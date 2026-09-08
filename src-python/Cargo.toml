@@ -1,0 +1,22 @@
+[package]
+name = "insta360-rs-python"
+version.workspace = true
+authors.workspace = true
+description = "Python bindings for insta360-rs"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[features]
+# Enable only for wheels; Rust unit-test executables need libpython linkage.
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+insta360-rs = { workspace = true, features = ["media", "gpu"] }
+pyo3 = { version = "0.29", features = ["abi3-py310"] }

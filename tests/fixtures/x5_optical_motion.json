@@ -1,0 +1,223 @@
+{
+  "description": "Independent spherical optical-flow rotations versus camera-clock integrated raw X5 gyro rotations. Static cave features; underwater dive-case optical calibration. A discrete frame conversion is tested, never a fitted mounting matrix.",
+  "method": "Robust spherical Kabsch fits of tracked unstabilized panorama features over three video frames; forward/backward feature consistency and angular residual gates. The fitted scene-bearing rotation is inverted to obtain camera rotation. Raw gyro integration uses camera-clock exposure centers. Observations are selected by tracked-feature quality and largest optical component in both signs of each axis, without selecting for gyro agreement.",
+  "interval_seconds": 0.1001,
+  "observations": [
+    {
+      "source_pts_micros": [
+        641807833,
+        641907933
+      ],
+      "raw_integrated_rotation_radians": [
+        -0.004764051894389121,
+        0.01015451418387352,
+        0.011935372941588649
+      ],
+      "optical_projector_rotation_radians": [
+        0.011990394443273544,
+        0.01112940814346075,
+        -0.004603130742907524
+      ],
+      "tracked_features": 2107,
+      "inliers": 1171
+    },
+    {
+      "source_pts_micros": [
+        661427433,
+        661527533
+      ],
+      "raw_integrated_rotation_radians": [
+        -0.003151014921748273,
+        0.00689999139579003,
+        0.0035885161629469315
+      ],
+      "optical_projector_rotation_radians": [
+        0.007278100587427616,
+        0.0025615491904318333,
+        -0.002913165371865034
+      ],
+      "tracked_features": 2149,
+      "inliers": 1459
+    },
+    {
+      "source_pts_micros": [
+        665031033,
+        665131133
+      ],
+      "raw_integrated_rotation_radians": [
+        -0.011746459129639784,
+        -0.009111936727605059,
+        0.001877180492581054
+      ],
+      "optical_projector_rotation_radians": [
+        -0.008757016621530056,
+        0.00045331864384934306,
+        -0.010551474057137966
+      ],
+      "tracked_features": 2088,
+      "inliers": 1386
+    },
+    {
+      "source_pts_micros": [
+        669235233,
+        669335333
+      ],
+      "raw_integrated_rotation_radians": [
+        -0.005374214232020041,
+        -0.010125690630591216,
+        0.00830393271954839
+      ],
+      "optical_projector_rotation_radians": [
+        -0.008063945919275284,
+        0.0064209396950900555,
+        -0.004337058402597904
+      ],
+      "tracked_features": 2117,
+      "inliers": 1222
+    },
+    {
+      "source_pts_micros": [
+        668534533,
+        668634633
+      ],
+      "raw_integrated_rotation_radians": [
+        0.0015608529159603073,
+        0.0040962895438733556,
+        0.007446286047455995
+      ],
+      "optical_projector_rotation_radians": [
+        0.003801272949203849,
+        0.005592355504631996,
+        0.0019892321433871984
+      ],
+      "tracked_features": 2116,
+      "inliers": 1437
+    },
+    {
+      "source_pts_micros": [
+        657023033,
+        657123133
+      ],
+      "raw_integrated_rotation_radians": [
+        0.0021675434404709367,
+        -0.003261127255100657,
+        0.006105244162896009
+      ],
+      "optical_projector_rotation_radians": [
+        -0.0023426690604537725,
+        0.004555182997137308,
+        0.002554042963311076
+      ],
+      "tracked_features": 2069,
+      "inliers": 1183
+    },
+    {
+      "source_pts_micros": [
+        646312333,
+        646412433
+      ],
+      "raw_integrated_rotation_radians": [
+        0.0015689750246544146,
+        0.0058891493931417785,
+        -0.012050502592086208
+      ],
+      "optical_projector_rotation_radians": [
+        0.006634072866290808,
+        -0.012323574163019657,
+        0.002792654326185584
+      ],
+      "tracked_features": 2122,
+      "inliers": 1218
+    },
+    {
+      "source_pts_micros": [
+        646212233,
+        646312333
+      ],
+      "raw_integrated_rotation_radians": [
+        0.006900815649246524,
+        0.004322180474430741,
+        -0.010568240966700147
+      ],
+      "optical_projector_rotation_radians": [
+        0.005224582739174366,
+        -0.0107740368694067,
+        0.0076749976724386215
+      ],
+      "tracked_features": 2113,
+      "inliers": 1219
+    },
+    {
+      "source_pts_micros": [
+        681147133,
+        681247233
+      ],
+      "raw_integrated_rotation_radians": [
+        0.018484339355045423,
+        0.0015294095154480783,
+        0.003844320794678744
+      ],
+      "optical_projector_rotation_radians": [
+        0.0022414105478674173,
+        0.002609626855701208,
+        0.019179709255695343
+      ],
+      "tracked_features": 1944,
+      "inliers": 1145
+    },
+    {
+      "source_pts_micros": [
+        638904933,
+        639005033
+      ],
+      "raw_integrated_rotation_radians": [
+        0.011918493442218112,
+        -0.00012283831750360417,
+        0.00705424949288624
+      ],
+      "optical_projector_rotation_radians": [
+        0.002783126663416624,
+        0.005540696904063225,
+        0.011699095368385315
+      ],
+      "tracked_features": 1712,
+      "inliers": 1004
+    },
+    {
+      "source_pts_micros": [
+        691257233,
+        691357333
+      ],
+      "raw_integrated_rotation_radians": [
+        -0.036250767666208106,
+        -0.005366061477300548,
+        -0.015215223857703443
+      ],
+      "optical_projector_rotation_radians": [
+        -0.005444520153105259,
+        -0.01565362885594368,
+        -0.035055264830589294
+      ],
+      "tracked_features": 2025,
+      "inliers": 1255
+    },
+    {
+      "source_pts_micros": [
+        668634633,
+        668734733
+      ],
+      "raw_integrated_rotation_radians": [
+        -0.01591407276610018,
+        0.0028621853263276816,
+        0.004417791819513417
+      ],
+      "optical_projector_rotation_radians": [
+        0.002995193935930729,
+        0.0028712968342006207,
+        -0.014950219541788101
+      ],
+      "tracked_features": 2128,
+      "inliers": 1445
+    }
+  ]
+}

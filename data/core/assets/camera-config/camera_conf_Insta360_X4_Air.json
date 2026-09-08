@@ -1,0 +1,5366 @@
+{
+  "FisheyesA0B" : {
+    "PHOTO_SINGLE" : {
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24",
+            "1/15",
+            "1/12.5",
+            "1/10",
+            "1/8",
+            "1/6.25",
+            "1/5",
+            "1/3",
+            "1/2.5",
+            "1/2",
+            "1/1.67",
+            "1/1.25",
+            "1",
+            "1.3",
+            "1.6",
+            "2",
+            "2.5",
+            "3",
+            "3.2",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "13",
+            "15",
+            "20",
+            "25",
+            "30",
+            "40",
+            "50",
+            "60",
+            "80",
+            "100",
+            "120"
+          ]
+        }
+      },
+      "fov_type" : {
+        "depend_on" : [
+          "photo_size_id"
+        ],
+        "list" : {
+          "16:9" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1:1" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "default" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ]
+        }
+      },
+      "photo_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3840_3840"
+          ]
+        }
+      },
+      "photo_size_id" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "16:9",
+            "1:1",
+            "9:16"
+          ]
+        }
+      },
+      "photography_self_timer" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "3",
+            "5",
+            "10",
+            "15"
+          ]
+        }
+      },
+      "raw_capture_type" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "PURESHOT",
+            "PURESHOT_RAW"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "photo_resolution",
+        "photography_self_timer",
+        "raw_capture_type",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "photo_size_id",
+        "fov_type"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_LOOPRECORDING" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "fov_type" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "1080_1920_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_48" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_50" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_48" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_50" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_24" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_25" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_30" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_48" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_50" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_24" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_25" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_30" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_48" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_50" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_24" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_25" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_30" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_48" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_50" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "default" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ]
+        }
+      },
+      "record_duration" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "60",
+            "180",
+            "300",
+            "600",
+            "900",
+            "1200",
+            "1500",
+            "1800",
+            "0"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3840_2160_60",
+            "3840_2160_50",
+            "3840_2160_48",
+            "3840_2160_30",
+            "3840_2160_25",
+            "3840_2160_24",
+            "2160_3840_30",
+            "2160_3840_25",
+            "2160_3840_24",
+            "2720_1530_60",
+            "2720_1530_50",
+            "2720_1530_48",
+            "1530_2720_60",
+            "1530_2720_50",
+            "1530_2720_48",
+            "2720_1530_30",
+            "2720_1530_25",
+            "2720_1530_24",
+            "1530_2720_30",
+            "1530_2720_25",
+            "1530_2720_24",
+            "1920_1080_60",
+            "1920_1080_50",
+            "1920_1080_48",
+            "1920_1080_30",
+            "1920_1080_25",
+            "1920_1080_24",
+            "1080_1920_60",
+            "1080_1920_50",
+            "1080_1920_48",
+            "1080_1920_30",
+            "1080_1920_25",
+            "1080_1920_24"
+          ]
+        }
+      },
+      "shoot_on_video" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "true"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "record_duration",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "fov_type",
+        "shoot_on_video"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_NORMAL" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "fov_type" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "1080_1920_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_48" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_50" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_48" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_50" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_24" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_25" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_30" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_48" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_50" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_24" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_25" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_30" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_48" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_50" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_24" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_25" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_30" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_48" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_50" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "default" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3840_2160_60",
+            "3840_2160_50",
+            "3840_2160_48",
+            "3840_2160_30",
+            "3840_2160_25",
+            "3840_2160_24",
+            "2160_3840_30",
+            "2160_3840_25",
+            "2160_3840_24",
+            "2720_1530_60",
+            "2720_1530_50",
+            "2720_1530_48",
+            "1530_2720_60",
+            "1530_2720_50",
+            "1530_2720_48",
+            "2720_1530_30",
+            "2720_1530_25",
+            "2720_1530_24",
+            "1530_2720_30",
+            "1530_2720_25",
+            "1530_2720_24",
+            "1920_1080_60",
+            "1920_1080_50",
+            "1920_1080_48",
+            "1920_1080_30",
+            "1920_1080_25",
+            "1920_1080_24",
+            "1080_1920_60",
+            "1080_1920_50",
+            "1080_1920_48",
+            "1080_1920_30",
+            "1080_1920_25",
+            "1080_1920_24"
+          ]
+        }
+      },
+      "recording_switch_lens" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "true"
+          ]
+        }
+      },
+      "shoot_on_video" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "true"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "fov_type",
+        "shoot_on_video",
+        "recording_switch_lens"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_SELFIE" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "fov_type" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "1530_2720_25" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_30" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_48" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_50" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_60" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_24" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_25" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_30" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_24" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_25" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_30" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_48" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_50" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_60" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_24" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_25" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_30" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "default" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3840_2160_30",
+            "3840_2160_25",
+            "3840_2160_24",
+            "2160_3840_30",
+            "2160_3840_25",
+            "2160_3840_24",
+            "2720_1530_60",
+            "2720_1530_50",
+            "2720_1530_48",
+            "1530_2720_60",
+            "1530_2720_50",
+            "1530_2720_48",
+            "2720_1530_30",
+            "2720_1530_25",
+            "2720_1530_24",
+            "1530_2720_30",
+            "1530_2720_25",
+            "1530_2720_24"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "fov_type",
+        "video_selfie_type"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "video_selfie_type" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "me_mode",
+            "torch_mode"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_SUPER" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "fov_type" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "1080_1920_24" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_25" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_30" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_48" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_50" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1080_1920_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1440_1920_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1440_1920_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1440_1920_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1440_1920_48" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1440_1920_50" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1440_1920_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_24" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_25" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_30" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_48" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_50" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1530_2720_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_24" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_25" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_30" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_48" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_50" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1080_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1440_24" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1440_25" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1440_30" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1440_48" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1440_50" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1440_60" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1920_25" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1920_30" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1920_48" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1920_50" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "1920_1920_60" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2040_2720_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2040_2720_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2040_2720_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2040_2720_48" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2040_2720_50" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2040_2720_60" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_24" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_25" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2160_3840_30" : [
+            "MAX_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_24" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_25" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_30" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_48" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_50" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_1530_60" : [
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2040_24" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2040_25" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2040_30" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2040_48" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2040_50" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2040_60" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2720_24" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2720_25" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2720_30" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2720_48" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2720_50" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "2720_2720_60" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3000_4000_24" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3000_4000_25" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3000_4000_30" : [
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_24" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_25" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_2160_30" : [
+            "MAX_VIEW",
+            "MEGA_VIEW",
+            "ACTION_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_3840_24" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_3840_25" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "3840_3840_30" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "4000_3000_24" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "4000_3000_25" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "4000_3000_30" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ],
+          "default" : [
+            "MEGA_VIEW",
+            "ULTRAWIDE",
+            "DEWARP",
+            "LINEAR"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3840_2160_30",
+            "3840_2160_25",
+            "3840_2160_24",
+            "2160_3840_30",
+            "2160_3840_25",
+            "2160_3840_24",
+            "2720_1530_60",
+            "2720_1530_50",
+            "2720_1530_48",
+            "1530_2720_60",
+            "1530_2720_50",
+            "1530_2720_48",
+            "2720_1530_30",
+            "2720_1530_25",
+            "2720_1530_24",
+            "1530_2720_30",
+            "1530_2720_25",
+            "1530_2720_24",
+            "1920_1080_60",
+            "1920_1080_50",
+            "1920_1080_48",
+            "1920_1080_30",
+            "1920_1080_25",
+            "1920_1080_24",
+            "1080_1920_60",
+            "1080_1920_50",
+            "1080_1920_48",
+            "1080_1920_30",
+            "1080_1920_25",
+            "1080_1920_24",
+            "4000_3000_30",
+            "4000_3000_25",
+            "4000_3000_24",
+            "2720_2040_30",
+            "2720_2040_25",
+            "2720_2040_24",
+            "2720_2040_60",
+            "2720_2040_50",
+            "2720_2040_48",
+            "1920_1440_60",
+            "1920_1440_50",
+            "1920_1440_48",
+            "1920_1440_30",
+            "1920_1440_25",
+            "1920_1440_24",
+            "3000_4000_30",
+            "3000_4000_25",
+            "3000_4000_24",
+            "2040_2720_30",
+            "2040_2720_25",
+            "2040_2720_24",
+            "2040_2720_60",
+            "2040_2720_50",
+            "2040_2720_48",
+            "1440_1920_60",
+            "1440_1920_50",
+            "1440_1920_48",
+            "1440_1920_30",
+            "1440_1920_25",
+            "1440_1920_24",
+            "3840_3840_30",
+            "3840_3840_25",
+            "3840_3840_24",
+            "2720_2720_30",
+            "2720_2720_25",
+            "2720_2720_24",
+            "2720_2720_60",
+            "2720_2720_50",
+            "2720_2720_48",
+            "1920_1920_60",
+            "1920_1920_50",
+            "1920_1920_48",
+            "1920_1920_30",
+            "1920_1920_25",
+            "1920_1920_24"
+          ]
+        }
+      },
+      "shoot_on_video" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "default" : [
+            "true"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "fov_type",
+        "shoot_on_video"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "photo_sub_mode" : [
+      "PHOTO_SINGLE"
+    ],
+    "video_sub_mode" : [
+      "VIDEO_SUPER",
+      "VIDEO_SELFIE",
+      "VIDEO_LOOPRECORDING",
+      "VIDEO_NORMAL"
+    ]
+  },
+  "SphereA0B" : {
+    "PHOTO_BURST" : {
+      "burst_capture_params" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3/1",
+            "5/1",
+            "10/1",
+            "10/3",
+            "10/6",
+            "10/10"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30"
+          ]
+        }
+      },
+      "photo_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840"
+          ]
+        }
+      },
+      "photography_self_timer" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "3",
+            "5",
+            "10",
+            "15"
+          ]
+        }
+      },
+      "raw_capture_type" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "PURESHOT"
+          ]
+        }
+      },
+      "splicing_base_enable" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "false",
+            "true"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "photo_resolution",
+        "photography_self_timer",
+        "burst_capture_params",
+        "exposure_program",
+        "exposure_shutter_speed",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "white_balance",
+        "raw_capture_type",
+        "splicing_base_enable",
+        "exposure_bias"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "PHOTO_INTERVAL" : {
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24",
+            "1/15",
+            "1/12.5",
+            "1/10",
+            "1/8",
+            "1/6.25",
+            "1/5",
+            "1/3",
+            "1/2.5",
+            "1/2",
+            "1/1.67",
+            "1/1.25",
+            "1",
+            "1.3",
+            "1.6",
+            "2",
+            "2.5",
+            "3",
+            "3.2",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "13",
+            "15",
+            "20",
+            "25",
+            "30",
+            "40",
+            "50",
+            "60",
+            "80",
+            "100",
+            "120"
+          ]
+        }
+      },
+      "lapse_time" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "3",
+            "5",
+            "10",
+            "30",
+            "60",
+            "120"
+          ]
+        }
+      },
+      "photo_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840"
+          ]
+        }
+      },
+      "raw_capture_type" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "PURESHOT",
+            "PURESHOT_RAW"
+          ]
+        }
+      },
+      "record_duration" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "180",
+            "300",
+            "600",
+            "900",
+            "1800",
+            "3600",
+            "7200",
+            "10800",
+            "18000",
+            "36000"
+          ]
+        }
+      },
+      "splicing_base_enable" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "false",
+            "true"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "photo_resolution",
+        "lapse_time",
+        "record_duration",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "raw_capture_type",
+        "splicing_base_enable"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "PHOTO_SINGLE" : {
+      "aeb_capture_num" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "OFF" : [],
+          "ON" : [],
+          "default" : [
+            "3",
+            "5",
+            "7"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [
+          "hdr_photo_mode",
+          "aeb_capture_num"
+        ],
+        "list" : {
+          "AEB|3" : [
+            "0.3",
+            "0.6",
+            "1",
+            "1.3",
+            "1.6",
+            "2",
+            "2.3",
+            "2.6",
+            "3",
+            "3.3",
+            "3.6",
+            "4"
+          ],
+          "AEB|5" : [
+            "0.3",
+            "0.6",
+            "1",
+            "1.3",
+            "1.6",
+            "2"
+          ],
+          "AEB|7" : [
+            "0.3",
+            "0.6",
+            "1",
+            "1.3"
+          ],
+          "ON|3" : [],
+          "ON|5" : [],
+          "ON|7" : [],
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "OFF" : [
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600"
+          ],
+          "default" : [
+            "0"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "OFF" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ],
+          "ON" : [
+            "FULL_AUTO"
+          ],
+          "default" : [
+            "FULL_AUTO"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "OFF" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24",
+            "1/15",
+            "1/12.5",
+            "1/10",
+            "1/8",
+            "1/6.25",
+            "1/5",
+            "1/3",
+            "1/2.5",
+            "1/2",
+            "1/1.67",
+            "1/1.25",
+            "1",
+            "1.3",
+            "1.6",
+            "2",
+            "2.5",
+            "3",
+            "3.2",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "13",
+            "15",
+            "20",
+            "25",
+            "30",
+            "40",
+            "50",
+            "60",
+            "80",
+            "100",
+            "120"
+          ],
+          "default" : [
+            "0"
+          ]
+        }
+      },
+      "hdr_photo_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "OFF",
+            "ON",
+            "AEB"
+          ]
+        }
+      },
+      "hdr_support" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840"
+          ]
+        }
+      },
+      "photo_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840"
+          ]
+        }
+      },
+      "photography_self_timer" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "3",
+            "5",
+            "10",
+            "15"
+          ]
+        }
+      },
+      "raw_capture_type" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "AEB" : [
+            "PURESHOT_RAW"
+          ],
+          "default" : [
+            "PURESHOT",
+            "PURESHOT_RAW"
+          ]
+        }
+      },
+      "splicing_base_enable" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "OFF" : [
+            "true",
+            "false"
+          ],
+          "ON" : [
+            "true",
+            "false"
+          ],
+          "default" : [
+            "false"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "photo_resolution",
+        "hdr_photo_mode",
+        "exposure_program",
+        "photography_self_timer",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "white_balance",
+        "raw_capture_type",
+        "splicing_base_enable",
+        "aeb_capture_num",
+        "exposure_bias",
+        "hdr_support"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [
+          "hdr_photo_mode"
+        ],
+        "list" : {
+          "OFF" : [
+            "400",
+            "800"
+          ],
+          "default" : [
+            "0"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "PHOTO_STARLAPSE" : {
+      "export_type" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STARLAPSE_VIDEO",
+            "STAR_TRAILS_PHOTO"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24",
+            "1/15",
+            "1/12.5",
+            "1/10",
+            "1/8",
+            "1/6.25",
+            "1/5",
+            "1/3",
+            "1/2.5",
+            "1/2",
+            "1/1.67",
+            "1/1.25",
+            "1",
+            "1.3",
+            "1.6",
+            "2",
+            "2.5",
+            "3",
+            "3.2",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "13",
+            "15",
+            "20",
+            "25",
+            "30",
+            "40",
+            "50",
+            "60",
+            "80",
+            "100",
+            "120"
+          ]
+        }
+      },
+      "photo_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840"
+          ]
+        }
+      },
+      "photography_self_timer" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "3",
+            "5",
+            "10",
+            "15"
+          ]
+        }
+      },
+      "record_duration" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "180",
+            "300",
+            "600",
+            "900",
+            "1800",
+            "3600",
+            "7200",
+            "10800",
+            "18000",
+            "36000"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "photo_resolution",
+        "photography_self_timer",
+        "export_type",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "record_duration"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_BULLETTIME" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "6016_1408_100"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "exposure_program",
+        "white_balance",
+        "color_mode",
+        "exposure_bias"
+      ],
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_DASHCAM" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_individual" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "off",
+            "individual",
+            "light_individual"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840_30",
+            "7680_3840_25",
+            "7680_3840_24",
+            "6016_3008_50",
+            "6016_3008_48",
+            "6016_3008_30",
+            "6016_3008_25",
+            "6016_3008_24",
+            "3840_1920_50",
+            "3840_1920_48",
+            "3840_1920_30",
+            "3840_1920_25",
+            "3840_1920_24"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "exposure_individual"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_GIMBAL" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO"
+          ]
+        }
+      },
+      "fov_distortion" : {
+        "depend_on" : [
+          "record_resolution_wide_angle",
+          "fov_type_slide"
+        ],
+        "list" : {
+          "1080_1920_24|[95,71]" : [
+            "true",
+            "false"
+          ],
+          "1080_1920_25|[95,71]" : [
+            "true",
+            "false"
+          ],
+          "1080_1920_30|[95,71]" : [
+            "true",
+            "false"
+          ],
+          "1920_1080_24|[160,111]" : [
+            "true",
+            "false"
+          ],
+          "1920_1080_25|[160,111]" : [
+            "true",
+            "false"
+          ],
+          "1920_1080_30|[160,111]" : [
+            "true",
+            "false"
+          ],
+          "default" : [
+            "false"
+          ]
+        }
+      },
+      "fov_type_slide" : {
+        "depend_on" : [
+          "record_resolution_wide_angle"
+        ],
+        "list" : {
+          "1080_1920_24" : [
+            "95",
+            "70",
+            "50"
+          ],
+          "1080_1920_25" : [
+            "95",
+            "70",
+            "50"
+          ],
+          "1080_1920_30" : [
+            "95",
+            "70",
+            "50"
+          ],
+          "default" : [
+            "160",
+            "110",
+            "80"
+          ]
+        }
+      },
+      "gimbal_view" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "track",
+            "rear",
+            "front",
+            "top",
+            "bottom",
+            "custom"
+          ]
+        }
+      },
+      "gimbal_view_action" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "yaw_360",
+            "roll_360"
+          ]
+        }
+      },
+      "gimbal_view_fixed_list" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "rear",
+            "front",
+            "top",
+            "bottom",
+            "custom"
+          ]
+        }
+      },
+      "horizon_lock" : {
+        "depend_on" : [
+          "gimbal_view"
+        ],
+        "list" : {
+          "bottom" : [
+            "true",
+            "false"
+          ],
+          "custom" : [
+            "true",
+            "false"
+          ],
+          "default" : [
+            "true"
+          ],
+          "front" : [
+            "true",
+            "false"
+          ],
+          "rear" : [
+            "true",
+            "false"
+          ],
+          "top" : [
+            "true",
+            "false"
+          ]
+        }
+      },
+      "lock_pitch_range" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-80",
+            "80"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "6016_3008_30",
+            "6016_3008_25",
+            "6016_3008_24"
+          ]
+        }
+      },
+      "record_resolution_wide_angle" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "1920_1080_30",
+            "1920_1080_25",
+            "1920_1080_24",
+            "1080_1920_30",
+            "1080_1920_25",
+            "1080_1920_24"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "record_resolution_wide_angle",
+        "exposure_program",
+        "color_mode",
+        "gimbal_view",
+        "gimbal_view_fixed_list",
+        "gimbal_view_action",
+        "horizon_lock",
+        "fov_distortion",
+        "fov_type_slide",
+        "track_reposition",
+        "lock_pitch_range",
+        "exposure_bias",
+        "white_balance"
+      ],
+      "track_reposition" : {
+        "depend_on" : [
+          "gimbal_view"
+        ],
+        "list" : {
+          "default" : [
+            "false"
+          ],
+          "track" : [
+            "true"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_LIVING_MODE_PANO" : {
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "living_bitrate" : {
+        "depend_on" : [
+          "living_platform"
+        ],
+        "list" : {
+          "DOUYIN" : [
+            "8M"
+          ],
+          "FACEBOOK" : [
+            "8M"
+          ],
+          "KUAISHOU" : [
+            "8M"
+          ],
+          "YOUTUBE" : [
+            "8M"
+          ],
+          "default" : [
+            "2M",
+            "4M",
+            "6M",
+            "8M"
+          ]
+        }
+      },
+      "living_platform" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FACEBOOK",
+            "YOUTUBE",
+            "RTMP",
+            "DOUYIN",
+            "KUAISHOU"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [
+          "living_platform"
+        ],
+        "list" : {
+          "DOUYIN" : [
+            "3840_1920_30"
+          ],
+          "FACEBOOK" : [
+            "2560_1280_30"
+          ],
+          "KUAISHOU" : [
+            "2560_1280_30"
+          ],
+          "YOUTUBE" : [
+            "3840_1920_30"
+          ],
+          "default" : [
+            "3840_1920_30",
+            "2560_1280_30",
+            "2160_1080_30",
+            "1920_960_30"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "living_platform",
+        "record_resolution",
+        "living_bitrate",
+        "exposure_bias",
+        "white_balance"
+      ],
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_LIVING_MODE_WIDE" : {
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "living_bitrate" : {
+        "depend_on" : [
+          "living_platform"
+        ],
+        "list" : {
+          "DOUYIN" : [
+            "8M"
+          ],
+          "FACEBOOK" : [
+            "8M"
+          ],
+          "KUAISHOU" : [
+            "8M"
+          ],
+          "YOUTUBE" : [
+            "8M"
+          ],
+          "default" : [
+            "2M",
+            "4M",
+            "6M",
+            "8M"
+          ]
+        }
+      },
+      "living_platform" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FACEBOOK",
+            "YOUTUBE",
+            "RTMP",
+            "DOUYIN",
+            "KUAISHOU"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [
+          "living_platform"
+        ],
+        "list" : {
+          "DOUYIN" : [
+            "3840_1920_30"
+          ],
+          "FACEBOOK" : [
+            "2560_1280_30"
+          ],
+          "KUAISHOU" : [
+            "2560_1280_30"
+          ],
+          "YOUTUBE" : [
+            "3840_1920_30"
+          ],
+          "default" : [
+            "3840_1920_30",
+            "2560_1280_30",
+            "2160_1080_30",
+            "1920_960_30"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "living_platform",
+        "record_resolution",
+        "living_bitrate",
+        "exposure_bias",
+        "white_balance"
+      ],
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_LOOPRECORDING" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_individual" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "off",
+            "individual",
+            "light_individual"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "record_duration" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "60",
+            "180",
+            "300",
+            "600",
+            "900",
+            "1200",
+            "1500",
+            "1800",
+            "0"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840_30",
+            "7680_3840_25",
+            "7680_3840_24",
+            "6016_3008_50",
+            "6016_3008_48",
+            "6016_3008_30",
+            "6016_3008_25",
+            "6016_3008_24",
+            "3840_1920_50",
+            "3840_1920_48",
+            "3840_1920_30",
+            "3840_1920_25",
+            "3840_1920_24"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "record_duration",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "exposure_individual"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_NORMAL" : {
+      "color_mode" : {
+        "depend_on" : [
+          "p3_switch"
+        ],
+        "list" : {
+          "default" : [],
+          "false" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_individual" : {
+        "depend_on" : [
+          "p3_switch"
+        ],
+        "list" : {
+          "default" : [],
+          "false" : [
+            "off",
+            "individual",
+            "light_individual"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [
+          "p3_switch"
+        ],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ],
+          "true" : [
+            "FULL_AUTO"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "hdr_support" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840_30",
+            "7680_3840_25",
+            "7680_3840_24",
+            "6016_3008_30",
+            "6016_3008_25",
+            "6016_3008_24",
+            "3840_1920_30",
+            "3840_1920_25",
+            "3840_1920_24"
+          ]
+        }
+      },
+      "hdr_switch" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "false",
+            "true"
+          ]
+        }
+      },
+      "onetake_support" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "3840_1920_25" : [
+            "true"
+          ],
+          "3840_1920_30" : [
+            "true"
+          ],
+          "3840_1920_48" : [
+            "true"
+          ],
+          "3840_1920_50" : [
+            "true"
+          ],
+          "6016_3008_24" : [
+            "true"
+          ],
+          "6016_3008_25" : [
+            "true"
+          ],
+          "6016_3008_30" : [
+            "true"
+          ],
+          "6016_3008_48" : [
+            "true"
+          ],
+          "6016_3008_50" : [
+            "true"
+          ],
+          "7680_3840_24" : [
+            "true"
+          ],
+          "7680_3840_25" : [
+            "true"
+          ],
+          "7680_3840_30" : [
+            "true"
+          ],
+          "default" : [
+            "true"
+          ]
+        }
+      },
+      "p3_switch" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "3840_1920_24" : [
+            "true",
+            "false"
+          ],
+          "3840_1920_25" : [
+            "true",
+            "false"
+          ],
+          "3840_1920_30" : [
+            "true",
+            "false"
+          ],
+          "6016_3008_24" : [
+            "true",
+            "false"
+          ],
+          "6016_3008_25" : [
+            "true",
+            "false"
+          ],
+          "6016_3008_30" : [
+            "true",
+            "false"
+          ],
+          "7680_3840_24" : [
+            "true",
+            "false"
+          ],
+          "7680_3840_25" : [
+            "true",
+            "false"
+          ],
+          "7680_3840_30" : [
+            "true",
+            "false"
+          ],
+          "default" : [
+            "false"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840_30",
+            "7680_3840_25",
+            "7680_3840_24",
+            "6016_3008_50",
+            "6016_3008_48",
+            "6016_3008_30",
+            "6016_3008_25",
+            "6016_3008_24",
+            "3840_1920_50",
+            "3840_1920_48",
+            "3840_1920_30",
+            "3840_1920_25",
+            "3840_1920_24"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "hdr_switch",
+        "hdr_support",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "exposure_individual",
+        "onetake_support",
+        "p3_switch"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_TIMELAPSE" : {
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_individual" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "off",
+            "individual",
+            "light_individual"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24",
+            "1/15",
+            "1/12.5",
+            "1/10",
+            "1/8",
+            "1/6.25",
+            "1/5",
+            "1/3",
+            "1/2.5",
+            "1/2",
+            "1/1.67",
+            "1/1.25",
+            "1"
+          ]
+        }
+      },
+      "lapse_time" : {
+        "depend_on" : [
+          "record_resolution"
+        ],
+        "list" : {
+          "default" : [
+            "2",
+            "5",
+            "10",
+            "30",
+            "60",
+            "120"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840_30"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "lapse_time",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "exposure_individual"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "VIDEO_TIMESHIFT" : {
+      "accelerate_frequency" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "10",
+            "15",
+            "20",
+            "30",
+            "60"
+          ]
+        }
+      },
+      "color_mode" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "STANDARD",
+            "VIVID",
+            "FLAT"
+          ]
+        }
+      },
+      "exposure_bias" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "-4",
+            "-3.7",
+            "-3.3",
+            "-3",
+            "-2.7",
+            "-2.3",
+            "-2",
+            "-1.7",
+            "-1.3",
+            "-1",
+            "-0.7",
+            "-0.3",
+            "0",
+            "0.3",
+            "0.7",
+            "1",
+            "1.3",
+            "1.7",
+            "2",
+            "2.3",
+            "2.7",
+            "3",
+            "3.3",
+            "3.7",
+            "4"
+          ]
+        }
+      },
+      "exposure_individual" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "off",
+            "individual",
+            "light_individual"
+          ]
+        }
+      },
+      "exposure_iso" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "100",
+            "125",
+            "160",
+            "200",
+            "250",
+            "320",
+            "400",
+            "500",
+            "640",
+            "800",
+            "1000",
+            "1250",
+            "1600",
+            "2000",
+            "2500",
+            "3200"
+          ]
+        }
+      },
+      "exposure_program" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "FULL_AUTO",
+            "AUTO",
+            "MANUAL",
+            "ISO_PRIORITY",
+            "SHUTTER_PRIORITY",
+            "ADAPTIVE"
+          ]
+        }
+      },
+      "exposure_shutter_speed" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "1/8000",
+            "1/6400",
+            "1/5000",
+            "1/4000",
+            "1/3200",
+            "1/2500",
+            "1/2000",
+            "1/1600",
+            "1/1250",
+            "1/1000",
+            "1/800",
+            "1/640",
+            "1/500",
+            "1/400",
+            "1/320",
+            "1/240",
+            "1/200",
+            "1/160",
+            "1/120",
+            "1/100",
+            "1/80",
+            "1/60",
+            "1/50",
+            "1/40",
+            "1/30",
+            "1/25",
+            "1/24"
+          ]
+        }
+      },
+      "record_resolution" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "7680_3840_30",
+            "6016_3008_30"
+          ]
+        }
+      },
+      "support_attrs" : [
+        "record_resolution",
+        "exposure_program",
+        "video_iso_top_limit",
+        "exposure_iso",
+        "exposure_shutter_speed",
+        "exposure_bias",
+        "white_balance",
+        "color_mode",
+        "exposure_individual",
+        "accelerate_frequency"
+      ],
+      "video_iso_top_limit" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "400",
+            "800",
+            "1600"
+          ]
+        }
+      },
+      "white_balance" : {
+        "depend_on" : [],
+        "list" : {
+          "default" : [
+            "0",
+            "2000",
+            "2200",
+            "2400",
+            "2600",
+            "2800",
+            "3000",
+            "3200",
+            "3400",
+            "3600",
+            "3800",
+            "4000",
+            "4200",
+            "4400",
+            "4600",
+            "4800",
+            "5000",
+            "5200",
+            "5400",
+            "5600",
+            "5800",
+            "6000",
+            "6200",
+            "6400",
+            "6600",
+            "6800",
+            "7000",
+            "7200",
+            "7400",
+            "7600",
+            "7800",
+            "8000",
+            "8200",
+            "8400",
+            "8600",
+            "8800",
+            "9000",
+            "9200",
+            "9400",
+            "9600",
+            "9800",
+            "10000"
+          ]
+        }
+      }
+    },
+    "live_sub_mode" : [
+      "VIDEO_LIVING_MODE_WIDE",
+      "VIDEO_LIVING_MODE_PANO"
+    ],
+    "photo_sub_mode" : [
+      "PHOTO_BURST",
+      "PHOTO_INTERVAL",
+      "PHOTO_STARLAPSE",
+      "PHOTO_SINGLE"
+    ],
+    "video_sub_mode" : [
+      "VIDEO_GIMBAL",
+      "VIDEO_NORMAL",
+      "VIDEO_TIMESHIFT",
+      "VIDEO_TIMELAPSE",
+      "VIDEO_DASHCAM",
+      "VIDEO_BULLETTIME",
+      "VIDEO_LOOPRECORDING"
+    ]
+  }
+}

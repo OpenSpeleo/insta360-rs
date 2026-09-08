@@ -1,0 +1,5 @@
+# Preserve original vendor bytes for manifest SHA-256 verification on every OS.
+** -text
+*.rs text eol=lf
+model-bundle.json text eol=lf
+.gitattributes text eol=lf

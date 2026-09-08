@@ -1,0 +1,46 @@
+---
+name: Set up native wheel build
+description: CMake 3, native compilers, and macOS or Windows wheel repair tools
+runs:
+  using: composite
+  steps:
+    - name: Install native build tools (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install nasm pkg-config ninja
+        python -m pip install cmake==3.31.10 delocate==0.13.0
+        echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+
+    - name: Export MSVC environment (Windows)
+      if: runner.os == 'Windows'
+      uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9  # v4.1.0
+      with:
+        arch: x64
+
+    - name: Install MSYS build utilities (Windows)
+      if: runner.os == 'Windows'
+      id: msys
+      uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884  # v2
+      with:
+        msystem: MSYS
+        path-type: inherit
+        install: diffutils gawk make nasm perl pkgconf
+
+    - name: Configure native tools (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        INSTA360_MSYS_LOCATION: ${{ steps.msys.outputs.msys2-location }}
+      run: |
+        python -m pip install cmake==3.31.10 ninja delvewheel==1.13.1
+        if ($LASTEXITCODE -ne 0) { throw 'Installing native wheel tools failed' }
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vs = & $vswhere -latest -property installationPath
+        $clang = Join-Path $vs 'VC\Tools\LLVM\x64\bin'
+        if (-not (Test-Path (Join-Path $clang 'libclang.dll'))) {
+          throw "libclang.dll missing from $clang"
+        }
+        Add-Content $env:GITHUB_ENV "LIBCLANG_PATH=$clang"
+        $msysBin = Join-Path $env:INSTA360_MSYS_LOCATION 'usr\bin'
+        Add-Content $env:GITHUB_ENV "INSTA360_MSYS_BIN=$msysBin"
