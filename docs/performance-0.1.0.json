@@ -1,0 +1,119 @@
+{
+  "host": "Apple M4 Pro, 24 GiB RAM",
+  "date": "2026-09-09",
+  "runtime": "repaired macOS ARM64 wheel, release Rust 1.97.1, FFmpeg 8.1.2, libx265",
+  "scope": "one 1-second warmup then three 5-second exports per backend; job startup included; direction lock with readout off",
+  "results": [
+    {
+      "backend": "cpu",
+      "width": 1920,
+      "height": 960,
+      "source_start_seconds": 635.3,
+      "measured_clip_seconds": 5,
+      "encoder_policy": "software",
+      "quality": 90,
+      "stabilization": "direction_lock",
+      "rolling_shutter": "off",
+      "runs": [
+        {
+          "run": 0,
+          "warmup": true,
+          "elapsed_seconds": 5.920583582977997,
+          "frames": 30,
+          "frames_per_second": 5.067068065089335,
+          "bytes": 4886235,
+          "decoded_frames": 30,
+          "encoded_duration_seconds": 1.001001
+        },
+        {
+          "run": 1,
+          "warmup": false,
+          "elapsed_seconds": 19.42795416599256,
+          "frames": 150,
+          "frames_per_second": 7.720833532877372,
+          "bytes": 23955156,
+          "decoded_frames": 150,
+          "encoded_duration_seconds": 5.005001
+        },
+        {
+          "run": 2,
+          "warmup": false,
+          "elapsed_seconds": 19.342294415982906,
+          "frames": 150,
+          "frames_per_second": 7.755026201858046,
+          "bytes": 23955156,
+          "decoded_frames": 150,
+          "encoded_duration_seconds": 5.005001
+        },
+        {
+          "run": 3,
+          "warmup": false,
+          "elapsed_seconds": 19.34464616701007,
+          "frames": 150,
+          "frames_per_second": 7.754083414345757,
+          "bytes": 23955156,
+          "decoded_frames": 150,
+          "encoded_duration_seconds": 5.005001
+        }
+      ],
+      "median_fps": 7.754083414345757,
+      "median_seconds": 19.34464616701007
+    },
+    {
+      "backend": "gpu",
+      "width": 1920,
+      "height": 960,
+      "source_start_seconds": 635.3,
+      "measured_clip_seconds": 5,
+      "encoder_policy": "software",
+      "quality": 90,
+      "stabilization": "direction_lock",
+      "rolling_shutter": "off",
+      "runs": [
+        {
+          "run": 0,
+          "warmup": true,
+          "elapsed_seconds": 3.385852583014639,
+          "frames": 30,
+          "frames_per_second": 8.86039757031864,
+          "bytes": 4958039,
+          "decoded_frames": 30,
+          "encoded_duration_seconds": 1.001001
+        },
+        {
+          "run": 1,
+          "warmup": false,
+          "elapsed_seconds": 10.82551554197562,
+          "frames": 150,
+          "frames_per_second": 13.856153032008443,
+          "bytes": 23945482,
+          "decoded_frames": 150,
+          "encoded_duration_seconds": 5.005001
+        },
+        {
+          "run": 2,
+          "warmup": false,
+          "elapsed_seconds": 10.82148887499352,
+          "frames": 150,
+          "frames_per_second": 13.86130889499157,
+          "bytes": 23945482,
+          "decoded_frames": 150,
+          "encoded_duration_seconds": 5.005001
+        },
+        {
+          "run": 3,
+          "warmup": false,
+          "elapsed_seconds": 10.844536165997852,
+          "frames": 150,
+          "frames_per_second": 13.831850224291992,
+          "bytes": 23945482,
+          "decoded_frames": 150,
+          "encoded_duration_seconds": 5.005001
+        }
+      ],
+      "median_fps": 13.856153032008443,
+      "median_seconds": 10.82551554197562
+    }
+  ],
+  "gpu_over_cpu_ratio": 1.786949184267647
+}

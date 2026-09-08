@@ -1,0 +1,29 @@
+---
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      rust-dependencies:
+        patterns: ['*']
+  - package-ecosystem: pip
+    directories:
+      - /src-python
+      - /scripts/ci
+    schedule:
+      interval: weekly
+    groups:
+      python-dependencies:
+        patterns: ['*']
+    ignore:
+      # x265's build scripts require CMake policies removed in CMake 4.
+      - dependency-name: cmake
+        versions: ['>=4']

@@ -1,0 +1,3 @@
+# Preserve original vendor bytes on every platform.
+** -text
+.gitattributes text eol=lf

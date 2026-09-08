@@ -1,0 +1,31 @@
+---
+name: Set up pinned Rust
+description: Install the exact compiler and components from rust-toolchain.toml
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: '3.14'
+    - name: Read the repository toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        python - <<'PY'
+        import os
+        import tomllib
+        from pathlib import Path
+        config = tomllib.loads(Path("rust-toolchain.toml").read_text())["toolchain"]
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            print(f"channel={config['channel']}", file=output)
+            print(f"components={','.join(config.get('components', []))}", file=output)
+        with open(os.environ["GITHUB_ENV"], "a") as output:
+            print(f"RUSTUP_TOOLCHAIN={config['channel']}", file=output)
+        PY
+    - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+      with:
+        toolchain: ${{ steps.toolchain.outputs.channel }}
+        components: ${{ steps.toolchain.outputs.components }}
+    - name: Verify selected toolchain
+      shell: bash
+      run: rustup show active-toolchain

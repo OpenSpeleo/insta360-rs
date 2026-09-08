@@ -1,0 +1,91 @@
+[workspace]
+members = [".", "data/core", "data/enhancement", "src-python"]
+# Keep ordinary library commands independent of Python and its native dependencies.
+default-members = [".", "data/core", "data/enhancement"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Jonathan Dekhtiar <jonathan@dekhtiar.com>"]
+edition = "2021"
+rust-version = "1.88"
+repository = "https://github.com/OpenSpeleo/insta360-rs"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+insta360-rs = { version = "=0.1.0", path = "." }
+insta360-rs-data-core = { version = "=0.1.0", path = "data/core" }
+insta360-rs-data-enhancement = { version = "=0.1.0", path = "data/enhancement" }
+
+[package]
+name = "insta360-rs"
+version.workspace = true
+authors.workspace = true
+description = "Portable Rust library for reading and stitching Insta360 media"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+documentation = "https://docs.rs/insta360-rs"
+repository.workspace = true
+readme = "README.md"
+keywords = ["insta360", "insv", "360-video", "video", "photogrammetry"]
+categories = ["multimedia::video", "parser-implementations"]
+include = [
+    "src-rust/**",
+    "tests/**",
+    "examples/**",
+    "docs/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE.md",
+    "/NOTICE.md",
+    "!**/.DS_Store",
+]
+
+[lib]
+name = "insta360_rs"
+path = "src-rust/lib.rs"
+
+[[bin]]
+name = "insta360-rs"
+path = "src-rust/bin/insta360-rs.rs"
+required-features = ["cli"]
+
+[[example]]
+name = "read_stream"
+required-features = ["media"]
+
+[features]
+default = []
+media = ["dep:crossbeam-channel", "dep:ffmpeg-next", "dep:image", "dep:tempfile"]
+gpu = ["dep:bytemuck", "dep:pollster", "dep:wgpu"]
+cli = ["media", "dep:clap"]
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"], optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+crossbeam-channel = { version = "0.5", default-features = false, features = ["std"], optional = true }
+ffmpeg-next = { version = "9.0", default-features = false, features = ["codec", "format", "software-scaling"], optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
+insta360-rs-data-core.workspace = true
+insta360-rs-data-enhancement.workspace = true
+pollster = { version = "1.0", optional = true }
+rayon = "1.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tempfile = { version = "3", optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "metal"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"

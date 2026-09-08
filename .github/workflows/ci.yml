@@ -1,0 +1,289 @@
+---
+name: CI
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+
+jobs:
+  ffmpeg-spec:
+    name: Identify FFmpeg build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.spec.outputs.image }}
+      cache-key: ${{ steps.spec.outputs.cache-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: spec
+        run: |
+          image=$(bash scripts/ci/build-wheel.sh --image)
+          native_key=$(bash scripts/ci/build-wheel.sh --cache-key)
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "cache-key=ffmpeg-linux-sdk-v1-$native_key" >> "$GITHUB_OUTPUT"
+
+  ffmpeg-prewarm:
+    name: Prepare shared FFmpeg libraries
+    needs: ffmpeg-spec
+    runs-on: ubuntu-24.04
+    container:
+      image: ${{ needs.ffmpeg-spec.outputs.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      INSTA360_WHEEL_IMAGE: ${{ needs.ffmpeg-spec.outputs.image }}
+      INSTA360_WHEEL_JOBS: '2'
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Restore the completed FFmpeg SDK
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg-sdk.tar.gz
+          key: ${{ needs.ffmpeg-spec.outputs.cache-key }}
+      - name: Build the native FFmpeg libraries on a cache miss
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          # Match the local builder's paths inside the Actions job container.
+          mkdir -p dist .cache/wheel target/wheel-build
+          ln -s "$GITHUB_WORKSPACE" /source
+          ln -s "$GITHUB_WORKSPACE/dist" /dist
+          ln -s "$GITHUB_WORKSPACE/.cache/wheel" /wheel-cache
+          ln -s "$GITHUB_WORKSPACE/target/wheel-build" /wheel-target
+          INSTA360_WHEEL_UID=$(id -u)
+          INSTA360_WHEEL_GID=$(id -g)
+          export INSTA360_WHEEL_UID INSTA360_WHEEL_GID
+          bash scripts/ci/build-wheel.sh --container-prewarm
+      - name: Save the completed FFmpeg SDK
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg-sdk.tar.gz
+          key: ${{ needs.ffmpeg-spec.outputs.cache-key }}
+      - name: Report FFmpeg cache use
+        env:
+          CACHE_HIT: ${{ steps.ffmpeg-cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ needs.ffmpeg-spec.outputs.cache-key }}
+        run: |
+          if [[ "$CACHE_HIT" == true ]]; then
+            echo "FFmpeg SDK restored; native build and package installation skipped." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "FFmpeg SDK built after a cache miss." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Cache key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ffmpeg-linux-x86_64
+          path: dist/ffmpeg-sdk.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  prek:
+    needs: ffmpeg-prewarm
+    name: Full prek
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: prek
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/prek
+          key: prek-linux-${{ hashFiles('.pre-commit-config.yaml', 'src-python/.pre-commit-config.yaml') }}
+      - name: Install tools with cargo-binstall
+        run: cargo binstall --no-confirm prek@0.4.14 cargo-machete@0.9.1
+      - name: Test release version and package checks
+        run: python -m unittest discover -s scripts/ci -p 'test_*.py' -v
+      - run: prek run --all-files --show-diff-on-failure
+
+  rust:
+    needs: [ffmpeg-prewarm, prek]
+    name: Rust (${{ matrix.features.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - name: default
+            args: --no-default-features
+          - name: media
+            args: --no-default-features --features media
+          - name: gpu
+            args: --no-default-features --features gpu
+          - name: cli
+            args: --no-default-features --features cli
+          - name: all
+            args: --all-features
+    env:
+      INSTA360_RS_REQUIRE_GPU: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-linux
+        with:
+          cache-key: rust-${{ matrix.features.name }}
+      - name: Verify generated-fixture and GPU prerequisites
+        run: |
+          ffmpeg -hide_banner -h encoder=libx265 2>&1 | tee /tmp/encoder.txt
+          grep -q 'Encoder libx265' /tmp/encoder.txt
+          vulkaninfo --summary
+      - name: All test targets
+        run: cargo test --locked --all-targets ${{ matrix.features.args }}
+      - name: Documentation tests
+        run: cargo test --locked --doc ${{ matrix.features.args }}
+      - name: Release build (library, CLI, and examples)
+        run: cargo build --locked --release --lib --bins --examples ${{ matrix.features.args }}
+      - name: Python binding Rust unit tests
+        env:
+          PYO3_PYTHON: python
+        if: matrix.features.name == 'all'
+        run: cargo test --locked --manifest-path src-python/Cargo.toml --all-targets
+      - name: Check API documentation
+        if: matrix.features.name == 'all'
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --all-features
+      - name: Verify all three crates.io archives and their size limits
+        if: matrix.features.name == 'all'
+        run: python scripts/ci/check-packages.py --all-features
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.features.name == 'all'
+        with:
+          name: rust-crates
+          path: dist/crates/*.crate
+          if-no-files-found: error
+          compression-level: 0
+
+  python-build:
+    needs: [ffmpeg-prewarm, prek]
+    name: Python wheel and source distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-rust
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: wheel-${{ hashFiles('scripts/ci/*.sh') }}
+          workspaces: . -> target/wheel-build
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/wheel/cargo
+            .cache/wheel/rustup
+          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: wheel-tools-linux-
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ffmpeg-linux-x86_64
+          path: .cache/artifacts
+      - name: Restore the prepared native FFmpeg libraries
+        run: |
+          mkdir -p .cache/wheel
+          tar -xzf .cache/artifacts/ffmpeg-sdk.tar.gz -C .
+      - name: Build and repair manylinux wheel from the source distribution
+        run: bash scripts/ci/build-wheel.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-dist-linux
+          path: |
+            dist/*.whl
+            dist/insta360*.tar.gz
+          if-no-files-found: error
+      - name: Smoke test without system FFmpeg libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+          ffmpeg -v error -f lavfi -i color=c=blue:s=32x16:r=5 \
+            -t 0.4 -c:v mpeg4 /tmp/fixture.mp4
+          PYTHONPATH=src-python/tests python3 - <<'PY'
+          from pathlib import Path
+          from media_fixtures import v3_tail
+
+          Path("/tmp/fixture.insv").write_bytes(
+              Path("/tmp/fixture.mp4").read_bytes() + v3_tail()
+          )
+          PY
+          docker run --rm \
+            -v "$PWD/dist:/dist:ro" \
+            -v "$PWD/scripts/ci:/checks:ro" \
+            -v /tmp/fixture.insv:/fixture.insv:ro \
+            python:3.10-slim-bookworm \
+            sh -ec 'pip install --no-deps /dist/*.whl; python /checks/smoke-wheel.py /fixture.insv'
+
+  python-native:
+    name: Python wheel (${{ matrix.target }})
+    needs: prek
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+          - os: windows-2025
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-native-wheel
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: wheel-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh') }}
+          workspaces: . -> target/wheel-native
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/wheel-native
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh', '.github/actions/setup-native-wheel/action.yml') }}
+      - name: Build and repair the native wheel
+        run: python scripts/ci/build-native-wheel.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-dist-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  python-test:
+    name: Python ${{ matrix.python }} installed wheel
+    needs: python-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-dist-linux
+          path: dist
+      - name: Install fixture generator and the built wheel
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+          python -m pip install --no-deps dist/*.whl
+      - name: Full Python tests against the installed extension
+        run: python -I -X faulthandler src-python/scripts/run-tests.py

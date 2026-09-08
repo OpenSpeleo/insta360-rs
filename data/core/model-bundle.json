@@ -1,0 +1,732 @@
+{
+  "schema_version": 2,
+  "bundle_id": "insta360-rs-data-core",
+  "bundle_version": "2026-09-08.1",
+  "assets": [
+    {
+      "id": "ai-seam-coreml-v22-analytics-coremldata-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/analytics/coremldata.bin",
+      "sha256": "c59650c106f830bc269a6797772b80a753c2d5209f06ef28069acd042c2921b7",
+      "byte_length": 482,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/analytics/coremldata.bin",
+        "source_sha256": "c59650c106f830bc269a6797772b80a753c2d5209f06ef28069acd042c2921b7",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-coremldata-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/coremldata.bin",
+      "sha256": "64aac91e8ef9b055246bbb0e94e20d56d203d743583258bbfe1830efde042fec",
+      "byte_length": 436,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/coremldata.bin",
+        "source_sha256": "64aac91e8ef9b055246bbb0e94e20d56d203d743583258bbfe1830efde042fec",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-metadata-json",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/metadata.json",
+      "sha256": "2811a0a97dfd57e3739477dc3951be43267270ed31df2872f46df50e95e49698",
+      "byte_length": 2897,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/metadata.json",
+        "source_sha256": "2811a0a97dfd57e3739477dc3951be43267270ed31df2872f46df50e95e49698",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-model-coremldata-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/model/coremldata.bin",
+      "sha256": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+      "byte_length": 64,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/model/coremldata.bin",
+        "source_sha256": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-model-espresso-net",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/model.espresso.net",
+      "sha256": "643fa90d0ae5e2637c97472e3a817575465fec75d7049870214793c4dd302174",
+      "byte_length": 33130,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/model.espresso.net",
+        "source_sha256": "643fa90d0ae5e2637c97472e3a817575465fec75d7049870214793c4dd302174",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-model-espresso-shape",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/model.espresso.shape",
+      "sha256": "5b45affdc5b54817930d5dcab60400db348d7cc83ddc99038f0fcb84113bc5b8",
+      "byte_length": 7268,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/model.espresso.shape",
+        "source_sha256": "5b45affdc5b54817930d5dcab60400db348d7cc83ddc99038f0fcb84113bc5b8",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-model-espresso-weights",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/model.espresso.weights",
+      "sha256": "021f9aedeb4b8e3107d26b1a9763e32b7edb7a20874f958c8b97a1af62627113",
+      "byte_length": 2004352,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/model.espresso.weights",
+        "source_sha256": "021f9aedeb4b8e3107d26b1a9763e32b7edb7a20874f958c8b97a1af62627113",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-coreml-v22-neural-network-optionals-coremldata-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-coreml-v22/neural_network_optionals/coremldata.bin",
+      "sha256": "5931bd536c4550294a212c6fc8d3c1bee75da817980ba0b671c8603dafb36238",
+      "byte_length": 40,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/INSCameraSDKSample-bluetooth/models/model_export_v22_d7c49187.mlmodelc/neural_network_optionals/coremldata.bin",
+        "source_sha256": "5931bd536c4550294a212c6fc8d3c1bee75da817980ba0b671c8603dafb36238",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-0db3a7a0-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/0db3a7a0.xml",
+      "sha256": "87340f245bcc07e23b6b3b42e741a0c2b83b32e3b841d08653b4ca7ec6e25fa6",
+      "byte_length": 59600,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/cameraaccessory/0db3a7a0.xml",
+        "source_sha256": "87340f245bcc07e23b6b3b42e741a0c2b83b32e3b841d08653b4ca7ec6e25fa6",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-0e38bc62-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/0e38bc62.xml",
+      "sha256": "7cf2517ea37ddefd9321927e52237b54887cfd6034511f213bb9c9392896f013",
+      "byte_length": 366127,
+      "compatibility": {
+        "qualification": "unqualified"
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/0e38bc62.xml",
+        "source_sha256": "7cf2517ea37ddefd9321927e52237b54887cfd6034511f213bb9c9392896f013",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-2780de8f-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/2780de8f.xml",
+      "sha256": "10ec05830d5d4e0596197467979ee3f61e9360c1f5e372d2f69dd5915bc89a75",
+      "byte_length": 90787,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/cameraaccessory/2780de8f.xml",
+        "source_sha256": "10ec05830d5d4e0596197467979ee3f61e9360c1f5e372d2f69dd5915bc89a75",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-616ea2f7-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/616ea2f7.xml",
+      "sha256": "654604cdf11c22beffc36534938efa1652396cbb7d0cdb0496e8e15f4f176433",
+      "byte_length": 20995,
+      "compatibility": {
+        "qualification": "unqualified"
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/616ea2f7.xml",
+        "source_sha256": "654604cdf11c22beffc36534938efa1652396cbb7d0cdb0496e8e15f4f176433",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-761dd84e-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/761dd84e.xml",
+      "sha256": "645c28d41447021222833e8b6b3cffd1eb706ca9c72b5f1f20108e9a52c4e3f3",
+      "byte_length": 58164,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/cameraaccessory/761dd84e.xml",
+        "source_sha256": "645c28d41447021222833e8b6b3cffd1eb706ca9c72b5f1f20108e9a52c4e3f3",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-79e7d25b-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/79e7d25b.xml",
+      "sha256": "489e35843ccf52e1d23d46894fc0632cd2065cab4c7cd671a76fa1b64bd052ed",
+      "byte_length": 20989,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/cameraaccessory/79e7d25b.xml",
+        "source_sha256": "489e35843ccf52e1d23d46894fc0632cd2065cab4c7cd671a76fa1b64bd052ed",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-accessory-svm-d1f3e452-xml",
+      "kind": "accessory_detector_svm",
+      "path": "models/cameraaccessory/d1f3e452.xml",
+      "sha256": "b5b5b5fc4b6332e7b337e369f6b8fbca58d2483dccaeabe8c2ddcc021b944e6c",
+      "byte_length": 34160,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/cameraaccessory/d1f3e452.xml",
+        "source_sha256": "b5b5b5fc4b6332e7b337e369f6b8fbca58d2483dccaeabe8c2ddcc021b944e6c",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-one-x2-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_ONE_X2.json",
+      "sha256": "058a31c1cc15539b4466452caa6f653c8ad9255fd4a7681d2877fe87463c7260",
+      "byte_length": 10160,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_ONE_X2.json",
+        "source_sha256": "058a31c1cc15539b4466452caa6f653c8ad9255fd4a7681d2877fe87463c7260",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-one2-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_One2.json",
+      "sha256": "76b0c9b9c331237ce69129c91629345ff91c5658e7c06cf3842cbf72556dab43",
+      "byte_length": 8952,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_One2.json",
+        "source_sha256": "76b0c9b9c331237ce69129c91629345ff91c5658e7c06cf3842cbf72556dab43",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-oner-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_OneR.json",
+      "sha256": "0b74225f146aeda161a68eddae63e83bc9012989f533d935166e22044474095a",
+      "byte_length": 12177,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_OneR.json",
+        "source_sha256": "0b74225f146aeda161a68eddae63e83bc9012989f533d935166e22044474095a",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-oners-283-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_OneRS_283.json",
+      "sha256": "7260649cb20caf3f42ed604220f4c0209db41a4ecbf7cd82350d38cbc2c1fd47",
+      "byte_length": 12297,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_OneRS_283.json",
+        "source_sha256": "7260649cb20caf3f42ed604220f4c0209db41a4ecbf7cd82350d38cbc2c1fd47",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-oners-577-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_OneRS_577.json",
+      "sha256": "0b74225f146aeda161a68eddae63e83bc9012989f533d935166e22044474095a",
+      "byte_length": 12177,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_OneRS_577.json",
+        "source_sha256": "0b74225f146aeda161a68eddae63e83bc9012989f533d935166e22044474095a",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-x3-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_X3.json",
+      "sha256": "cf756d9155e3d4829e66f34e81d71731913366a4f0aa3677323c9663f112039c",
+      "byte_length": 14391,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_X3.json",
+        "source_sha256": "cf756d9155e3d4829e66f34e81d71731913366a4f0aa3677323c9663f112039c",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-x4-air-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_X4_Air.json",
+      "sha256": "da0f7048c3125e1e1e11b20e641f04db4b65e9a23b51558a9ea85f99cff4097b",
+      "byte_length": 115749,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_X4_Air.json",
+        "source_sha256": "da0f7048c3125e1e1e11b20e641f04db4b65e9a23b51558a9ea85f99cff4097b",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-x4-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_X4.json",
+      "sha256": "b88b647847096dcb012f21255e3dfeaff15dc6f701f257c89c484337ecdb2104",
+      "byte_length": 145665,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_X4.json",
+        "source_sha256": "b88b647847096dcb012f21255e3dfeaff15dc6f701f257c89c484337ecdb2104",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-x5-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_X5.json",
+      "sha256": "1a7a016439fca88928ad86844e7b4902b3153d9f2553719eb4a81aed98d314c7",
+      "byte_length": 152752,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_X5.json",
+        "source_sha256": "1a7a016439fca88928ad86844e7b4902b3153d9f2553719eb4a81aed98d314c7",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "camera-config-camera-conf-insta360-x6-json",
+      "kind": "camera_config",
+      "path": "camera-config/camera_conf_Insta360_X6.json",
+      "sha256": "9325937d5c4a60555f4c556c2e0f69ac0b89012232e4a6022f50c29bbd308aa0",
+      "byte_length": 237283,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "CameraSDK-2.1.8",
+          "maximum": "CameraSDK-2.1.8"
+        }
+      },
+      "provenance": {
+        "sdk_release": "CameraSDK-2.1.8",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/CameraSDK-2.1.8-20260828_171805-linux-x86_64/bin/jsons/camera_conf_Insta360_X6.json",
+        "source_sha256": "9325937d5c4a60555f4c556c2e0f69ac0b89012232e4a6022f50c29bbd308aa0",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "cooling-shell-svm-0810e5c7-xml",
+      "kind": "cooling_shell_detector_svm",
+      "path": "models/coolingshell/0810e5c7.xml",
+      "sha256": "39393da1f9241b34bf85e29b0942327b54388e59494dc8bb8d55ea089a819b5d",
+      "byte_length": 12216,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/coolingshell/0810e5c7.xml",
+        "source_sha256": "39393da1f9241b34bf85e29b0942327b54388e59494dc8bb8d55ea089a819b5d",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "cooling-shell-svm-7105bb47-xml",
+      "kind": "cooling_shell_detector_svm",
+      "path": "models/coolingshell/7105bb47.xml",
+      "sha256": "bb3ee47e396dc1a1626710585be0fd189499d00817534672a1b7e4c4214cbc56",
+      "byte_length": 12233,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/coolingshell/7105bb47.xml",
+        "source_sha256": "bb3ee47e396dc1a1626710585be0fd189499d00817534672a1b7e4c4214cbc56",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "cooling-shell-svm-bc29340e-xml",
+      "kind": "cooling_shell_detector_svm",
+      "path": "models/coolingshell/bc29340e.xml",
+      "sha256": "bc76c8e6ce2d02b3ecc9741057edbb7dfc65a2de32d93d49aca37318d7f389b5",
+      "byte_length": 12237,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/coolingshell/bc29340e.xml",
+        "source_sha256": "bc76c8e6ce2d02b3ecc9741057edbb7dfc65a2de32d93d49aca37318d7f389b5",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "cooling-shell-svm-e6e1de02-xml",
+      "kind": "cooling_shell_detector_svm",
+      "path": "models/coolingshell/e6e1de02.xml",
+      "sha256": "79b06b8d29dd9dabce155a04cc8ec75afdcac587a5a3d0e12818c84f5d13a7d2",
+      "byte_length": 12215,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/coolingshell/e6e1de02.xml",
+        "source_sha256": "79b06b8d29dd9dabce155a04cc8ec75afdcac587a5a3d0e12818c84f5d13a7d2",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "cooling-shell-svm-heatx5-d1790022-xml",
+      "kind": "cooling_shell_detector_svm",
+      "path": "models/coolingshell/heatX5_d1790022.xml",
+      "sha256": "3b7a76e04f2ba2677e9d9d6fa85ad4697e152cfde0671e1665c52f011532203c",
+      "byte_length": 12211,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/coolingshell/heatX5_d1790022.xml",
+        "source_sha256": "3b7a76e04f2ba2677e9d9d6fa85ad4697e152cfde0671e1665c52f011532203c",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "desktop-ai-stitcher",
+      "kind": "ai_stitch",
+      "path": "models/ai_stitcher.ins",
+      "sha256": "c737532cc40757435ff395de0e82dfd45c603d9320b5447c96139cc6d2c36869",
+      "byte_length": 2034051,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/ai_stitcher.ins",
+        "source_sha256": "c737532cc40757435ff395de0e82dfd45c603d9320b5447c96139cc6d2c36869",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "inscoremedia-model-catalog",
+      "kind": "model_catalog",
+      "path": "catalog/model_info.json",
+      "sha256": "fa43241339beff3a745fce9e6e14a9f60f1f50e36a81f889e65dcd92bb3a2a30",
+      "byte_length": 85505,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      },
+      "provenance": {
+        "sdk_release": "iOS-SDK-1.10.4",
+        "source_path": "iOS_v1.10.4/INSCameraSDKSample-bluetooth/Frameworks/INSCoreMedia.xcframework/ios-arm64/INSCoreMedia.framework/model_info.json",
+        "source_sha256": "fa43241339beff3a745fce9e6e14a9f60f1f50e36a81f889e65dcd92bb3a2a30",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "studio-i-log-ace-pro-2-rec709",
+      "kind": "color_lut",
+      "path": "color-luts/AcePro2_I-Log_To_Rec.709_V1.0.cube",
+      "sha256": "7ffabf0359afdcc64132ad166513b052ba2f796fad451aa6faa8232f9a0929a7",
+      "byte_length": 555970,
+      "compatibility": {
+        "qualification": "unqualified",
+        "camera_models": [
+          "Ace Pro 2"
+        ]
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/i_log/AcePro2_I-Log_To_Rec.709_V1.0.cube",
+        "source_sha256": "7ffabf0359afdcc64132ad166513b052ba2f796fad451aa6faa8232f9a0929a7",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "studio-i-log-luna-rec709",
+      "kind": "color_lut",
+      "path": "color-luts/Luna_I-Log_to_Rec709.cube",
+      "sha256": "0203d224569d3576bf4117c53c7ec2c61aa59580f150a71af1d2e05b8e79a2f4",
+      "byte_length": 1401597,
+      "compatibility": {
+        "qualification": "unqualified"
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/i_log/Luna_I-Log_to_Rec709.cube",
+        "source_sha256": "0203d224569d3576bf4117c53c7ec2c61aa59580f150a71af1d2e05b8e79a2f4",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "studio-i-log-x5-rec709",
+      "kind": "color_lut",
+      "path": "color-luts/X5_I-Log_To_Rec.709_V1.0.cube",
+      "sha256": "edba4055614bb2c3e8fa66435998aa18fc9ed8da4dbf2de23ce57038670f2e56",
+      "byte_length": 4792092,
+      "compatibility": {
+        "qualification": "unqualified",
+        "camera_models": [
+          "X5"
+        ]
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/i_log/X5_I-Log_To_Rec.709_V1.0.cube",
+        "source_sha256": "edba4055614bb2c3e8fa66435998aa18fc9ed8da4dbf2de23ce57038670f2e56",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "studio-sharpen-parameters",
+      "kind": "other",
+      "path": "image-processing/sharpen_param.json",
+      "sha256": "5a85d398fb985447cd8c2fc44219328a9ff9f17fa784a6f2bfb1d8616cab1f81",
+      "byte_length": 9719,
+      "compatibility": {
+        "qualification": "unqualified"
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/sharpen_param.json",
+        "source_sha256": "5a85d398fb985447cd8c2fc44219328a9ff9f17fa784a6f2bfb1d8616cab1f81",
+        "normalization": "identity"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "id": "ai-seam-coreml-v22",
+      "kind": "ai_stitch",
+      "members": [
+        "ai-seam-coreml-v22-analytics-coremldata-bin",
+        "ai-seam-coreml-v22-coremldata-bin",
+        "ai-seam-coreml-v22-metadata-json",
+        "ai-seam-coreml-v22-model-espresso-net",
+        "ai-seam-coreml-v22-model-espresso-shape",
+        "ai-seam-coreml-v22-model-espresso-weights",
+        "ai-seam-coreml-v22-model-coremldata-bin",
+        "ai-seam-coreml-v22-neural-network-optionals-coremldata-bin"
+      ],
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "iOS-SDK-1.10.4",
+          "maximum": "iOS-SDK-1.10.4"
+        }
+      }
+    }
+  ]
+}

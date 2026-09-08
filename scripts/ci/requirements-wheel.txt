@@ -1,0 +1,7 @@
+maturin==1.15.0
+# Linux uses the CMake and auditwheel supplied by the pinned manylinux image.
+# x265's build scripts require CMake policies removed in CMake 4.
+cmake==3.31.10; sys_platform != 'linux'
+delocate==0.13.0; sys_platform == 'darwin'
+delvewheel==1.13.1; sys_platform == 'win32'
+ninja; sys_platform == 'win32'

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source_fixture": "VID_20181001_225939_00_002.insv",
+  "optical_setup": "InvisibleDiveCaseUnderwater",
+  "stabilization": "DirectionLock",
+  "clip": {
+    "selection": "centered",
+    "requested_duration_seconds": 15.0,
+    "output_duration_seconds": 14.981634,
+    "frame_count": 449,
+    "width": 1920,
+    "height": 960
+  },
+  "midpoint": {
+    "required_zero_coverage_holes": true,
+    "required_no_dual_fisheye_footprint": true,
+    "required_no_duplicated_geometry": true,
+    "required_no_dome_rim_leakage": true,
+    "lower_seam": {
+      "left_region": [1045, 600, 1060, 720],
+      "right_region": [1076, 600, 1091, 720],
+      "luma_gap_dn": 7.7372,
+      "u_gap_dn": 1.388,
+      "v_gap_dn": 1.535,
+      "maximum_luma_regression_dn": 0.5
+    }
+  }
+}

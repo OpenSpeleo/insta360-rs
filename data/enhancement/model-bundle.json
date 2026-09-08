@@ -1,0 +1,108 @@
+{
+  "schema_version": 2,
+  "bundle_id": "insta360-rs-data-enhancement",
+  "bundle_version": "2026-09-08.1",
+  "assets": [
+    {
+      "id": "desktop-colorplus-lut",
+      "kind": "color_lut",
+      "path": "models/colorplus_model.ins",
+      "sha256": "8864c23f677a589145aaadaeb9ab28fd9454d4fa5cb33a232c1876a71b561dcd",
+      "byte_length": 5276998,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/colorplus_model.ins",
+        "source_sha256": "8864c23f677a589145aaadaeb9ab28fd9454d4fa5cb33a232c1876a71b561dcd",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "desktop-deflicker-86ccba0d",
+      "kind": "deflicker",
+      "path": "models/deflicker_86ccba0d.ins",
+      "sha256": "e5c6c98df6f2db99cbc4a0bd070c4166bf6b26a7f96dc689275d13646264e47b",
+      "byte_length": 1989846,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/deflicker_86ccba0d.ins",
+        "source_sha256": "e5c6c98df6f2db99cbc4a0bd070c4166bf6b26a7f96dc689275d13646264e47b",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "desktop-defringe-defringe-air-hr-dynamic-6fbc2886-ins",
+      "kind": "defringe",
+      "path": "models/defringe_air_hr_dynamic_6fbc2886.ins",
+      "sha256": "ad002ff8395304a1514f50de5678426c308d84855443b201f86f28830d6d9198",
+      "byte_length": 10390,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/defringe_air_hr_dynamic_6fbc2886.ins",
+        "source_sha256": "ad002ff8395304a1514f50de5678426c308d84855443b201f86f28830d6d9198",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "desktop-defringe-defringe-hr-dynamic-7b56e80f-ins",
+      "kind": "defringe",
+      "path": "models/defringe_hr_dynamic_7b56e80f.ins",
+      "sha256": "67050fca0604806ccf59518086885ec537b0c25d7955f2b896bbf14f76b82d00",
+      "byte_length": 10390,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/defringe_hr_dynamic_7b56e80f.ins",
+        "source_sha256": "67050fca0604806ccf59518086885ec537b0c25d7955f2b896bbf14f76b82d00",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "desktop-jpeg-denoise-9d006262",
+      "kind": "image_denoise",
+      "path": "models/jpg_denoise_9d006262.ins",
+      "sha256": "846cb51cad4e362e742d43f679280894c688459dd403dea00515415ba153da28",
+      "byte_length": 2165326,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "MediaSDK-3.1.5",
+          "maximum": "MediaSDK-3.1.5"
+        }
+      },
+      "provenance": {
+        "sdk_release": "MediaSDK-3.1.5",
+        "source_path": "Linux_CameraSDK-2.1.8_MediaSDK-3.1.5/MediaSDK-3.1.5-20260819-linux64/models/jpg_denoise_9d006262.ins",
+        "source_sha256": "846cb51cad4e362e742d43f679280894c688459dd403dea00515415ba153da28",
+        "normalization": "identity"
+      }
+    }
+  ],
+  "groups": []
+}

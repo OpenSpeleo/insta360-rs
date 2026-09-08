@@ -1,0 +1,45 @@
+---
+name: Set up Linux
+description: Rust, Python, FFmpeg, and software Vulkan for library checks
+inputs:
+  cache-key:
+    description: Separate caches for different build jobs
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install native dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y \
+          build-essential pkg-config libclang-dev clang llvm-dev \
+          ffmpeg \
+          mesa-vulkan-drivers libvulkan1 vulkan-tools
+        echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+        mkdir -p "$RUNNER_TEMP/xdg-runtime"
+        chmod 700 "$RUNNER_TEMP/xdg-runtime"
+        echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg-runtime" >> "$GITHUB_ENV"
+        # Mesa packages use both lvp_icd.json and architecture-suffixed names.
+        # Loader filters support wildcards only at the start or end.
+        echo 'VK_LOADER_DRIVERS_SELECT=lvp_icd*' >> "$GITHUB_ENV"
+    - uses: ./.github/actions/setup-rust
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ffmpeg-linux-x86_64
+        path: .cache/artifacts
+    - name: Configure the prepared FFmpeg libraries
+      shell: bash
+      run: |
+        mkdir -p .cache/wheel
+        tar -xzf .cache/artifacts/ffmpeg-sdk.tar.gz -C .
+        python scripts/ci/use-ffmpeg.py
+    - name: Verify the prepared libraries
+      shell: bash
+      run: pkg-config --modversion libavcodec libavformat libavutil libswscale
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      with:
+        key: ${{ inputs.cache-key }}
+        workspaces: . -> target
+        cache-on-failure: true
+    - uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0

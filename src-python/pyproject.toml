@@ -1,0 +1,51 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "insta360-rs"
+dynamic = ["version", "authors"]
+description = "Portable file conversion for Insta360 media"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+# Explicit paths also retain license metadata when rebuilding the source archive.
+license-files = ["LICENSE.md", "NOTICE.md"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Multimedia :: Video :: Conversion",
+]
+
+[project.urls]
+Repository = "https://github.com/OpenSpeleo/insta360-rs"
+Documentation = "https://github.com/OpenSpeleo/insta360-rs/tree/main/src-python/docs"
+Issues = "https://github.com/OpenSpeleo/insta360-rs/issues"
+
+[project.optional-dependencies]
+test = ["build>=1.2,<2", "ruff>=0.12"]
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "insta360_rs._native"
+python-source = "python"
+features = ["extension-module"]
+exclude = [
+    "**/__pycache__/**",
+    "**/*.py[cod]",
+    "**/.cache/**",
+    "**/target/**",
+    "**/.DS_Store",
+]
+include = [
+  { path = "docs/**", format = "sdist" },
+  { path = "tests/**", format = "sdist" },
+  { path = "scripts/**", format = "sdist" },
+]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
