@@ -31,7 +31,7 @@ jobs:
           key: ffmpeg-linux-${{ hashFiles('scripts/ci/build-ffmpeg.sh', 'scripts/ci/build-wheel.sh', 'scripts/ci/ffmpeg-runtime-config.sh', 'rust-toolchain.toml') }}
       - name: Build or restore the native FFmpeg libraries once
         run: bash scripts/ci/build-wheel.sh --prewarm
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ffmpeg-linux-x86_64
           path: dist/ffmpeg-sdk.tar.gz
@@ -108,7 +108,7 @@ jobs:
       - name: Verify all three crates.io archives and their size limits
         if: matrix.features.name == 'all'
         run: python scripts/ci/check-packages.py --all-features
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: matrix.features.name == 'all'
         with:
           name: rust-crates
@@ -143,7 +143,7 @@ jobs:
           tar -xzf .cache/artifacts/ffmpeg-sdk.tar.gz -C .
       - name: Build and repair manylinux wheel from the source distribution
         run: bash scripts/ci/build-wheel.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-dist-linux
           path: |
@@ -201,7 +201,7 @@ jobs:
           key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh', '.github/actions/setup-native-wheel/action.yml') }}
       - name: Build and repair the native wheel
         run: python scripts/ci/build-native-wheel.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-dist-${{ matrix.target }}
           path: dist/*.whl
