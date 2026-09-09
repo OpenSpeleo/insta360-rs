@@ -8,6 +8,10 @@ details are intentionally omitted.
 
 ### Features
 
+- Export compatible split recordings as continuous 360° videos with original
+  audio, or extract synchronized fisheye frames and complete source archives.
+  6824cb3
+
 ### Performance
 
 ## v0.1.0 - 2026-09-09
