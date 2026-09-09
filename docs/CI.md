@@ -1,15 +1,18 @@
 # Continuous integration
 
-[CI](../.github/workflows/ci.yml) runs only on pushes to `master` and manual
-dispatch. Pull requests and pushes to other branches, including Dependabot
-branches, do not start CI. To check a branch before merging, manually dispatch
-the workflow for that branch. All lint and tests run on Linux x86_64
-(`ubuntu-24.04`). macOS and Windows runners only build Python wheels.
+[CI](../.github/workflows/ci.yml) runs on pushes to `master`, manual dispatch,
+and reusable calls from the release workflow. Pull requests and pushes to other
+branches, including Dependabot branches, do not start CI. To check a branch
+before merging, manually dispatch the workflow for that branch. All lint and
+tests run on Linux x86_64 (`ubuntu-24.04`). macOS and Windows runners only build
+Python wheels.
 
-CI does not accept reusable workflow calls. The
-[release workflow](../.github/workflows/release.yml) still references CI as a
-reusable workflow; that integration must be adjusted before tag publication can
-run with this trigger policy.
+The [release workflow](../.github/workflows/release.yml) calls CI at the tagged
+commit and waits for all checks before publishing. Its Python publishing job
+attests the built wheels and source distribution with GitHub build provenance,
+retains the signed bundle as `python-provenance-<attempt>`, and uploads PyPI
+attestations through trusted publishing. See
+[release verification](RELEASE.md#attestations-and-verification).
 
 For Rust publication, the release job uses this repository’s Cargo workspace.
 The Python extension has `publish = false`, leaving three publishable crates.
@@ -199,5 +202,4 @@ upgrades belong only in `rust-toolchain.toml`.
 Windows/macOS wheels receive compilation and repair checks, without runtime
 testing. Linux ARM64, Windows ARM64, musl, PyPy, and free-threaded CPython
 wheels are outside this build matrix. See [RELEASE.md](RELEASE.md) for registry
-configuration; resolve the reusable CI integration described above before
-publishing a version tag.
+configuration and publication from a version tag.

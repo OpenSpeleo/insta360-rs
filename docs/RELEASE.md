@@ -35,7 +35,9 @@ No `PYPI_API_TOKEN` or permanent `CARGO_REGISTRY_TOKEN` repository secret is
 needed. Only publishing jobs receive `id-token: write`. The crates.io action
 exchanges GitHub's identity for a short-lived token immediately before Cargo
 publishes. PyPI uses the official PyPA publishing action and its trusted
-publishing support. CI/build jobs have read-only repository permissions.
+publishing support. The Python publishing job also receives
+`attestations: write` to store build provenance on GitHub. CI/build jobs have
+read-only repository permissions.
 
 The library depends on `insta360-rs-data-core` and
 `insta360-rs-data-enhancement`; all three packages must be available on
@@ -180,6 +182,46 @@ bundle the required FFmpeg libraries; the separate `ffmpeg` executable used to
 generate CI fixtures is not part of the Python API. See
 [Maturin's distribution guide](https://www.maturin.rs/distribution.html).
 
+## Attestations and verification
+
+After the tagged commit passes the complete CI workflow, the Python publishing
+job downloads that run's `python-dist-*` artifacts and signs every wheel and
+sdist using the pinned `actions/attest` action. Its default predicate is SLSA
+build provenance, binding the distribution digests to the repository, source
+commit, and release workflow run. See the
+[GitHub attestation action](https://github.com/actions/attest).
+
+GitHub stores the attestations with the repository and links them from the job
+summary. The release run also retains the signed Sigstore bundle as the
+`python-provenance-<attempt>` artifact, separately from the distributions
+uploaded to PyPI. Each retry retains its own bundle without colliding with an
+earlier attempt's artifact. Attestation generation and bundle retention must
+succeed before the PyPI upload starts. Only the publishing job receives signing
+permissions.
+
+The PyPA publisher explicitly enables PEP 740 attestations, metadata validation,
+file hashes, and verbose upload logs. PyPI publish attestations identify the
+trusted publisher that uploaded each file; they are separate from GitHub's SLSA
+build-provenance attestations. The PyPA action generates and uploads the PyPI
+attestations automatically during trusted publishing. See
+[PyPI's attestation guide](https://docs.pypi.org/attestations/producing-attestations/).
+
+To verify a downloaded wheel or sdist against GitHub's provenance, use:
+
+```sh
+gh attestation verify dist/insta360_rs-0.1.0.tar.gz \
+  --repo OpenSpeleo/insta360-rs \
+  --signer-workflow OpenSpeleo/insta360-rs/.github/workflows/release.yml
+```
+
+Replace the example path with the exact downloaded distribution. PyPI exposes
+its publish attestations through the
+[Integrity API](https://docs.pypi.org/api/integrity/); follow the
+[PyPI verification guide](https://docs.pypi.org/attestations/consuming-attestations/)
+to verify those with `pypi-attestations`. Local builds cannot generate the
+GitHub Actions signing identity; the first tagged release run validates the OIDC
+signing and registry integration.
+
 ## Failures and retries
 
 A failed tag/version check or CI job prevents both registries from being
@@ -191,14 +233,16 @@ release run.
 The registries cannot commit a release atomically. If one publication succeeds
 and the other fails, keep the successful version and rerun only the failed job.
 PyPI's `skip-existing` allows retrying a partial upload of the already-tested
-artifact set. Cargo does not overwrite an existing version. If a Cargo upload
-succeeded before a later network failure, inspect the registry before retrying;
-a duplicate-version error can mean the original upload completed. For a partial
-Rust release, verify the already published versions and their contents, then
-publish only the remaining packages from a clean checkout of the same tagged
-source. Cargo rejects a workspace selection that includes an existing version;
-the automatic job does not skip it. For example, when both data crates are
-already published and only the library remains:
+artifact set. Attestations are attached to PyPI files at upload time; skipping
+an existing file does not add missing attestations to a previous upload. Cargo
+does not overwrite an existing version. If a Cargo upload succeeded before a
+later network failure, inspect the registry before retrying; a duplicate-version
+error can mean the original upload completed. For a partial Rust release, verify
+the already published versions and their contents, then publish only the
+remaining packages from a clean checkout of the same tagged source. Cargo
+rejects a workspace selection that includes an existing version; the automatic
+job does not skip it. For example, when both data crates are already published
+and only the library remains:
 
 ```sh
 cargo publish --locked -p insta360-rs
