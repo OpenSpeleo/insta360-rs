@@ -112,7 +112,7 @@ Run the test/build matrix:
 
 ```sh
 export XDG_RUNTIME_DIR="$(mktemp -d)"
-export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+export VK_LOADER_DRIVERS_SELECT='lvp_icd*'
 export INSTA360_RS_REQUIRE_GPU=1
 export LIBCLANG_PATH="$(llvm-config --libdir)"
 for features in '' media gpu cli media,gpu,cli; do
