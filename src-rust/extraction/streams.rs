@@ -9,8 +9,11 @@ use ffmpeg::codec::packet::Ref;
 use ffmpeg_next as ffmpeg;
 use serde_json::{json, Value};
 
-use super::ComponentExtraction;
+use super::{ComponentExtraction, ProgressTracker};
 use crate::{Error, Result};
+
+mod sequence;
+pub(super) use sequence::{SequenceCopies, SequenceInput};
 
 const MAX_STREAMS: usize = 256;
 const MAX_CHAPTERS: usize = 10_000;
@@ -20,7 +23,21 @@ const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_METADATA_ENTRIES: usize = 100_000;
 
 /// Demux once, preserving every packet before passing it to a convenience muxer.
+#[cfg(test)]
 pub(super) fn extract_streams(input: &Path, output_dir: &Path) -> Result<ComponentExtraction> {
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+    let mut callback = |_| {};
+    let mut progress = ProgressTracker::new(&cancelled, &mut callback, 1, 0);
+    extract_streams_controlled(input, output_dir, &mut progress, None)
+}
+
+pub(super) fn extract_streams_controlled(
+    input: &Path,
+    output_dir: &Path,
+    progress: &mut ProgressTracker<'_>,
+    mut sequence: Option<SequenceInput<'_>>,
+) -> Result<ComponentExtraction> {
+    progress.check()?;
     ffmpeg::init().map_err(|error| media_error("initializing stream extraction", error))?;
     let file = File::open(input).map_err(|error| crate::error::io_error(input, error))?;
     let io = ffmpeg::format::context::StreamIo::from_read_seek(file)
@@ -53,6 +70,9 @@ pub(super) fn extract_streams(input: &Path, output_dir: &Path) -> Result<Compone
         .collect::<Result<Vec<_>>>()?;
     let mut streams = Vec::with_capacity(source.nb_streams() as usize);
     let mut warnings = Vec::new();
+    if let Some(sequence) = sequence.as_mut() {
+        sequence.begin(&source)?;
+    }
     for stream in source.streams() {
         if stream.index() != streams.len() {
             return Err(Error::InvalidMedia(
@@ -65,11 +85,13 @@ pub(super) fn extract_streams(input: &Path, output_dir: &Path) -> Result<Compone
             output_dir,
             &mut metadata_budget,
             &mut warnings,
+            sequence.is_none(),
         )?);
     }
 
-    let mut sequence = 0_u64;
+    let mut packet_sequence = 0_u64;
     loop {
+        progress.check()?;
         let mut packet = ffmpeg::Packet::empty();
         match packet.read(&mut source) {
             Ok(()) => {}
@@ -97,8 +119,17 @@ pub(super) fn extract_streams(input: &Path, output_dir: &Path) -> Result<Compone
         let stream = streams.get_mut(packet.stream()).ok_or_else(|| {
             Error::InvalidMedia("packet refers to an unknown media stream".into())
         })?;
-        stream.write_packet(&mut packet, sequence, output_dir, &mut warnings)?;
-        sequence = sequence
+        let bytes = packet.size();
+        stream.write_packet(&mut packet, packet_sequence, output_dir, &mut warnings)?;
+        progress.copied(bytes)?;
+        if let Some(sequence) = sequence.as_mut() {
+            if sequence.write_packet(&mut packet)? {
+                progress.copied(bytes)?;
+            }
+        } else if stream.muxer.is_some() {
+            progress.copied(bytes)?;
+        }
+        packet_sequence = packet_sequence
             .checked_add(1)
             .ok_or_else(|| Error::InvalidMedia("media packet counter overflow".into()))?;
     }
@@ -116,7 +147,7 @@ pub(super) fn extract_streams(input: &Path, output_dir: &Path) -> Result<Compone
             "duration_microseconds": timestamp(source.duration()),
             "bit_rate": source.bit_rate(),
             "tags": tags, "chapters": chapters,
-            "packet_count": sequence, "streams": descriptions,
+            "packet_count": packet_sequence, "streams": descriptions,
         }),
         item_count: descriptions.len(),
         files,
@@ -144,6 +175,7 @@ impl StreamOutput {
         output_dir: &Path,
         metadata_budget: &mut usize,
         warnings: &mut Vec<String>,
+        playable: bool,
     ) -> Result<Self> {
         let index = stream.index();
         let directory = PathBuf::from(format!("streams/{index:03}"));
@@ -210,7 +242,11 @@ impl StreamOutput {
             side_data.relative.clone(),
             extradata.relative,
         ];
-        let muxer = Muxer::try_new(source, stream, output_dir, &directory, warnings)?;
+        let muxer = if playable {
+            Muxer::try_new(source, stream, output_dir, &directory, warnings)?
+        } else {
+            None
+        };
         Ok(Self {
             description,
             index,
@@ -336,6 +372,20 @@ impl Muxer {
         directory: &Path,
         warnings: &mut Vec<String>,
     ) -> Result<Option<Self>> {
+        Self::try_new_named(
+            source, stream, output_dir, directory, "media", false, warnings,
+        )
+    }
+
+    fn try_new_named(
+        source: &ffmpeg::format::context::Input,
+        stream: &ffmpeg::Stream<'_>,
+        output_dir: &Path,
+        directory: &Path,
+        stem: &str,
+        preserve_timestamps: bool,
+        warnings: &mut Vec<String>,
+    ) -> Result<Option<Self>> {
         let parameters = stream.parameters();
         let candidates: &[(&str, &str)] = match (parameters.medium(), parameters.id()) {
             (
@@ -354,7 +404,7 @@ impl Muxer {
         };
         let mut failures = Vec::new();
         for &(format, extension) in candidates {
-            let relative = directory.join(format!("media.{extension}"));
+            let relative = directory.join(format!("{stem}.{extension}"));
             let absolute = output_dir.join(&relative);
             let file = create_file(&absolute)?;
             let attempt = (|| {
@@ -403,13 +453,25 @@ impl Muxer {
                 let mut options = ffmpeg::Dictionary::new();
                 if format == "mp4" {
                     // Fragmenting bounds sample-table memory for long recordings.
-                    options.set("movflags", "frag_keyframe+empty_moov+default_base_moof");
+                    options.set(
+                        "movflags",
+                        if preserve_timestamps {
+                            // A delayed header can represent the initial edit list,
+                            // keeping priming/B-frame starts on the shared timeline.
+                            "frag_keyframe+delay_moov+default_base_moof"
+                        } else {
+                            "frag_keyframe+empty_moov+default_base_moof"
+                        },
+                    );
                     options.set("frag_duration", "1000000");
                     options.set("write_tmcd", "0");
                 } else {
                     // Avoid accumulating a whole-file cue index in memory.
                     options.set("live", "1");
                     options.set("cluster_time_limit", "1000");
+                }
+                if preserve_timestamps {
+                    options.set("avoid_negative_ts", "disabled");
                 }
                 context.write_header_with(options)?;
                 let time_base = context

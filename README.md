@@ -56,11 +56,11 @@ those assets does not imply that their algorithms are implemented or qualified.
 - Offers PyO3 bindings for Python 3.10+.
 
 Packet-preserving extraction does not spatially split a packed dual-fisheye
-frame. The crate does **not** currently copy audio into stitched MP4 output, use
-hardware decoding, run AI seam inference or ColorPlus, apply general crop-aware
-optical projection, or preserve 10-bit depth in stitched output. Supported X5
-recordings have gravity-referenced stabilization and sensor readout correction
-on both CPU and GPU; see [stabilization](docs/stabilization.md).
+frame. The crate does **not** currently use hardware decoding, run AI seam
+inference or ColorPlus, apply general crop-aware optical projection, or preserve
+10-bit depth in stitched output. Supported X5 recordings have gravity-referenced
+stabilization and sensor readout correction on both CPU and GPU; see
+[stabilization](docs/stabilization.md).
 
 ## Camera support
 
@@ -500,13 +500,13 @@ Output-size option for frames and video:
 
 Video-only options:
 
-| Option                 | Values                         | Default | Meaning                                                        |
-| ---------------------- | ------------------------------ | ------- | -------------------------------------------------------------- |
-| `--quality`            | `1..=100`                      | `90`    | HEVC quality target.                                           |
-| `--start`              | non-negative seconds           | `0`     | Source-relative start.                                         |
-| `--duration`           | positive seconds               | to end  | Requested interval length; zero is rejected.                   |
-| `--audio`              | `drop`, `copy`                 | `drop`  | Only `drop` is implemented; `copy` returns a capability error. |
-| `--media-acceleration` | `auto`, `software`, `hardware` | `auto`  | HEVC encoder selection, independent of the stitch backend.     |
+| Option                 | Values                         | Default | Meaning                                                    |
+| ---------------------- | ------------------------------ | ------- | ---------------------------------------------------------- |
+| `--quality`            | `1..=100`                      | `90`    | HEVC quality target.                                       |
+| `--start`              | non-negative seconds           | `0`     | Source-relative start.                                     |
+| `--duration`           | positive seconds               | to end  | Requested interval length; zero is rejected.               |
+| `--audio`              | `drop`, `copy`                 | `drop`  | Copy compatible original AAC/ALAC packets or omit audio.   |
+| `--media-acceleration` | `auto`, `software`, `hardware` | `auto`  | HEVC encoder selection, independent of the stitch backend. |
 
 `--media-acceleration hardware` requires an eligible hardware HEVC encoder;
 `software` requires a software encoder. `auto` tries eligible encoders in
@@ -714,16 +714,17 @@ print(report.manifest_path, report.stream_count, report.warnings)
 ```
 
 Python extraction releases the GIL and uses the same sibling discovery and
-destination rules as the CLI. Stitched-video calls must currently select
-`AudioPolicy.DROP`; extraction still preserves audio packets and attempts a
-standalone codec-copy remux. The asset-provider layer is not yet exposed as a
-Python conversion argument.
+destination rules as the CLI. Stitched-video calls can retain compatible
+original AAC/ALAC audio with `AudioPolicy.COPY` or omit it with `DROP`. The
+asset-provider layer is not yet exposed as a Python conversion argument.
 
 See [Python bindings](docs/python.md) for examples and wheel targets.
 
 ## Current limitations
 
-- High-level media export is restricted to X5 single-file, two-track input.
+- High-level media export requires X5 single-file, two-track input per chapter.
+  Rust `Exporter::from_sequence` exports a complete recording through one video
+  writer; see [sequence stitching](docs/sequence-stitching.md).
 - Packed ONE X-X3 video is preserved as one encoded stream; extraction does not
   synthesize separate decoded lens tracks from that packed frame.
 - V1 calibration is parse-only and fails stitch preflight.
@@ -737,8 +738,8 @@ See [Python bindings](docs/python.md) for examples and wheel targets.
   readback.
 - Stitched video output is 8-bit YUV420 HEVC; extraction preserves encoded
   10-bit packets without converting them.
-- Audio copy/remux into stitched MP4 is not implemented; extraction preserves
-  audio packets and attempts a standalone M4A/MKA codec-copy remux.
+- Stitched audio copy supports compatible AAC/ALAC tracks with complete-packet
+  cuts; unsupported audio formats can be preserved by container extraction.
 - AI seam, ColorPlus, defringe, deflicker, denoise, and accessory-image
   classification are not runtime capabilities.
 - X1-X4 and X6 need decoded stitching/export support and real-camera golden

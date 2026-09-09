@@ -64,9 +64,9 @@ export_video(
 )
 ```
 
-Stitched audio copy is not implemented; the default `AudioPolicy.COPY` raises
-`MissingCapabilityError`. Select `DROP` explicitly for video exports. Extraction
-and original stream readers retain audio packets.
+The default `AudioPolicy.COPY` retains compatible AAC/ALAC compressed packets
+and their timing relative to video; cuts keep complete packets. Select `DROP` to
+omit audio. A source without audio exports silently with a warning.
 
 Stitching is selected with `StitchConfig(backend=ProcessingBackend.GPU)`. The
 default `ProcessingBackend.AUTO` attempts GPU and reruns the complete export on

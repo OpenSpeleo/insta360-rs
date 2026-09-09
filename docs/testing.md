@@ -67,6 +67,11 @@ qualification also requires another X5 unit, air and water profiles, 8- and
   deterministic color-adjustment ramps.
 - Clean Python wheel installation and file-conversion smoke tests.
 - Cancellation, backpressure, atomic output, and complete-file soak tests.
+- Sequence video export: split/unsplit decoded pixel equality, a single encoder
+  and renderer across boundaries, recording-wide clipping, copied audio packet
+  identity and A/V offsets, continued gravity pose/unwrapped heading, and strict
+  rejection of conflicting telemetry or reset camera clocks. See
+  [sequence stitching](sequence-stitching.md).
 
 ## GPU qualification status
 

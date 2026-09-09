@@ -6,8 +6,8 @@ use std::time::Duration;
 use crate::container::{InsvInspection, InsvMetadata, RecordInfo, VideoPtsMapType};
 use crate::motion::profile::X5MotionProfile;
 use crate::motion::{
-    decode_motion_record, AttitudeTrack, FrameMotion, FusionOptions, ReadoutDirection,
-    ReadoutPoseTable,
+    decode_motion_record, AttitudeTrack, FrameMotion, FusionOptions, MotionSample,
+    ReadoutDirection, ReadoutPoseTable,
 };
 use crate::telemetry::{decode_camera_exposure_record, CameraExposureSample};
 use crate::timing::{validate_camera_timestamp, ExposureTimeline};
@@ -71,6 +71,9 @@ struct SensorReadout {
 
 pub(super) struct FileStabilizer {
     attitude: AttitudeTrack,
+    // Only adjacent chapters are retained while preparing the next one. Keeping
+    // original normalized samples lets us verify duplicated boundary telemetry.
+    samples: Vec<MotionSample>,
     clocks: [FrameClock; 2],
     camera_origin_micros: i64,
     gyro_adjust_micros: f64,
@@ -85,6 +88,15 @@ impl FileStabilizer {
         reader: &mut InsvReader<R>,
         inspection: &InsvInspection,
         config: &StitchConfig,
+    ) -> Result<Option<Self>> {
+        Self::from_reader_continuing(reader, inspection, config, None)
+    }
+
+    pub(super) fn from_reader_continuing<R: Read + Seek>(
+        reader: &mut InsvReader<R>,
+        inspection: &InsvInspection,
+        config: &StitchConfig,
+        previous: Option<&Self>,
     ) -> Result<Option<Self>> {
         if config.stabilization == Stabilization::Off {
             if config.rolling_shutter == RollingShutterCorrection::Required {
@@ -131,24 +143,47 @@ impl FileStabilizer {
             .transpose()?
             .map(|payload| decode_camera_exposure_record(&payload, &inspection.metadata))
             .transpose()?;
-        Self::from_payloads(
+        Self::from_payloads_continuing(
             &inspection.metadata,
             config,
             &gyro_payload,
             primary,
             secondary,
             presentation,
+            previous,
         )
         .map(Some)
     }
 
+    #[cfg(test)]
     fn from_payloads(
         metadata: &InsvMetadata,
         config: &StitchConfig,
         gyro_payload: &[u8],
         primary: Vec<CameraExposureSample>,
         secondary: Option<Vec<CameraExposureSample>>,
+        presentation: Vec<Vec<i64>>,
+    ) -> Result<Self> {
+        Self::from_payloads_continuing(
+            metadata,
+            config,
+            gyro_payload,
+            primary,
+            secondary,
+            presentation,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_payloads_continuing(
+        metadata: &InsvMetadata,
+        config: &StitchConfig,
+        gyro_payload: &[u8],
+        primary: Vec<CameraExposureSample>,
+        secondary: Option<Vec<CameraExposureSample>>,
         mut presentation: Vec<Vec<i64>>,
+        previous: Option<&Self>,
     ) -> Result<Self> {
         let profile = X5MotionProfile::from_metadata(metadata)?;
         validate_timing_metadata(metadata)?;
@@ -196,7 +231,10 @@ impl FileStabilizer {
                 }
             }
         }
-        let camera_origin_micros = i64::from_le_bytes(gyro_payload[..8].try_into().unwrap());
+        let first_gyro_micros = i64::from_le_bytes(gyro_payload[..8].try_into().unwrap());
+        let previous_end_micros = previous.map(Self::last_sample_camera_time).transpose()?;
+        let camera_origin_micros =
+            previous_end_micros.map_or(first_gyro_micros, |end| first_gyro_micros.min(end));
         let first_frame_micros = metadata.first_frame_timestamp.ok_or_else(|| {
             Error::MissingCalibration(
                 "stabilization requires the first-frame camera timestamp".into(),
@@ -275,10 +313,13 @@ impl FileStabilizer {
             .into_iter()
             .reduce(f64::min)
             .unwrap();
-        let initialization_window =
+        let initialization_window = if previous.is_some() {
+            FusionOptions::default().initialization_window
+        } else {
             Duration::try_from_secs_f64((first_capture / 1_000_000.0).min(2.0)).map_err(|_| {
                 Error::InvalidMedia("no gyro pre-roll precedes the first capture".into())
-            })?;
+            })?
+        };
         let options = FusionOptions {
             initialization_window,
             max_angular_speed_rad_s: metadata
@@ -289,7 +330,11 @@ impl FileStabilizer {
                 * 3.0_f64.sqrt(),
             ..FusionOptions::default()
         };
-        let attitude = AttitudeTrack::new(&samples, options)?;
+        let attitude = if let Some(previous) = previous {
+            previous.continue_attitude(&mut samples, camera_origin_micros, options)?
+        } else {
+            AttitudeTrack::new(&samples, options)?
+        };
         let mut warnings = Vec::new();
         let readout = if config.rolling_shutter == RollingShutterCorrection::Off {
             None
@@ -341,6 +386,7 @@ impl FileStabilizer {
         );
         let stabilizer = Self {
             attitude,
+            samples,
             clocks,
             camera_origin_micros,
             gyro_adjust_micros,
@@ -367,6 +413,92 @@ impl FileStabilizer {
             }
         }
         Ok(stabilizer)
+    }
+
+    fn last_sample_camera_time(&self) -> Result<i64> {
+        self.sample_camera_time(
+            self.samples
+                .last()
+                .expect("validated nonempty gyro samples"),
+        )
+    }
+
+    fn sample_camera_time(&self, sample: &MotionSample) -> Result<i64> {
+        i64::try_from(sample.timestamp.as_micros())
+            .ok()
+            .and_then(|time| self.camera_origin_micros.checked_add(time))
+            .ok_or_else(|| Error::InvalidMedia("gyro chapter timestamp overflow".into()))
+    }
+
+    fn continue_attitude(
+        &self,
+        samples: &mut Vec<MotionSample>,
+        origin: i64,
+        options: FusionOptions,
+    ) -> Result<AttitudeTrack> {
+        let first = origin
+            .checked_add(
+                i64::try_from(samples[0].timestamp.as_micros())
+                    .map_err(|_| Error::InvalidMedia("gyro chapter timestamp overflow".into()))?,
+            )
+            .ok_or_else(|| Error::InvalidMedia("gyro chapter timestamp overflow".into()))?;
+        let previous_end = self.last_sample_camera_time()?;
+        let seed_time = first.min(previous_end);
+        let seed_relative = seed_time
+            .checked_sub(self.camera_origin_micros)
+            .and_then(|value| u64::try_from(value).ok())
+            .map(Duration::from_micros)
+            .ok_or_else(|| {
+                Error::InvalidMedia(
+                    "chapter gyro clock moved backwards beyond available telemetry".into(),
+                )
+            })?;
+        // A repeated sample must describe the same sensor measurement. Never
+        // average conflicting tails or infer an offset between camera clocks.
+        for sample in samples.iter() {
+            let absolute =
+                origin
+                    .checked_add(i64::try_from(sample.timestamp.as_micros()).map_err(|_| {
+                        Error::InvalidMedia("gyro chapter timestamp overflow".into())
+                    })?)
+                    .ok_or_else(|| Error::InvalidMedia("gyro chapter timestamp overflow".into()))?;
+            if absolute > previous_end {
+                break;
+            }
+            let relative = absolute
+                .checked_sub(self.camera_origin_micros)
+                .and_then(|value| u64::try_from(value).ok())
+                .map(Duration::from_micros)
+                .ok_or_else(|| {
+                    Error::InvalidMedia("chapter gyro overlap exceeds previous coverage".into())
+                })?;
+            let matched = self
+                .samples
+                .binary_search_by_key(&relative, |sample| sample.timestamp)
+                .ok()
+                .map(|index| &self.samples[index]);
+            if matched.is_none_or(|old| {
+                old.acceleration != sample.acceleration
+                    || old.angular_velocity != sample.angular_velocity
+            }) {
+                return Err(Error::InvalidMedia(
+                    "chapter gyro overlap contains conflicting or differently sampled measurements"
+                        .into(),
+                ));
+            }
+        }
+        if first > previous_end {
+            let mut bridge = *self.samples.last().expect("validated gyro samples");
+            bridge.timestamp = Duration::ZERO;
+            samples.insert(0, bridge);
+        }
+        AttitudeTrack::from_state(
+            samples,
+            options,
+            self.attitude.pose_at(seed_relative)?,
+            self.attitude.heading_at(seed_relative)?,
+            self.attitude.diagnostics().residual_gyro_bias_rad_s,
+        )
     }
 
     pub(super) fn frame_motion(&self, pts_micros: i64) -> Result<FrameMotion> {
@@ -597,6 +729,84 @@ mod tests {
 
     fn yaw_rate() -> f64 {
         f64::from(YAW_COUNTS) * 2_000.0_f64.to_radians() / 32_768.0
+    }
+
+    #[test]
+    fn overlapping_chapter_continues_the_same_camera_clock() {
+        let previous = prepare(&metadata(), &StitchConfig::default(), None).unwrap();
+        let origin = ORIGIN + 300_000;
+        let mut tail: Vec<_> = previous.samples[300..]
+            .iter()
+            .map(|sample| MotionSample {
+                timestamp: sample.timestamp - Duration::from_millis(300),
+                ..*sample
+            })
+            .collect();
+        let continued = previous
+            .continue_attitude(&mut tail, origin, FusionOptions::default())
+            .unwrap();
+        for sample in &tail {
+            let expected = previous
+                .attitude
+                .pose_at(sample.timestamp + Duration::from_millis(300))
+                .unwrap();
+            let actual = continued.pose_at(sample.timestamp).unwrap();
+            for axis in [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] {
+                for (actual, expected) in actual
+                    .rotate_vector(axis)
+                    .into_iter()
+                    .zip(expected.rotate_vector(axis))
+                {
+                    assert!((actual - expected).abs() < 1e-10);
+                }
+            }
+        }
+        tail[1].angular_velocity[0] += 0.1;
+        assert!(previous
+            .continue_attitude(&mut tail, origin, FusionOptions::default())
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting"));
+    }
+
+    #[test]
+    fn adjacent_chapter_bridges_one_sensor_interval_and_rejects_clock_reset() {
+        let previous = prepare(&metadata(), &StitchConfig::default(), None).unwrap();
+        let last = *previous.samples.last().unwrap();
+        let mut tail: Vec<_> = (1..=10)
+            .map(|index| MotionSample {
+                timestamp: Duration::from_millis(index),
+                ..last
+            })
+            .collect();
+        let continued = previous
+            .continue_attitude(&mut tail, ORIGIN + 400_000, FusionOptions::default())
+            .unwrap();
+        assert_eq!(tail[0].timestamp, Duration::ZERO);
+        let before = previous
+            .attitude
+            .heading_at(Duration::from_millis(400))
+            .unwrap();
+        assert!(
+            (continued.heading_at(Duration::from_millis(10)).unwrap() - before - yaw_rate() * 0.01)
+                .abs()
+                < 1e-10
+        );
+        let mut reset = tail.clone();
+        assert!(previous
+            .continue_attitude(&mut reset, 0, FusionOptions::default())
+            .is_err());
+        let mut gap: Vec<_> = tail
+            .into_iter()
+            .skip(1)
+            .map(|sample| MotionSample {
+                timestamp: sample.timestamp + Duration::from_secs(1),
+                ..sample
+            })
+            .collect();
+        assert!(previous
+            .continue_attitude(&mut gap, ORIGIN + 400_000, FusionOptions::default())
+            .is_err());
     }
 
     fn assert_yaw(orientation: Orientation, radians: f64) {

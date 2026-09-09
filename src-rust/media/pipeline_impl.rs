@@ -248,179 +248,21 @@ fn export_frames_attempt(
     Ok(result)
 }
 
+#[path = "audio.rs"]
+mod audio;
+#[path = "sequence_export.rs"]
+mod sequence_export;
+pub(super) use sequence_export::preflight_video;
+
 pub(super) fn export_video(
-    inputs: InputSet,
+    inputs: crate::RecordingSequence,
     config: StitchConfig,
     output: PathBuf,
     options: VideoExportOptions,
     context: ExportContext,
     started: Instant,
 ) -> Result<ExportResult> {
-    let requested = config.backend;
-    run_with_backend_fallback(
-        requested,
-        &context,
-        "video export",
-        |selected, reported_request, fallback| {
-            let mut attempt_config = config.clone();
-            attempt_config.backend = selected;
-            export_video_attempt(
-                inputs.clone(),
-                attempt_config,
-                output.clone(),
-                options.clone(),
-                context.clone(),
-                started,
-                reported_request,
-                fallback,
-            )
-        },
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn export_video_attempt(
-    inputs: InputSet,
-    config: StitchConfig,
-    output: PathBuf,
-    options: VideoExportOptions,
-    context: ExportContext,
-    started: Instant,
-    requested: ProcessingBackend,
-    fallback: Option<GpuFailure>,
-) -> Result<ExportResult> {
-    context.check_cancelled()?;
-    validate_video_export_config(&inputs, &output, &options)?;
-    ffmpeg::init().map_err(|error| media_error("initializing FFmpeg", error))?;
-    let mut stitcher = StitchSession::select(config.backend, requested, fallback, &context)?;
-    context.emit(ExportEvent::BackendSelected(Box::new(
-        stitcher.report.clone(),
-    )));
-
-    let source = read_source(&inputs, &config)?;
-    validate_x5_source(&source)?;
-    let calibration = resolve_calibration(&source.inspection.metadata, &config)?;
-    stitcher.set_color_lut(resolve_color_lut(
-        &source.inspection.metadata,
-        config.color_conversion,
-    )?);
-    if let Some(stabilizer) = &source.stabilizer {
-        context.emit(ExportEvent::StabilizationPrepared(stabilizer.diagnostics()));
-        for warning in stabilizer.warnings() {
-            context.emit(ExportEvent::Warning(warning.clone()));
-        }
-    }
-    let frame_rate = source.inspection.fps.ok_or_else(|| {
-        Error::InvalidMedia("HEVC export requires a known source frame rate".into())
-    })?;
-    if !frame_rate.is_finite() || frame_rate <= 0.0 {
-        return Err(Error::InvalidMedia(
-            "HEVC export source frame rate must be finite and positive".into(),
-        ));
-    }
-    let mut range = VideoRange::new(options.start, options.duration, source.inspection.duration)?;
-    let total = range
-        .effective_duration(source.inspection.duration)
-        .map(|duration| (duration.as_secs_f64() * frame_rate).ceil() as u64);
-    let mut writer = None;
-    let mut frames_written = 0_u64;
-
-    decode_synchronized(
-        &inputs.paths()[0],
-        range.seek_timestamp(),
-        source
-            .inspection
-            .metadata
-            .reverse_video_track_order
-            .unwrap_or(false),
-        &context,
-        |_frame_index, pair| {
-            let output_timestamp = match range.classify(pair.timestamp)? {
-                VideoRangeDecision::Before => return Ok(false),
-                VideoRangeDecision::End => return Ok(true),
-                VideoRangeDecision::Include(timestamp) => timestamp,
-            };
-            let media_time = duration_from_timestamp(pair.timestamp);
-            if frames_written.is_multiple_of(PROGRESS_FRAME_INTERVAL) {
-                emit_video_progress(
-                    &context,
-                    ExportPhase::Decoding,
-                    frames_written,
-                    total,
-                    media_time,
-                    started,
-                );
-            }
-            let projection = video_projection(&config, &options, &pair)?;
-            let motion = stitch_motion(source.stabilizer.as_ref(), pair.timestamp)?;
-            if frames_written.is_multiple_of(PROGRESS_FRAME_INTERVAL) {
-                emit_video_progress(
-                    &context,
-                    ExportPhase::Stitching,
-                    frames_written,
-                    total,
-                    media_time,
-                    started,
-                );
-            }
-            let panorama = stitcher.stitch_video(pair, &calibration, projection, &motion)?;
-            context.check_cancelled()?;
-            let encoder = match writer.as_mut() {
-                Some(writer) => writer,
-                None => {
-                    writer = Some(HevcWriter::new(
-                        &output,
-                        panorama.width(),
-                        panorama.height(),
-                        frame_rate,
-                        options.quality,
-                        HevcEncodingPolicy {
-                            acceleration: options.acceleration,
-                            gpu_stitching: stitcher.report.selected == EffectiveBackend::Gpu,
-                            direct_bt709_yuv: panorama.is_gpu_yuv420(),
-                            converted_rec709: stitcher.color_lut.is_some(),
-                        },
-                    )?);
-                    writer.as_mut().expect("writer inserted above")
-                }
-            };
-            if frames_written.is_multiple_of(PROGRESS_FRAME_INTERVAL) {
-                emit_video_progress(
-                    &context,
-                    ExportPhase::Encoding,
-                    frames_written,
-                    total,
-                    media_time,
-                    started,
-                );
-            }
-            encoder.write_stitched(&panorama, output_timestamp, frames_written)?;
-            stitcher.recycle_video_frame(panorama);
-            frames_written = frames_written
-                .checked_add(1)
-                .ok_or_else(|| Error::InvalidMedia("encoded frame count overflowed".into()))?;
-            Ok(false)
-        },
-    )?;
-
-    let writer = writer.ok_or_else(|| {
-        Error::InvalidMedia("requested video interval contains no decodable frames".into())
-    })?;
-    emit_video_progress(
-        &context,
-        ExportPhase::Finalizing,
-        frames_written,
-        total,
-        None,
-        started,
-    );
-    writer.finish(&context)?;
-    Ok(ExportResult {
-        outputs: vec![output],
-        frames_written,
-        elapsed: started.elapsed(),
-        backend: stitcher.report.clone(),
-    })
+    sequence_export::export_video(inputs, config, output, options, context, started)
 }
 
 fn validate_frame_export_config(inputs: &InputSet, options: &ImageExportOptions) -> Result<()> {
@@ -453,11 +295,6 @@ fn validate_video_export_config(
     if inputs.paths().len() != 1 {
         return Err(Error::MissingCapability(
             "media export currently supports X5 single-file dual-track recordings only".into(),
-        ));
-    }
-    if options.audio == AudioPolicy::Copy {
-        return Err(Error::MissingCapability(
-            "audio stream copy is not implemented; select AudioPolicy::Drop".into(),
         ));
     }
     if !(1..=100).contains(&options.quality) {
@@ -559,6 +396,7 @@ impl VideoRange {
         })
     }
 
+    #[cfg(test)]
     fn seek_timestamp(&self) -> Option<i64> {
         (self.start_timestamp > 0).then_some(self.start_timestamp)
     }
@@ -1622,6 +1460,10 @@ struct HevcWriter {
     is_x265: bool,
     frames_submitted: u64,
     flushing: bool,
+    audio_layout: Option<audio::AudioLayout>,
+    audio_indices: Vec<usize>,
+    audio_last_dts: Vec<Option<i64>>,
+    encoder_report: super::EncoderReport,
 }
 
 #[derive(Clone, Copy)]
@@ -1633,6 +1475,7 @@ struct HevcEncodingPolicy {
 }
 
 impl HevcWriter {
+    #[cfg(test)]
     fn new(
         final_path: &Path,
         width: u32,
@@ -1640,6 +1483,19 @@ impl HevcWriter {
         frame_rate: f64,
         quality: u8,
         policy: HevcEncodingPolicy,
+    ) -> Result<Self> {
+        Self::new_with_audio(final_path, width, height, frame_rate, quality, policy, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_audio(
+        final_path: &Path,
+        width: u32,
+        height: u32,
+        frame_rate: f64,
+        quality: u8,
+        policy: HevcEncodingPolicy,
+        audio_layout: Option<audio::AudioLayout>,
     ) -> Result<Self> {
         let candidates = hevc_encoder_candidates(policy.acceleration, policy.gpu_stitching);
         if candidates.is_empty() {
@@ -1712,6 +1568,11 @@ impl HevcWriter {
             stream.set_parameters(&encoder);
             stream_index
         };
+        let audio_indices = audio_layout
+            .as_ref()
+            .map(|layout| layout.add_output_streams(&mut output))
+            .transpose()?
+            .unwrap_or_default();
         output
             .write_header()
             .map_err(|error| media_error("writing the MP4 header", error))?;
@@ -1735,6 +1596,14 @@ impl HevcWriter {
             is_x265: codec.name() == "libx265",
             frames_submitted: 0,
             flushing: false,
+            audio_last_dts: vec![None; audio_indices.len()],
+            encoder_report: super::EncoderReport {
+                name: codec.name().to_owned(),
+                hardware: !matches!(codec.name(), "libx265" | "libkvazaar"),
+                audio_tracks: audio_indices.len(),
+            },
+            audio_layout,
+            audio_indices,
         })
     }
 
@@ -1877,6 +1746,55 @@ fn try_in_order<C, T, E>(
 }
 
 impl HevcWriter {
+    fn write_audio(
+        &mut self,
+        chapter_index: usize,
+        mut packet: ffmpeg::Packet,
+        origin_micros: i64,
+        end_micros: i64,
+    ) -> Result<()> {
+        let Some(layout) = &self.audio_layout else {
+            return Ok(());
+        };
+        let chapter = layout.chapters.get(chapter_index).ok_or_else(|| {
+            Error::InvalidMedia("audio packet refers to an unknown chapter".into())
+        })?;
+        let track_index = chapter
+            .tracks
+            .iter()
+            .position(|track| track.source_index == packet.stream())
+            .ok_or_else(|| Error::InvalidMedia("audio packet refers to an unknown track".into()))?;
+        let output_index = self.audio_indices[track_index];
+        let output = self
+            .output
+            .as_mut()
+            .expect("writer remains open until finalization");
+        let time_base = output
+            .stream(output_index)
+            .expect("created audio stream")
+            .time_base();
+        if !audio::prepare_packet(
+            chapter,
+            &mut packet,
+            time_base,
+            output_index,
+            origin_micros,
+            end_micros,
+        )? {
+            return Ok(());
+        }
+        let dts = packet.dts().expect("validated audio DTS");
+        if self.audio_last_dts[track_index].is_some_and(|previous| previous >= dts) {
+            return Err(Error::InvalidMedia(
+                "audio timestamps overlap or move backwards across chapters".into(),
+            ));
+        }
+        self.audio_last_dts[track_index] = Some(dts);
+        packet
+            .write_interleaved(output)
+            .map_err(|error| media_error("muxing original audio", error))
+    }
+
     fn write(
         &mut self,
         panorama: &PanoramaFrame,
@@ -2048,6 +1966,20 @@ impl HevcWriter {
             .expect("output remains open until finish")
             .write_trailer()
             .map_err(|error| media_error("writing the MP4 trailer", error))?;
+        // SAFETY: the muxer owns this writable AVIOContext. Destruction cannot
+        // report a buffered write failure, so flush and check it before publish.
+        unsafe {
+            let io = (*self.output.as_mut().expect("open output").as_mut_ptr()).pb;
+            if !io.is_null() {
+                ffmpeg::ffi::avio_flush(io);
+                if (*io).error < 0 {
+                    return Err(media_error(
+                        "flushing the MP4 output",
+                        ffmpeg::Error::from((*io).error),
+                    ));
+                }
+            }
+        }
         drop(self.output.take());
         context.check_cancelled()?;
         publish_output(self.temporary, &self.final_path)?;

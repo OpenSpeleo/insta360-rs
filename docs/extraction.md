@@ -95,8 +95,53 @@ print(report.manifest_path)
 A single CLI/Python input discovers its conventional `_00_`/`_10_` sibling. Rust
 callers use `InputSet::discover` for discovery or `InputSet::new` for an
 explicit set. Each file has its own output directory. Optional proxies and
-continuation segments are separate inputs; extraction does not recursively
-search unrelated captures.
+continuation segments are separate inputs to `extract`; that API does not
+recursively search unrelated captures. Use a verified `RecordingSequence` and
+`extract_sequence` for camera-split recordings.
+
+### Controlled and sequence extraction
+
+`extract_controlled(inputs, target, cancelled, callback)` retains the ordinary
+output structure while adding cooperative cancellation through an `AtomicBool`
+and throttled `ExtractionProgress` callbacks. Container copying checks between
+64 KiB buffers and packet archiving checks between packets. Progress counts
+original container and encoded packet bytes actually copied, with an estimated
+total because preserved metadata can appear in several artifacts. Phase changes
+and successful publication are always reported; intermediate events are limited
+to one every 100 ms. `completed` becomes true only after publication.
+
+`extract_sequence(sequence, target, cancelled, callback)` requires a complete
+recording. It archives every original file under `parts/0001/input-00`,
+`parts/0002/input-00`, and so on. These directories retain all container bytes,
+ExtraInfo records, raw encoded packets, packet indexes, codec configuration, and
+stream metadata described below. They do not include redundant playable copies.
+Compatible video/audio streams instead get one continuous playable file at the
+root. Declared lens ordering yields `camera_A.mp4` and `camera_B.mp4`; unknown
+lens ordering uses neutral `video_001` names. Audio copies use `audio_001.m4a`
+or a compatible Matroska extension.
+
+The sequence manifest uses schema version 2 and records every chapter's source,
+timeline start, preserved component paths, and continuous stream mapping. All
+raw packet PTS/DTS values remain unchanged. Continuous files use one video-based
+time origin shared with audio per input, then add the chapter's timeline start
+using rational timestamp rescaling. Repeated audio priming before subsequent
+chapters and audio packets beginning beyond the chapter's video duration are
+omitted from playable copies and counted in the manifest; the complete packets
+remain in the raw archive. No packet is decoded or re-encoded. Boundary trimming
+is packet-granular, so the last retained audio packet may extend beyond the
+video boundary by less than one packet duration.
+
+Codec-configuration changes, missing timestamps/streams, and non-increasing
+decode timestamps make that continuous copy unavailable. Extraction records a
+warning and preserves all per-chapter original artifacts. A compatible copy
+never silently changes codecs to force a join. Camera-split discovery and exact
+frame pairing have their own validation contracts; convenience remuxing is not
+evidence of physical camera synchronization.
+
+Sequence copying writes the archive and continuous file during the same demux
+pass, using bounded muxer fragments and no decoded frames. Cancellation removes
+the entire job-owned staging directory, including incomplete continuous files,
+while leaving the sources and any pre-existing empty destination intact.
 
 The destination must be absent or an empty directory. Symlink destinations and
 nonempty directories are rejected. Extraction runs in an owned sibling staging
@@ -172,3 +217,16 @@ packet boundaries and payload bytes with both raw artifacts and playable copies.
 Direct-reader tests cover independent cursors, decoder draining, seeking, and
 frame access without output files. No camera-specific rendering result is needed
 to qualify encoded stream copying.
+
+### Continuous stream timestamp preservation
+
+Continuous MP4 copies delay their initial movie header until the first fragment
+so the muxer can represent edit lists for AAC priming and reordered video.
+Automatic negative timestamp rebasing is disabled: independent camera and audio
+files retain the same source origin instead of receiving different shifts.
+Fragmentation still bounds sample-table memory. Regression tests compare native
+packet PTS/DTS and encoded payloads on both sides of a chapter boundary.
+
+Camera A/B names require an explicit recorded lens order and exactly two video
+tracks, or the declared two-file lens layout with one video track per file.
+Additional proxy tracks retain neutral stream names; all tracks are archived.

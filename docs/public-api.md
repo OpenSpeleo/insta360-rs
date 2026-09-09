@@ -69,6 +69,15 @@ omitted: start defaults to zero and an omitted duration runs to end of source.
 The decoder seeks to an earlier keyframe when necessary, discards pre-roll, and
 rebases the first encoded frame to timestamp zero.
 
+`Exporter::from_sequence` stitches a complete `RecordingSequence` through one
+renderer and MP4 writer. `preflight_video` validates the implemented options for
+every chapter without writing files. `ExportEvent::EncoderSelected` reports the
+opened encoder and copied audio count. `AudioPolicy::Copy` preserves compatible
+AAC/ALAC packet payloads on the shared video timeline, with complete-packet
+cuts; `Drop` omits audio. See [sequence stitching](sequence-stitching.md) for
+preflight, chapter motion continuity, clipping, unsupported layouts and
+qualification.
+
 GPU export consumes retained decoded YUV420P planes directly when possible and
 can return encoder-ready YUV420P after GPU stitching. Other decoded layouts use
 CPU RGB conversion before upload. Both image RGB and video YUV results are read

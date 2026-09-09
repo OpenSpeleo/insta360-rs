@@ -61,7 +61,7 @@ rejected.
 | -------------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
 | `config`       | `None`                   | Equivalent to default `StitchConfig`.                                                             |
 | `quality`      | `90`                     | Integer 1–100; mapped to the selected encoder's quality control.                                  |
-| `audio`        | `AudioPolicy.COPY`       | Currently unsupported for stitched video; select `DROP` explicitly.                               |
+| `audio`        | `AudioPolicy.COPY`       | Copy compatible original AAC/ALAC packets with complete-packet cuts; `DROP` omits audio.          |
 | `start`        | `None`                   | Start in finite nonnegative seconds; omitted means the beginning.                                 |
 | `duration`     | `None`                   | Finite positive seconds; omitted means the remaining recording. The interval is half-open.        |
 | `acceleration` | `MediaAcceleration.AUTO` | Encoder candidate policy, independent of the stitch backend. Decoding currently remains software. |

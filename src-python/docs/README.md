@@ -57,9 +57,9 @@ The default optical policy selects only an unambiguous recorded profile. Set
 `optical_setup` explicitly for an accessory or water profile; Python does not
 substitute generic calibration. Disabling stabilization in this example removes
 the requirement for gyro data, which the default direction-lock mode needs. For
-stitched video, explicitly use `audio=AudioPolicy.DROP`: the default `COPY`
-policy currently raises `MissingCapabilityError` because stitched audio remux is
-not implemented. Direct packet access and extraction preserve audio.
+stitched video, `audio=AudioPolicy.COPY` preserves compatible AAC/ALAC packets
+and their timing relative to video; cuts keep complete packets. Select `DROP` to
+omit audio. Direct packet access and extraction also preserve audio.
 
 See the [guide](guide.md) for underwater presets, backend selection,
 cancellation, color conversion, and the distinction between reading and

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use super::ComponentExtraction;
+use super::{ComponentExtraction, ProgressTracker};
 use crate::error::io_error;
 use crate::{Error, Result};
 
@@ -46,9 +46,28 @@ struct Extractor<'a> {
     file_size: u64,
     files: Vec<PathBuf>,
     warnings: Vec<String>,
+    control: &'a mut dyn FnMut(usize) -> Result<()>,
 }
 
+#[cfg(test)]
 pub(super) fn extract_container(input: &Path, output_dir: &Path) -> Result<ComponentExtraction> {
+    extract_container_impl(input, output_dir, &mut |_| Ok(()))
+}
+
+pub(super) fn extract_container_controlled(
+    input: &Path,
+    output_dir: &Path,
+    progress: &mut ProgressTracker<'_>,
+) -> Result<ComponentExtraction> {
+    extract_container_impl(input, output_dir, &mut |bytes| progress.copied(bytes))
+}
+
+fn extract_container_impl(
+    input: &Path,
+    output_dir: &Path,
+    control: &mut dyn FnMut(usize) -> Result<()>,
+) -> Result<ComponentExtraction> {
+    control(0)?;
     let file = File::open(input).map_err(|error| io_error(input, error))?;
     let file_size = file
         .metadata()
@@ -61,6 +80,7 @@ pub(super) fn extract_container(input: &Path, output_dir: &Path) -> Result<Compo
         file_size,
         files: Vec::new(),
         warnings: Vec::new(),
+        control,
     };
     let mut tail = extractor.detect_tail()?;
     let media_end = tail.as_ref().map_or(file_size, |tail| tail.media_end);
@@ -144,6 +164,7 @@ pub(super) fn extract_container(input: &Path, output_dir: &Path) -> Result<Compo
 
 impl Extractor<'_> {
     fn read(&mut self, offset: u64, size: usize) -> Result<Vec<u8>> {
+        (self.control)(0)?;
         if offset > self.file_size || size as u64 > self.file_size - offset {
             return Err(invalid("read exceeds the input file"));
         }
@@ -180,6 +201,7 @@ impl Extractor<'_> {
         let mut remaining = size;
         let mut buffer = [0; COPY_BUFFER_SIZE];
         while remaining > 0 {
+            (self.control)(0)?;
             let count = remaining.min(buffer.len() as u64) as usize;
             self.file
                 .read_exact(&mut buffer[..count])
@@ -187,6 +209,7 @@ impl Extractor<'_> {
             destination
                 .write_all(&buffer[..count])
                 .map_err(|error| io_error(self.output.join(relative), error))?;
+            (self.control)(count)?;
             remaining -= count as u64;
         }
         self.files.push(relative.to_path_buf());
@@ -194,15 +217,18 @@ impl Extractor<'_> {
     }
 
     fn write_bytes(&mut self, relative: &Path, bytes: &[u8]) -> Result<()> {
+        (self.control)(0)?;
         let mut destination = self.destination(relative)?;
         destination
             .write_all(bytes)
             .map_err(|error| io_error(self.output.join(relative), error))?;
+        (self.control)(bytes.len())?;
         self.files.push(relative.to_path_buf());
         Ok(())
     }
 
     fn write_json(&mut self, relative: &Path, value: &Value) -> Result<()> {
+        (self.control)(0)?;
         let mut destination = self.destination(relative)?;
         serde_json::to_writer_pretty(&mut destination, value).map_err(|error| {
             Error::Media(format!(

@@ -166,6 +166,17 @@ capture time from its own projected source position. The table resolves angular
 winding before shortest-arc interpolation and supports the same representation
 on CPU and GPU.
 
+## Recording chapter continuity
+
+Sequence video export continues the existing world pose and unwrapped heading on
+the recorded camera clock. It validates repeated sensor measurements at
+overlapping chapter tails and rejects clock resets or coverage gaps. Gravity
+initialization and Direction Lock are retained across the recording; a trim
+starting in a later chapter prepares the preceding motion first. Only adjacent
+chapters' bounded telemetry is retained during preparation. See
+[sequence stitching](sequence-stitching.md) for the processing and audio
+contract.
+
 ## Recorded factory calibration
 
 The observed tag-31 `gyro_calib` payload has six little-endian `f64` values

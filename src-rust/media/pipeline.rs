@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::{
-    ExportResult, FrameSelection, ImageExportOptions, InputSet, Result, StitchConfig,
-    VideoExportOptions,
+    ExportResult, FrameSelection, ImageExportOptions, InputSet, RecordingSequence, Result,
+    StitchConfig, VideoExportOptions,
 };
 
 use super::{ExportContext, ExportEvent, ExportPhase, ExportProgress};
@@ -32,7 +32,7 @@ pub(super) fn export_frames(
 }
 
 pub(super) fn export_video(
-    inputs: InputSet,
+    inputs: RecordingSequence,
     config: StitchConfig,
     output: PathBuf,
     options: VideoExportOptions,

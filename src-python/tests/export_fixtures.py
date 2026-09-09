@@ -35,6 +35,8 @@ def calibrated_metadata(*, camera="Insta360 X5", calibration=True, underwater=Fa
     metadata += protobuf_bytes(2, camera.encode())
     metadata += protobuf_bytes(3, b"v1.2.3")
     metadata += varint(20 << 3) + varint(10)
+    metadata += varint(80 << 3) + varint(2)  # Track zero is camera A / stream 00.
+    metadata += varint(131 << 3) + varint(3)  # Single file with two video tracks.
     metadata += varint(62 << 3) + varint(1)  # X5 compact raw IMU.
     metadata += varint(24 << 3) + varint(1_000_000)  # First camera exposure, us.
     metadata += varint(64 << 3) + varint(2)  # Exposure-to-video mapping.

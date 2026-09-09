@@ -417,8 +417,36 @@ pub struct UnknownMetadataField {
 }
 
 /// Metadata required by calibration and motion processing.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct RecordingGroup {
+    /// Raw capture subtype, independent of physical lens organization.
+    pub capture_type: u32,
+    /// Zero-based chapter position used by the camera group assembler.
+    pub index: u32,
+    /// Camera-provided recording identity; empty means unavailable.
+    pub identity: String,
+    /// Declared member count; zero means not declared.
+    pub total: u32,
+}
+
+/// Temporal splitting flag, distinct from panorama lens/file organization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum FileSplitType {
+    Unknown,
+    NotSplit,
+    Split,
+    Other(u32),
+}
+
+/// Metadata required by calibration and motion processing.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct InsvMetadata {
+    /// Recording identity and chapter position from protobuf field 26.
+    pub recording_group: Option<RecordingGroup>,
+    /// Temporal split declaration from protobuf field 88.
+    pub file_split_type: Option<FileSplitType>,
+    /// Group or split declarations were malformed or contradictory.
+    pub sequence_metadata_invalid: bool,
     /// Camera serial number.
     pub serial: Option<String>,
     /// Camera model string written by the firmware.
@@ -1661,6 +1689,13 @@ pub(crate) fn parse_metadata(data: &[u8]) -> Result<InsvMetadata> {
         recorded_color_mode: recorded_color_mode.ok().flatten(),
         ..InsvMetadata::default()
     };
+    match parse_sequence_metadata(&fields) {
+        Ok((group, split)) => {
+            metadata.recording_group = group;
+            metadata.file_split_type = split;
+        }
+        Err(()) => metadata.sequence_metadata_invalid = true,
+    }
     for field in &fields {
         let handled = match (field.number, &field.value) {
             (1, ProtobufValue::Bytes(value)) => {
@@ -1827,6 +1862,72 @@ pub(crate) fn parse_metadata(data: &[u8]) -> Result<InsvMetadata> {
     deduplicate_offsets(&mut metadata.offsets);
     deduplicate_profiles(&mut metadata.profiles);
     Ok(metadata)
+}
+
+fn parse_sequence_metadata(
+    fields: &[ProtobufField<'_>],
+) -> std::result::Result<(Option<RecordingGroup>, Option<FileSplitType>), ()> {
+    let mut group = None;
+    let mut split = None;
+    for field in fields {
+        match (field.number, &field.value) {
+            (26, ProtobufValue::Bytes(bytes)) => {
+                let nested = protobuf_fields(bytes).map_err(|_| ())?;
+                let mut parsed = RecordingGroup::default();
+                let mut seen = std::collections::BTreeMap::new();
+                for child in &nested {
+                    if !(1..=4).contains(&child.number) {
+                        continue;
+                    }
+                    let retained = retain_unknown_field(child);
+                    if seen
+                        .insert(child.number, retained.clone())
+                        .is_some_and(|old| old != retained)
+                    {
+                        return Err(());
+                    }
+                    match (child.number, &child.value) {
+                        (1, ProtobufValue::Varint(value)) => {
+                            parsed.capture_type = u32::try_from(*value).map_err(|_| ())?
+                        }
+                        (2, ProtobufValue::Varint(value)) => {
+                            parsed.index = u32::try_from(*value).map_err(|_| ())?
+                        }
+                        (3, ProtobufValue::Bytes(value)) => {
+                            if value.len() > 4096 {
+                                return Err(());
+                            }
+                            parsed.identity =
+                                std::str::from_utf8(value).map_err(|_| ())?.to_owned();
+                        }
+                        (4, ProtobufValue::Varint(value)) => {
+                            parsed.total = u32::try_from(*value).map_err(|_| ())?
+                        }
+                        _ => return Err(()),
+                    }
+                }
+                if group.as_ref().is_some_and(|old| old != &parsed) {
+                    return Err(());
+                }
+                group = Some(parsed);
+            }
+            (88, ProtobufValue::Varint(value)) => {
+                let parsed = match u32::try_from(*value).map_err(|_| ())? {
+                    0 => FileSplitType::Unknown,
+                    1 => FileSplitType::NotSplit,
+                    2 => FileSplitType::Split,
+                    value => FileSplitType::Other(value),
+                };
+                if split.is_some_and(|old| old != parsed) {
+                    return Err(());
+                }
+                split = Some(parsed);
+            }
+            (26 | 88, _) => return Err(()),
+            _ => {}
+        }
+    }
+    Ok((group, split))
 }
 
 fn parse_gamma_mode(fields: &[ProtobufField<'_>]) -> Option<String> {

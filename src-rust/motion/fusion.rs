@@ -147,6 +147,54 @@ impl AttitudeTrack {
         let options = options.validate()?;
         validate_samples(samples, options)?;
         let (initial, initialization) = initialize(samples, options)?;
+        Self::integrate(samples, options, initial, 0.0, [0.0; 3], initialization)
+    }
+
+    /// Continues the same world frame at a verified chapter boundary. The media
+    /// adapter supplies the preceding pose on a common camera clock; gravity is
+    /// already initialized and must not be reset to a new heading.
+    #[cfg(any(feature = "media", test))]
+    pub(crate) fn from_state(
+        samples: &[MotionSample],
+        options: FusionOptions,
+        orientation: Orientation,
+        heading: f64,
+        bias: [f64; 3],
+    ) -> Result<Self> {
+        let options = options.validate()?;
+        validate_samples(samples, options)?;
+        if options.estimate_stationary_bias {
+            return Err(invalid(
+                "chapter continuation does not support stationary bias estimation",
+            ));
+        }
+        if !heading.is_finite() || bias.iter().any(|value| !value.is_finite()) {
+            return Err(invalid("invalid fusion continuation state"));
+        }
+        Self::integrate(
+            samples,
+            options,
+            orientation.validate()?,
+            heading,
+            bias,
+            InitialGravityWindow {
+                reference: UP,
+                sum: UP,
+                start: samples[0].timestamp,
+                end: samples[0].timestamp,
+                samples: 0,
+            },
+        )
+    }
+
+    fn integrate(
+        samples: &[MotionSample],
+        options: FusionOptions,
+        initial: Orientation,
+        initial_heading: f64,
+        initial_bias: [f64; 3],
+        initialization: InitialGravityWindow,
+    ) -> Result<Self> {
         let pose_count = samples.windows(2).try_fold(1usize, |count, pair| {
             let next = count
                 .checked_add(substep_count(pair, options))
@@ -165,7 +213,7 @@ impl AttitudeTrack {
         poses.push(Pose {
             time: samples[0].timestamp,
             orientation: initial,
-            heading: 0.0,
+            heading: initial_heading,
         });
         let mut diagnostics = FusionDiagnostics {
             initialization_samples: initialization.samples,
@@ -175,8 +223,8 @@ impl AttitudeTrack {
             ..FusionDiagnostics::default()
         };
         let mut current = initial;
-        let mut heading = 0.0;
-        let mut bias = [0.0; 3];
+        let mut heading = initial_heading;
+        let mut bias = initial_bias;
         let mut stationary = StationaryWindow::default();
         for (index, pair) in samples.windows(2).enumerate() {
             let interval = pair[1].timestamp - pair[0].timestamp;
@@ -601,6 +649,48 @@ mod tests {
         (0..=seconds * 100)
             .map(|i| sample(i as f64 * 0.01, accel, omega))
             .collect()
+    }
+
+    #[test]
+    fn continuation_preserves_world_pose_and_unwrapped_heading() {
+        let samples = constant_samples(UP, [0.0, 0.0, 2.0], 5);
+        let options = FusionOptions::default();
+        let full = AttitudeTrack::new(&samples, options).unwrap();
+        let boundary = samples[350].timestamp;
+        let tail: Vec<_> = samples[350..]
+            .iter()
+            .map(|sample| MotionSample {
+                timestamp: sample.timestamp - boundary,
+                ..*sample
+            })
+            .collect();
+        let continued = AttitudeTrack::from_state(
+            &tail,
+            options,
+            full.pose_at(boundary).unwrap(),
+            full.heading_at(boundary).unwrap(),
+            full.diagnostics().residual_gyro_bias_rad_s,
+        )
+        .unwrap();
+        assert!(continued.heading_at(Duration::ZERO).unwrap() > std::f64::consts::TAU);
+        for sample in &tail {
+            let expected = full.pose_at(sample.timestamp + boundary).unwrap();
+            let actual = continued.pose_at(sample.timestamp).unwrap();
+            for axis in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], UP] {
+                assert_vector(
+                    actual.rotate_vector(axis),
+                    expected.rotate_vector(axis),
+                    1e-10,
+                );
+            }
+            assert!(
+                (continued.heading_at(sample.timestamp).unwrap()
+                    - full.heading_at(sample.timestamp + boundary).unwrap())
+                .abs()
+                    < 1e-10
+            );
+        }
+        assert_eq!(continued.diagnostics().initialization_samples, 0);
     }
 
     #[test]

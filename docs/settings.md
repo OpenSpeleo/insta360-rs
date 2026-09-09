@@ -42,9 +42,10 @@ Keep the normal path small:
 - **Video quality/audio**: quality 1–100. `libx265` maps this to CRF; bitrate-
   driven encoders use a nonlinear quality curve that preserves the high end for
   photogrammetry and scales sublinearly with resolution (quality 85 targets
-  about 36 Mb/s at 1920×960 and 140 Mb/s at 5760×2880, 29.97 fps). Version 0.1
-  exports video with `Drop`; selecting `Copy` returns an explicit error until
-  synchronized audio remuxing is implemented.
+  about 36 Mb/s at 1920×960 and 140 Mb/s at 5760×2880, 29.97 fps). `Drop` omits
+  audio; `Copy` preserves compatible AAC/ALAC packets and A/V timing without
+  re-encoding. Cuts keep complete packets; a silent source stays silent. See
+  [sequence stitching](sequence-stitching.md) for boundary rules.
 
 Seam mode remains fixed in 0.1. The X5 fixed mode automatically uses calibrated
 optical validity, a sharp high-frequency seam, and adaptive low-frequency color
@@ -66,7 +67,7 @@ media codec     auto
 video quality   85 or higher
 projection      5760 × 2880 when source detail supports it
 still output    PNG for highest radiometric consistency, JPEG 95 when storage matters
-audio           drop (the only implemented video policy in 0.1)
+audio           drop for still-oriented processing; copy to retain original audio
 AI/restoration  disabled
 ```
 

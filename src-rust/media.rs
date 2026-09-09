@@ -10,8 +10,8 @@ use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BackendReport, ExportResult, FrameSelection, GpuAdapterInfo, ImageExportOptions, InputSet,
-    Result, StitchConfig, VideoExportOptions,
+    BackendReport, EquirectangularProjection, ExportResult, FrameSelection, GpuAdapterInfo,
+    ImageExportOptions, InputSet, RecordingSequence, Result, StitchConfig, VideoExportOptions,
 };
 
 #[cfg(feature = "cli")]
@@ -47,9 +47,31 @@ pub enum ExportEvent {
     /// Emitted when a renderer is prepared and pinned for an export attempt.
     /// `Auto` may emit it again after restarting a failed GPU attempt on CPU.
     BackendSelected(Box<BackendReport>),
+    /// The encoder successfully opened for this attempt (not merely compiled in).
+    EncoderSelected(EncoderReport),
     /// Describes the established motion profile and timing strategy for this attempt.
     StabilizationPrepared(String),
     Warning(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncoderReport {
+    pub name: String,
+    pub hardware: bool,
+    pub audio_tracks: usize,
+}
+
+/// Validated source and output properties for an export panel. Encoder names
+/// are candidates; `EncoderSelected` reports the one that actually opens.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VideoPreflight {
+    pub projection: EquirectangularProjection,
+    pub duration: Duration,
+    pub frame_rate: f64,
+    pub chapter_count: usize,
+    pub audio_tracks: usize,
+    pub encoder_candidates: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +135,7 @@ impl MediaCapabilities {
 #[derive(Clone, Debug)]
 pub struct Exporter {
     inputs: InputSet,
+    sequence: Option<RecordingSequence>,
     config: StitchConfig,
 }
 
@@ -121,7 +144,36 @@ impl Exporter {
         if let Some(projection) = config.projection {
             projection.validate()?;
         }
-        Ok(Self { inputs, config })
+        Ok(Self {
+            inputs,
+            sequence: None,
+            config,
+        })
+    }
+
+    /// Configures one output across ordered, validated recording chapters.
+    pub fn from_sequence(sequence: RecordingSequence, config: StitchConfig) -> Result<Self> {
+        sequence.require_complete()?;
+        let inputs = sequence
+            .chapters
+            .first()
+            .ok_or_else(|| crate::Error::InvalidMedia("recording sequence is empty".into()))?
+            .inputs
+            .clone();
+        let mut exporter = Self::new(inputs, config)?;
+        exporter.sequence = Some(sequence);
+        Ok(exporter)
+    }
+
+    /// Resolves camera/calibration/timing and every implemented video option
+    /// without writing output. Call off the application's UI thread.
+    pub fn preflight_video(&self, options: &VideoExportOptions) -> Result<VideoPreflight> {
+        let sequence = self
+            .sequence
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| RecordingSequence::single(self.inputs.clone()))?;
+        pipeline_impl::preflight_video(&sequence, &self.config, options)
     }
 
     pub fn export_frames(
@@ -133,7 +185,14 @@ impl Exporter {
         let inputs = self.inputs.clone();
         let config = self.config.clone();
         let output_dir = output_dir.as_ref().to_path_buf();
+        let multiple_chapters = self
+            .sequence
+            .as_ref()
+            .is_some_and(|sequence| sequence.chapters.len() > 1);
         spawn_export(move |context| {
+            if multiple_chapters {
+                return Err(crate::Error::MissingCapability("stitched still export currently accepts one chapter; use paired stream access for sequence fisheye images".into()));
+            }
             pipeline::export_frames(inputs, config, output_dir, selection, options, context)
         })
     }
@@ -142,8 +201,12 @@ impl Exporter {
         let inputs = self.inputs.clone();
         let config = self.config.clone();
         let output = output.as_ref().to_path_buf();
+        let sequence = self.sequence.clone();
         spawn_export(move |context| {
-            pipeline::export_video(inputs, config, output, options, context)
+            let sequence = sequence
+                .map(Ok)
+                .unwrap_or_else(|| RecordingSequence::single(inputs))?;
+            pipeline::export_video(sequence, config, output, options, context)
         })
     }
 }

@@ -599,19 +599,28 @@ class VideoExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
                     )
                     packets = description["packets"]
                     self.assertEqual(len(packets), count)
+                    previous_dts = None
                     for index, packet in enumerate(packets):
-                        self.assertEqual(int(packet["pts"]), int(packet["dts"]))
                         self.assertAlmostEqual(float(packet["pts_time"]), index / 10)
-                        self.assertAlmostEqual(float(packet["dts_time"]), index / 10)
+                        # Kvazaar can retain a valid negative decode delay even
+                        # for two-frame clips. x265's historical uninitialized
+                        # DTS is far outside this bounded, monotonic interval.
+                        dts = float(packet["dts_time"])
+                        self.assertGreaterEqual(dts, -0.2)
+                        self.assertLessEqual(dts, float(packet["pts_time"]))
+                        if previous_dts is not None:
+                            self.assertAlmostEqual(dts - previous_dts, 0.1)
+                        previous_dts = dts
                         self.assertAlmostEqual(float(packet["duration_time"]), 0.1)
 
-    def test_audio_copy_explicitly_reports_missing_capability(self):
-        for options in ({}, {"audio": api.AudioPolicy.COPY}):
-            with self.assertRaisesRegex(api.MissingCapabilityError, "audio.*copy"):
-                api.export_video(
-                    self.source, self.root / "video.mp4", config=cpu_config(), **options
-                )
-        self.assertEqual(list(self.root.iterdir()), [])
+    def test_audio_copy_and_default_export_succeed(self):
+        for index, options in enumerate(({}, {"audio": api.AudioPolicy.COPY})):
+            output = self.root / f"video-{index}.mp4"
+            result = api.export_video(
+                self.source, output, config=cpu_config(), **options
+            )
+            self.assertGreater(result.frames_written, 0)
+            self.assertTrue(output.is_file())
 
     def test_existing_video_is_never_overwritten(self):
         output = self.root / "video.mp4"
