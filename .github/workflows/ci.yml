@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/wheel
           key: ffmpeg-linux-${{ hashFiles('scripts/ci/build-ffmpeg.sh', 'scripts/ci/build-wheel.sh', 'scripts/ci/ffmpeg-runtime-config.sh', 'rust-toolchain.toml') }}
@@ -48,7 +48,7 @@ jobs:
       - uses: ./.github/actions/setup-linux
         with:
           cache-key: prek
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/prek
           key: prek-linux-${{ hashFiles('.pre-commit-config.yaml', 'src-python/.pre-commit-config.yaml') }}
@@ -128,7 +128,7 @@ jobs:
         with:
           key: wheel-${{ hashFiles('scripts/ci/*.sh') }}
           workspaces: . -> target/wheel-build
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/wheel
           key: wheel-tools-${{ hashFiles('scripts/ci/*.sh', 'rust-toolchain.toml', '**/Cargo.lock') }}
@@ -195,7 +195,7 @@ jobs:
         with:
           key: wheel-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh') }}
           workspaces: . -> target/wheel-native
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/wheel-native
           key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh', '.github/actions/setup-native-wheel/action.yml') }}
