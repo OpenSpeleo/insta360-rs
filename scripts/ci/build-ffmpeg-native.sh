@@ -72,8 +72,16 @@ fi
 "$INSTA360_CMAKE" --install "$build_dir/x265-build"
 
 if [[ $wheel_platform == windows ]]; then
-    # FFmpeg translates pkg-config's -lx265 to x265.lib with the MSVC linker.
+    # FFmpeg's MSVC flag filter maps -lz to zlib.lib and -lx265 to x265.lib.
+    # The source builds install these import libraries under different names.
+    cp "$prefix/lib/z.lib" "$prefix/lib/zlib.lib"
     cp "$prefix/lib/libx265.lib" "$prefix/lib/x265.lib"
+    # MSVC uses Windows paths; retain the developer prompt's SDK directories.
+    INCLUDE="$(cygpath -w "$prefix/include")${INCLUDE:+;$INCLUDE}"
+    LIB="$(cygpath -w "$prefix/lib")${LIB:+;$LIB}"
+    export INCLUDE LIB
+    # Configure also executes probes linked to the freshly built DLLs.
+    export PATH="$prefix/bin:$PATH"
 fi
 
 if [[ $wheel_platform == macos ]]; then
@@ -85,7 +93,13 @@ else
     ffmpeg_options+=(--toolchain=msvc --arch=x86_64 --target-os=win32)
 fi
 cd "$build_dir/ffmpeg-$ffmpeg_version"
-./configure "${ffmpeg_options[@]}"
+if ./configure "${ffmpeg_options[@]}"; then
+    :
+else
+    configure_status=$?
+    cat ffbuild/config.log >&2 || true
+    exit "$configure_status"
+fi
 make -j "$INSTA360_WHEEL_JOBS"
 make install
 
