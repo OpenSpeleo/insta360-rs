@@ -171,9 +171,13 @@ run. Caches are disposable; delete the affected cache when investigating stale
 state.
 
 GitHub Actions are pinned by commit and updated by Dependabot, alongside the
-shared Cargo dependency graph. Run `prek autoupdate` to update hooks, review the
-revisions, and rerun all checks. Keep binstall tool versions aligned when
-upgrading them. Compiler upgrades belong only in `rust-toolchain.toml`.
+shared Cargo dependency graph and Python dependencies in
+`src-python/pyproject.toml` and `scripts/ci/requirements-wheel.txt`. Actions
+monitoring includes local composite action directories. All three ecosystems are
+checked weekly. CMake stays below 4 until x265 supports its removed policies.
+Run `prek autoupdate` to update hooks, review the revisions, and rerun all
+checks. Keep binstall tool versions aligned when upgrading them. Compiler
+upgrades belong only in `rust-toolchain.toml`.
 
 Windows/macOS wheels receive compilation and repair checks, without runtime
 testing. Linux ARM64, Windows ARM64, musl, PyPy, and free-threaded CPython

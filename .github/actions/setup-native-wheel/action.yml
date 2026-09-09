@@ -9,7 +9,7 @@ runs:
       shell: bash
       run: |
         brew install nasm pkg-config ninja
-        python -m pip install cmake==3.31.10 delocate==0.13.0
+        python -m pip install -r scripts/ci/requirements-wheel.txt
         echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
 
     - name: Export MSVC environment (Windows)
@@ -33,7 +33,7 @@ runs:
       env:
         INSTA360_MSYS_LOCATION: ${{ steps.msys.outputs.msys2-location }}
       run: |
-        python -m pip install cmake==3.31.10 ninja delvewheel==1.13.1
+        python -m pip install -r scripts/ci/requirements-wheel.txt
         if ($LASTEXITCODE -ne 0) { throw 'Installing native wheel tools failed' }
         $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         $vs = & $vswhere -latest -property installationPath

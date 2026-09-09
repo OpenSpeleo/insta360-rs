@@ -133,7 +133,6 @@ def main():
     env["FFMPEG_DIR"] = str(prefix)
     env["PKG_CONFIG_PATH"] = str(prefix / "lib" / "pkgconfig")
 
-    run("cargo", "binstall", "--no-confirm", "--locked", "maturin@1.15.0", env=env)
     destination = args.out.resolve()
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="insta360-wheel-") as directory:
@@ -159,6 +158,7 @@ def main():
         for path in (
             native_script,
             runtime_config,
+            ROOT / "scripts" / "ci" / "requirements-wheel.txt",
             Path(__file__),
             cache / "downloads" / "ffmpeg-8.1.2.tar.xz",
             cache / "downloads" / "x265_4.1.tar.gz",
@@ -172,7 +172,7 @@ def main():
                     platform.platform(),
                     output("rustc", "--version", env=env),
                     output("cargo", "--version", env=env),
-                    output("maturin", "--version"),
+                    output(sys.executable, "-m", "maturin", "--version"),
                     output(cmake_executable, "--version"),
                 ]
             )
@@ -206,6 +206,8 @@ def main():
         unrepaired = temporary / "unrepaired"
         # Maturin 1.15 builds wheels from the generated sdist with this flag.
         run(
+            sys.executable,
+            "-m",
             "maturin",
             "build",
             "--release",

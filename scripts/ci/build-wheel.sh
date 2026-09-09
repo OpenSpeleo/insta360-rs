@@ -92,14 +92,7 @@ if [[ ! -x "$CARGO_HOME/bin/rustup" ]]; then
 fi
 rustup toolchain install "$toolchain" --profile minimal --no-self-update
 
-binstall_version=1.23.0
-binstall_sha256=64bf954c68bb558431deeabecaec7687edd5541c2189ee263bb8bc18bc4fdf55
-curl --fail --location --retry 3 \
-    "https://github.com/cargo-bins/cargo-binstall/releases/download/v$binstall_version/cargo-binstall-x86_64-unknown-linux-musl.tgz" \
-    -o /tmp/cargo-binstall.tgz
-printf '%s  %s\n' "$binstall_sha256" /tmp/cargo-binstall.tgz | sha256sum --check
-tar -xzf /tmp/cargo-binstall.tgz -C "$CARGO_HOME/bin" cargo-binstall
-cargo binstall --no-confirm --locked maturin@1.15.0
+python -m pip install -r /build/source/scripts/ci/requirements-wheel.txt
 
 notices=/build/source/src-python/python/insta360_rs/_licenses
 mkdir -p "$notices/sources" "$notices/project" /dist/sources
@@ -107,13 +100,14 @@ cp "$INSTA360_FFMPEG_PREFIX/share/insta360-rs/"*.txt "$notices/"
 cp /build/source/src-python/LICENSE.md /build/source/src-python/NOTICE.md "$notices/project/"
 cp /build/source/scripts/ci/build-{wheel,ffmpeg}.sh "$notices/sources/"
 cp /build/source/scripts/ci/ffmpeg-runtime-config.sh "$notices/sources/"
+cp /build/source/scripts/ci/requirements-wheel.txt "$notices/sources/"
 cp "$downloads/$ffmpeg_archive" "$downloads/$x265_archive" "$notices/sources/"
 cp "$notices/sources/"* /dist/sources/
 {
     printf 'Build image: %s\n' "$INSTA360_WHEEL_IMAGE"
     rustc --version
     cargo --version
-    maturin --version
+    python -m maturin --version
     gcc --version
     /usr/bin/cmake --version
 } > "$notices/BUILD-ENVIRONMENT.txt"
@@ -147,7 +141,7 @@ PY
 cd /build/source/src-python
 # --sdist builds the wheel from the generated source archive, verifying that
 # the path dependency and bundled data survived source distribution packaging.
-maturin build --release --locked --sdist --strip \
+python -m maturin build --release --locked --sdist --strip \
     --interpreter /opt/python/cp310-cp310/bin/python \
     --compatibility linux --out /build/unrepaired
 auditwheel repair --plat manylinux_2_28_x86_64 \
