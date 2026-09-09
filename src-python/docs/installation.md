@@ -2,7 +2,9 @@
 
 ## Requirements
 
-- CPython 3.10 or newer; the extension targets the `cp310-abi3` stable ABI.
+- Standard, GIL-enabled CPython 3.10 or a later Python 3.x version; the
+  extension targets the `cp310-abi3` stable ABI. See
+  [wheel compatibility](#wheel-compatibility).
 - A Rust toolchain satisfying `rust-version` in the Cargo manifests, a C/C++
   toolchain, and libclang for FFmpeg bindgen.
 - FFmpeg development headers/libraries for `avcodec`, `avformat`, `avutil`, and
@@ -55,6 +57,45 @@ the license/notice metadata. It has no Python runtime dependencies.
 
 Use the [complete test runner](testing.md) to inspect both artifacts, rebuild
 the source archive, and exercise installed FFI on multiple interpreters.
+
+## Wheel compatibility
+
+For example, `insta360_rs-0.1.0-cp310-abi3-win_amd64.whl` targets standard,
+GIL-enabled CPython 3.10 and later Python 3.x versions on Windows x86-64.
+
+| Filename tag | Meaning                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| `cp310`      | Minimum CPython version: 3.10 when combined with `abi3`.                                 |
+| `abi3`       | CPython's stable ABI, allowing the same wheel to work across later CPython 3.x versions. |
+| `win_amd64`  | Windows with 64-bit x86 Python, on Intel or AMD processors.                              |
+
+`cp310` does not restrict this wheel to Python 3.10: `abi3` makes 3.10 the
+minimum compatible version. The same wheel can therefore be installed on
+standard CPython 3.11, 3.12, 3.13, 3.14, and subsequent Python 3.x versions
+without building a separate wheel for each interpreter version. See the
+[wheel tag specification](https://packaging.python.org/en/latest/specifications/platform-compatibility-tags/)
+and
+[PyO3's minimum ABI version explanation](https://pyo3.rs/v0.29.0/building-and-distribution.html#minimum-python-version-for-abi3-and-abi3t-builds).
+
+This is intentional: [`Cargo.toml`](../Cargo.toml) enables PyO3's `abi3-py310`
+feature, and [`pyproject.toml`](../pyproject.toml) declares
+`requires-python = ">=3.10"`. The stable ABI supplies compatibility across
+CPython versions; it does not remove operating-system, architecture, or
+interpreter-implementation requirements.
+
+This particular Windows wheel does not target:
+
+- macOS or Linux, which require their own platform wheels;
+- 32-bit Python or native ARM64 Python;
+- PyPy or other non-CPython interpreters;
+- free-threaded CPython builds, which cannot load `abi3` wheels and require a
+  compatible build with different ABI tags. See
+  [PyO3's ABI compatibility details](https://pyo3.rs/v0.29.0/building-and-distribution.html#py_limited_apiabi3abi3t).
+
+The architecture must match the Python interpreter, not merely the machine's
+processor. ABI compatibility also does not establish runtime test coverage for
+every platform/version combination; see
+[testing](testing.md#pre-commit-hooks-and-ci) for the current validation matrix.
 
 ## Runtime portability
 

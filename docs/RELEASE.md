@@ -1,11 +1,13 @@
 # Releasing to crates.io and PyPI
 
-Pushing a tag such as `v0.1.0` starts
-[Release](../.github/workflows/release.yml). It validates the package versions,
-runs the entire [CI workflow](CI.md) on that commit, and then publishes the
-three Rust crates to crates.io and the Linux, macOS, and Windows wheels plus
-source distribution to PyPI. Branch pushes and pull requests cannot publish. The
-two registries have separate publishing jobs and credentials.
+[CI](CI.md) runs all tests on `master` pushes or manual dispatch. After every
+check passes, it fetches tags and dispatches
+[Release](../.github/workflows/release.yml) for the workspace-version tag on the
+tested commit, such as `v0.1.0`. Release accepts only workflow dispatch at a tag
+and verifies the source CI run ID and attempt. It then builds fresh Rust and
+Python distributions and publishes to crates.io and PyPI. Test suites remain in
+CI; release keeps package build verification and wheel repair. The two
+registries have separate publishing jobs and credentials.
 
 ## One-time setup
 
@@ -36,8 +38,10 @@ needed. Only publishing jobs receive `id-token: write`. The crates.io action
 exchanges GitHub's identity for a short-lived token immediately before Cargo
 publishes. PyPI uses the official PyPA publishing action and its trusted
 publishing support. The Python publishing job also receives
-`attestations: write` to store build provenance on GitHub. CI/build jobs have
-read-only repository permissions.
+`attestations: write` to store build provenance on GitHub. CI's final dispatch
+job receives `actions: write`; release's CI verification and Linux build jobs
+receive `actions: read` to inspect the run and retrieve its FFmpeg SDK. Build
+jobs have read-only repository permissions.
 
 The library depends on `insta360-rs-data-core` and
 `insta360-rs-data-enhancement`; all three packages must be available on
@@ -83,7 +87,7 @@ credential. A dry run performs no uploads and cannot verify remote publication
 permissions.
 
 Register the same trusted publisher for **each** of the three crates after the
-initial manual uploads. If the matching first tag is also pushed to publish
+initial manual uploads. If CI dispatches the matching first tag to publish
 Python, the Rust job will encounter already published versions. Verify those
 versions and allow the independent Python job to complete; do not delete or
 retag the release. Future releases publish both data crates before the library,
@@ -92,26 +96,26 @@ remote permissions or replace the explicit archive-size check.
 
 ## Prepare a release
 
-Edit `[workspace.package].version` in the root `Cargo.toml`. All four Rust
-packages inherit it, and Maturin derives the Python distribution version from
+`[workspace.package].version` in the root `Cargo.toml` is the version authority.
+All four Rust packages inherit it, and Maturin derives the Python version from
 Cargo through `project.dynamic`. Author, repository, edition, and minimum Rust
 version are shared there too. The library and Python extension inherit the
 project license; each data crate retains its vendor-resource license file.
 
-Update the three exact local dependency pins in the same manifest’s
-`[workspace.dependencies]` to match (`=0.1.0` for the initial release). Cargo
-does not interpolate the workspace version into dependency requirements. The
-release gate checks the version, inheritance, and pins before publication. The
-Python Rust extension remains `publish = false`; the library and its two data
-crates go to crates.io. Tags use stable `vMAJOR.MINOR.PATCH` versions.
-Prerelease tags and Python’s differing prerelease syntax are deliberately
-rejected by the version check; add an explicit version mapping before supporting
-those releases.
+The three exact local dependency pins in the same manifest’s
+`[workspace.dependencies]` must match (`=0.1.0` for the initial release). Cargo
+does not interpolate the workspace version into dependency requirements. Use
+`cargo set-version --workspace <version>` from cargo-edit to update the version,
+pins, and lockfile together, previewing with `--dry-run` first. The release gate
+checks the version, inheritance, and pins before publication. The Python Rust
+extension remains `publish = false`; the library and its two data crates go to
+crates.io. Tags use stable `vMAJOR.MINOR.PATCH` versions. Prerelease tags and
+Python’s differing prerelease syntax are deliberately rejected by the version
+check; add an explicit version mapping before supporting those releases.
 
-After editing the root manifest, refresh the shared lockfile and run the checks:
+Review the root manifest and shared lockfile, then run the checks:
 
 ```sh
-cargo check
 python3 scripts/ci/check-release.py v0.1.0
 prek run --all-files --show-diff-on-failure
 ```
@@ -123,24 +127,63 @@ resolution. Licensed recordings, physical GPU qualification, and vendor-oracle
 checks follow [testing.md](testing.md) and remain separate from
 generated-fixture CI.
 
-Commit all source, manifest, lockfile, and documentation changes. From the
-tested commit, create and push the release tag (replace the example version):
+Commit all source, manifest, lockfile, and documentation changes on `master`.
+Create the release tag on that commit and push the commit and tag together
+(replace the example version):
 
 ```sh
 git tag -a v0.1.0 -m 'Release 0.1.0'
-git push origin HEAD
-git push origin v0.1.0
+git push --atomic origin master v0.1.0
 ```
 
-The release job checks versions before starting CI. Both publication jobs wait
-for the complete reusable CI workflow. PyPI downloads every `python-dist-*`
-artifact from that same run. Linux wheels pass installed-package tests; macOS
-and Windows wheels pass build and repair checks. Publication does not rebuild
-any wheel. Maturin builds each wheel from an sdist to verify source
-completeness. Rust packages and verifies all three crates and checks their sizes
-before requesting its temporary credential. It then uses one
+The `master` push starts CI. Its final job fetches tags, checks that the exact
+workspace-version tag points to the tested commit, and dispatches release at
+that tag with its run ID and attempt. A tag push alone starts neither workflow.
+If the commit was already pushed and CI finished before the tag appeared, rerun
+CI on that commit or dispatch it explicitly:
+
+```sh
+gh workflow run ci.yml --repo OpenSpeleo/insta360-rs --ref v0.1.0
+```
+
+Release checks package versions and verifies the source run's repository,
+`.github/workflows/ci.yml` identity, event (`master` push or manual dispatch),
+commit SHA, and exact current attempt. It polls while the dispatching CI run
+finishes and requires a successful conclusion before building. Failed,
+cancelled, mismatched, or superseded attempts cannot authorize publication.
+
+Release builds fresh Linux, macOS ARM64/x86_64, and Windows x86_64 wheels; Linux
+also supplies the sdist. Both registry jobs wait for every wheel build. No CI
+distribution artifacts are reused. Maturin builds each wheel from an sdist to
+verify source completeness, using the existing release settings and Rust
+profiles. Release first tries the exact native/image cache key for the completed
+Linux FFmpeg SDK. On a miss it downloads only `ffmpeg-linux-x86_64` from the
+verified source CI run; if that artifact is absent or expired, the builder
+compiles the SDK. Other platforms keep separate native caches because their
+compiled libraries are incompatible. Native caches created on a release tag are
+available to same-tag reruns, not other release tags; matching default-branch
+caches may also be restored. See
+[cache scope](CI.md#github-setup-and-maintenance).
+
+Rust packages and verifies all three crates and checks their sizes before
+requesting its temporary credential. It then uses one
 `cargo publish --workspace --locked` command with verification enabled: every
-build finishes before any crate is uploaded.
+crate build finishes before any crate is uploaded.
+
+To dispatch release manually using an existing successful CI run on the same
+tagged commit, inspect its identity and current attempt first:
+
+```sh
+gh run list --repo OpenSpeleo/insta360-rs --workflow ci.yml
+gh api repos/OpenSpeleo/insta360-rs/actions/runs/CI_RUN_ID \
+  --jq '{id, run_attempt, path, event, head_branch, head_sha, status, conclusion}'
+gh workflow run release.yml --repo OpenSpeleo/insta360-rs --ref v0.1.0 \
+  -f ci_run_id=CI_RUN_ID -f ci_run_attempt=CI_RUN_ATTEMPT
+```
+
+Replace `CI_RUN_ID` and `CI_RUN_ATTEMPT` with the inspected numeric values.
+Manual dispatch performs the same verification and fresh builds; it cannot
+bypass CI.
 
 ## Distributed artifacts
 
@@ -148,12 +191,17 @@ The Rust data dependencies include the original licensed resources and notices
 listed in [packaging.md](packaging.md). Python publishes CPython 3.10+ ABI3
 wheels for:
 
-| Platform       | Wheel target                 | Validation                                         |
-| -------------- | ---------------------------- | -------------------------------------------------- |
-| Linux x86_64   | manylinux_2_28 (glibc 2.28+) | Build, repair, clean smoke test, full Python tests |
-| macOS ARM64    | macOS 11+                    | Build and repair only                              |
-| macOS x86_64   | macOS 11+                    | Build and repair only                              |
-| Windows x86_64 | win_amd64                    | Build and repair only                              |
+| Platform       | Wheel target                 | Release validation |
+| -------------- | ---------------------------- | ------------------ |
+| Linux x86_64   | manylinux_2_28 (glibc 2.28+) | Build and repair   |
+| macOS ARM64    | macOS 11+                    | Build and repair   |
+| macOS x86_64   | macOS 11+                    | Build and repair   |
+| Windows x86_64 | win_amd64                    | Build and repair   |
+
+CI separately runs a clean-container smoke test and full Python 3.10–3.14 suites
+against its Linux wheel from the same source commit. Release wheels are fresh
+builds and do not undergo those runtime suites. macOS/Windows runtime and
+physical GPU qualification remain separate.
 
 The release also includes a Linux-produced sdist. Source builds need Rust,
 libclang, pkg-config, and compatible shared FFmpeg development libraries; the
@@ -184,11 +232,12 @@ generate CI fixtures is not part of the Python API. See
 
 ## Attestations and verification
 
-After the tagged commit passes the complete CI workflow, the Python publishing
-job downloads that run's `python-dist-*` artifacts and signs every wheel and
-sdist using the pinned `actions/attest` action. Its default predicate is SLSA
-build provenance, binding the distribution digests to the repository, source
-commit, and release workflow run. See the
+After CI verification and all release wheel builds succeed, the Python
+publishing job downloads `python-dist-*` artifacts from its own release run and
+signs every wheel and sdist using the pinned `actions/attest` action. All
+published Python distributions are built within that release workflow. Its
+default predicate is SLSA build provenance, binding the distribution digests to
+the repository, source commit, and release workflow run. See the
 [GitHub attestation action](https://github.com/actions/attest).
 
 GitHub stores the attestations with the repository and links them from the job
@@ -224,15 +273,15 @@ signing and registry integration.
 
 ## Failures and retries
 
-A failed tag/version check or CI job prevents both registries from being
-written. Fix source failures in a new commit and create a new version/tag; do
-not move an already published tag. Fix external configuration errors in GitHub
-or the registry, then use GitHub's **Re-run failed jobs** for the original
-release run.
+A failed tag/version check, CI verification, or release wheel build prevents
+both registries from being written. Fix source failures in a new commit and
+create a new version/tag; do not move an already published tag. Fix external
+configuration errors in GitHub or the registry, then use GitHub's **Re-run
+failed jobs** for the original release run.
 
 The registries cannot commit a release atomically. If one publication succeeds
 and the other fails, keep the successful version and rerun only the failed job.
-PyPI's `skip-existing` allows retrying a partial upload of the already-tested
+PyPI's `skip-existing` allows retrying a partial upload of the same release
 artifact set. Attestations are attached to PyPI files at upload time; skipping
 an existing file does not add missing attestations to a previous upload. Cargo
 does not overwrite an existing version. If a Cargo upload succeeded before a
@@ -253,8 +302,15 @@ packages are verified before any of those remaining uploads. This protects
 against build failures; crates.io's separate upload requests are not an atomic
 transaction, so network or registry failures can still leave a partial release.
 
-If artifacts have expired, rebuild the checks for the same immutable tag to
-regenerate and test them. Do not substitute local or unrelated workflow
-artifacts. Keep the repository, workflow filename, environment, and tag rules
-aligned with the trusted publisher when diagnosing OIDC errors. Changing only an
-API token secret does not repair an OIDC identity mismatch.
+If release artifacts have expired, dispatch a new release run at the same
+immutable tag with a still-successful CI run ID and its current attempt. This
+rebuilds distributions without rerunning CI or reusing CI's test artifacts.
+Expired FFmpeg SDK artifacts do not require a new CI run: release can restore
+the exact compatible cache or compile the SDK. If the source CI run itself is no
+longer available or successful, run CI at the tag first. Before regenerating a
+partially published release, verify existing registry files: a fresh build can
+have different bytes and cannot replace an existing upload. Do not substitute
+local or unrelated workflow artifacts. Keep the repository, workflow filename,
+environment, and tag rules aligned with the trusted publisher when diagnosing
+OIDC errors. Changing only an API token secret does not repair an OIDC identity
+mismatch.

@@ -1,8 +1,17 @@
 ---
 name: Release
+run-name: Release ${{ github.ref_name }}
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: CI run that tested this exact release commit
+        required: true
+        type: string
+      ci_run_attempt:
+        description: Successful attempt of the source CI run
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,25 +21,123 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  version:
-    name: Validate release tag
+  verify-ci:
+    name: Verify tested release commit
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
-      - run: python scripts/ci/check-release.py
+      - name: Require matching tag and successful source CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ inputs.ci_run_attempt }}
+        run: |
+          python scripts/ci/check-release.py \
+            --ci-run-id "$CI_RUN_ID" --ci-run-attempt "$CI_RUN_ATTEMPT"
 
-  ci:
-    name: Release checks
-    needs: version
-    uses: ./.github/workflows/ci.yml
+  python-linux:
+    name: Build Linux release wheel and source distribution
+    needs: verify-ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-rust
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: wheel-${{ hashFiles('scripts/ci/*.sh') }}
+          workspaces: . -> target/wheel-build
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/wheel/cargo
+            .cache/wheel/rustup
+          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: wheel-tools-linux-
+      - name: Identify the compatible FFmpeg SDK
+        id: ffmpeg
+        run: |
+          native_key=$(bash scripts/ci/build-wheel.sh --cache-key)
+          echo "cache-key=ffmpeg-linux-sdk-v1-$native_key" >> "$GITHUB_OUTPUT"
+      - name: Restore the shared Linux FFmpeg SDK
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg-sdk.tar.gz
+          key: ${{ steps.ffmpeg.outputs.cache-key }}
+      - name: Reuse source CI's FFmpeg SDK when the cache is unavailable
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        id: ffmpeg-artifact
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ffmpeg-linux-x86_64
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ github.token }}
+          path: dist
+      - name: Configure the compatible FFmpeg SDK
+        if: steps.ffmpeg-cache.outputs.cache-hit == 'true' || steps.ffmpeg-artifact.outcome == 'success'
+        run: |
+          mkdir -p .cache/wheel
+          tar -xzf dist/ffmpeg-sdk.tar.gz -C .
+      - name: Build fresh repaired wheel and source distribution
+        run: bash scripts/ci/build-wheel.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-dist-linux
+          path: |
+            dist/*.whl
+            dist/insta360*.tar.gz
+          if-no-files-found: error
+
+  python-native:
+    name: Python wheel (${{ matrix.target }})
+    needs: verify-ci
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+          - os: windows-2025
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-native-wheel
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: wheel-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh') }}
+          workspaces: . -> target/wheel-native
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/wheel-native
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh', '.github/actions/setup-native-wheel/action.yml') }}
+      - name: Build and repair the native wheel
+        run: python scripts/ci/build-native-wheel.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-dist-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
 
   crates-io:
     name: Publish Rust crates
-    needs: ci
+    needs: [verify-ci, python-linux, python-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: crates-io
@@ -63,7 +170,7 @@ jobs:
 
   pypi:
     name: Publish Python package
-    needs: ci
+    needs: [verify-ci, python-linux, python-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:

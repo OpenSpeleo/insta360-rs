@@ -1,18 +1,24 @@
 # Continuous integration
 
-[CI](../.github/workflows/ci.yml) runs on pushes to `master`, manual dispatch,
-and reusable calls from the release workflow. Pull requests and pushes to other
+[CI](../.github/workflows/ci.yml) owns all test suites and runs on pushes to
+`master` and manual dispatch. Pull requests, tag pushes, and pushes to other
 branches, including Dependabot branches, do not start CI. To check a branch
 before merging, manually dispatch the workflow for that branch. All lint and
-tests run on Linux x86_64 (`ubuntu-24.04`). macOS and Windows runners only build
-Python wheels.
+tests run on Linux x86_64 (`ubuntu-24.04`).
 
-The [release workflow](../.github/workflows/release.yml) calls CI at the tagged
-commit and waits for all checks before publishing. Its Python publishing job
-attests the built wheels and source distribution with GitHub build provenance,
-retains the signed bundle as `python-provenance-<attempt>`, and uploads PyPI
-attestations through trusted publishing. See
-[release verification](RELEASE.md#attestations-and-verification).
+After every check passes, CI fetches tags and looks for the workspace's exact
+`vMAJOR.MINOR.PATCH` version tag on the tested commit. If present, it dispatches
+the [release workflow](../.github/workflows/release.yml) at that tag, passing
+the CI run ID and attempt. Otherwise CI finishes without releasing. A tag pushed
+after CI finishes requires rerunning CI or dispatching CI at that tag.
+
+Release validates the tag and originating CI run before building fresh Linux,
+macOS, and Windows distributions. It waits for CI to reach a successful
+conclusion, including the final dispatch job, and requires the same repository,
+CI workflow, permitted event, commit, and run attempt. Release retains package
+build/repair checks and Cargo publication verification; test suites remain in
+CI. No CI distribution artifacts are published. See
+[release instructions](RELEASE.md) for dispatch, attestations, and recovery.
 
 For Rust publication, the release job uses this repository’s Cargo workspace.
 The Python extension has `publish = false`, leaving three publishable crates.
@@ -46,8 +52,13 @@ starts the job container. On a miss it builds and validates the SDK, then saves
 the archive before uploading `ffmpeg-linux-x86_64`. The job summary reports the
 cache key and whether it restored or built the SDK. The Linux lint, Rust, and
 wheel jobs download that exact artifact. `use-ffmpeg.py` relocates pkg-config
-metadata and exports library paths for the consuming checkout. This keeps the
-tested Rust library and published Linux wheel on the same FFmpeg build.
+metadata and exports library paths for the consuming checkout. Release can
+restore the same completed SDK using the exact native/image cache key. On a
+miss, it downloads only `ffmpeg-linux-x86_64` from the verified source CI run.
+If that SDK artifact is absent or expired, the Linux wheel builder compiles the
+SDK. The wheel and sdist are always built afresh. Linux, macOS, and Windows
+cannot share compiled native libraries; native release caches remain
+target-specific.
 
 The separate system `ffmpeg`/`ffprobe` executables generate test fixtures; the
 application links the prepared FFmpeg libraries. Fixture generation needs
@@ -68,18 +79,19 @@ physical GPU qualification remain separate; see [testing.md](testing.md).
 | Rust (all)                       | Also packages, size-checks, tests, and builds all three extracted crates with `python scripts/ci/check-packages.py --all-features` |
 | Linux Python build               | Creates an sdist, builds an ABI3 wheel from it, repairs its libraries, and smoke tests a clean installation                        |
 | Python 3.10–3.14                 | Installs the repaired Linux wheel and runs every Python unittest on each interpreter                                               |
-| macOS/Windows Python builds      | Builds and repairs native ABI3 wheels; no test suites run on these runners                                                         |
+| Trigger matching release         | Dispatches release only for the workspace-version tag on the commit that passed all checks                                         |
 
-Python distribution artifacts use `python-dist-*` names. Linux emits its wheel
-and the sdist; macOS ARM64, macOS x86_64, and Windows x86_64 emit wheels. The
-artifacts are available from the completed CI run. Linux's clean smoke test uses
-a fresh Python container without system FFmpeg libraries and checks import,
+CI's `python-test-dist-linux` artifact contains its test wheel and sdist;
+`rust-crates` contains its verified crate archives. These are available for
+inspection, while release builds its own distributions. Linux's clean smoke test
+uses a fresh Python container without system FFmpeg libraries and checks import,
 capabilities, probing, decoding, extraction, and typing metadata.
 
 The PyO3 `extension-module` feature is enabled by Maturin when building wheels.
 Plain `cargo test --manifest-path src-python/Cargo.toml` leaves that feature off
 so Rust test executables can link libpython. The resulting wheel still uses the
-Python 3.10 stable ABI.
+Python 3.10 stable ABI. Wheel builders retain their existing Maturin release
+settings; this workflow separation does not change Rust optimization profiles.
 
 ## Local setup and checks
 
@@ -175,18 +187,24 @@ matrix.
 ## GitHub setup and maintenance
 
 Enable Actions and allow the referenced actions. CI requires no repository
-secrets or publishing permissions. Master pushes run Full prek, every Rust
-matrix job, all wheel builds, and every Python test job. PR checks are not
-started automatically, so requiring them for merging would require a manual CI
-run on the PR's current commit.
+secrets or publishing permissions. Its final dispatch job receives
+`actions: write`; other CI jobs have read-only repository permissions. Master
+pushes run Full prek, every Rust matrix job, the Linux test-wheel build, and
+every Python test job. PR checks are not started automatically, so requiring
+them for merging would require a manual CI run on the PR's current commit.
 
 `Swatinem/rust-cache` caches Rust dependencies and build outputs with separate
 keys for each feature job and each wheel target. `actions/cache` stores prek
 environments, completed SDKs, and tool downloads. The Linux wheel tools cache
 contains only Cargo and rustup directories, avoiding another copy of the SDK and
-native build trees. Build artifacts transfer the prepared libraries between jobs
-in the same run. Cache storage is shared across branches and subject to GitHub's
-repository limit and eviction policy; caches are an optimization, and a miss
+native build trees. Build artifacts transfer the prepared libraries between CI
+jobs and provide the Linux release job's cache fallback. GitHub scopes cache
+access by ref: releases can restore the Linux SDK populated on the default
+branch, but a native cache created on one release tag is not available to
+another tag. Native caches can help same-tag reruns or restore matching
+default-branch entries; cross-tag hits are not guaranteed. See
+[GitHub's cache access rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+Cache storage is subject to the repository limit and eviction policy. A miss
 must remain buildable. Check the cache result and key before treating a slow
 prewarm job as a compiler problem.
 
@@ -199,7 +217,8 @@ Run `prek autoupdate` to update hooks, review the revisions, and rerun all
 checks. Keep binstall tool versions aligned when upgrading them. Compiler
 upgrades belong only in `rust-toolchain.toml`.
 
-Windows/macOS wheels receive compilation and repair checks, without runtime
-testing. Linux ARM64, Windows ARM64, musl, PyPy, and free-threaded CPython
-wheels are outside this build matrix. See [RELEASE.md](RELEASE.md) for registry
-configuration and publication from a version tag.
+Windows/macOS wheels are built in release and receive compilation and repair
+checks, without runtime testing. Linux ARM64, Windows ARM64, musl, PyPy, and
+free-threaded CPython wheels are outside this build matrix. See
+[RELEASE.md](RELEASE.md) for registry configuration and publication from a
+version tag.

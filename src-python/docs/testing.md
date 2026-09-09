@@ -88,8 +88,11 @@ test suite. Missing prerequisites fail instead of turning media coverage into
 skips. Rebuild the extension after Rust changes before running tests.
 
 CI's Full prek job runs both hook configurations. The dedicated Python 3.10–3.14
-jobs use `scripts/run-tests.py` against the repaired distribution wheel. These
-checks and runtime tests run on Linux; macOS/Windows jobs build wheels.
+jobs use `scripts/run-tests.py` against the repaired Linux wheel retained as
+`python-test-dist-linux`. All test suites run in `ci.yml`. After a matching
+version tag passes CI, `release.yml` builds fresh Linux, macOS, and Windows
+distributions. Release performs build and repair checks without rerunning the
+runtime suites or publishing CI's test wheel.
 
 ## Contract coverage
 

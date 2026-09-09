@@ -89,11 +89,17 @@ for the initial unpublished-dependency check and publication ordering.
 ## Python wheels
 
 The Python package uses PyO3's Python 3.10 stable ABI, so one repaired wheel per
-OS/architecture supports Python 3.10 and newer. Releases build manylinux_2_28
-x86_64, macOS ARM64, macOS x86_64, and Windows x86_64 wheels. All tests run on
-Linux; macOS and Windows runners build and repair wheels only. See [CI](CI.md)
-for checks and [releases](RELEASE.md) for registry configuration and
-publication.
+OS/architecture supports standard, GIL-enabled CPython 3.10 and later Python 3.x
+versions. See the
+[wheel compatibility table](../src-python/docs/installation.md#wheel-compatibility)
+for filename tags and interpreter/platform exclusions. Releases build
+manylinux_2_28 x86_64, macOS ARM64, macOS x86_64, and Windows x86_64 wheels. All
+tests run on Linux in `ci.yml`, using a separate test wheel. After validating
+the successful CI run for the tagged commit, `release.yml` builds fresh wheels
+and a source distribution; it does not publish CI's package artifacts or repeat
+test suites. All release platforms build and repair wheels before either
+registry job can start. See [CI](CI.md) for checks and [releases](RELEASE.md)
+for registry configuration and publication.
 
 Maturin includes the library and both transitive data crates in each source
 distribution. The Python distribution verifier checks all 41 payload hashes,
@@ -111,9 +117,11 @@ path passes the corresponding real-X5 and clean GPU-less-host matrix.
 
 Release wheels must bundle the same capability-pruned shared FFmpeg runtime used
 at link time and repair loader paths with the platform-native wheel tool:
-`delocate` on macOS, `delvewheel` on Windows, and `auditwheel` on Linux. A clean
-container or VM must install each wheel, import `insta360_rs`, run
-`capabilities()`, and probe a generated fixture before publication.
+`delocate` on macOS, `delvewheel` on Windows, and `auditwheel` on Linux. CI's
+Linux test wheel receives a clean-container check for import, `capabilities()`,
+and generated-fixture probing. Clean-host runtime qualification of release
+wheels on every supported platform remains separate from automated build and
+repair checks.
 
 FFmpeg's license/configuration and transitive shared-library notices must ship
 with wheel metadata. The Rust dependency includes the licensed resource bundle;

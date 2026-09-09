@@ -4,7 +4,6 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
@@ -172,7 +171,7 @@ jobs:
 
   python-build:
     needs: [ffmpeg-prewarm, prek]
-    name: Python wheel and source distribution
+    name: Build Linux wheel for testing
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -201,7 +200,7 @@ jobs:
         run: bash scripts/ci/build-wheel.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-dist-linux
+          name: python-test-dist-linux
           path: |
             dist/*.whl
             dist/insta360*.tar.gz
@@ -227,41 +226,6 @@ jobs:
             python:3.10-slim-bookworm \
             sh -ec 'pip install --no-deps /dist/*.whl; python /checks/smoke-wheel.py /fixture.insv'
 
-  python-native:
-    name: Python wheel (${{ matrix.target }})
-    needs: prek
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            target: macos-arm64
-          - os: macos-15-intel
-            target: macos-x86_64
-          - os: windows-2025
-            target: windows-x86_64
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/setup-native-wheel
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: wheel-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh') }}
-          workspaces: . -> target/wheel-native
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .cache/wheel-native
-          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh', '.github/actions/setup-native-wheel/action.yml') }}
-      - name: Build and repair the native wheel
-        run: python scripts/ci/build-native-wheel.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-dist-${{ matrix.target }}
-          path: dist/*.whl
-          if-no-files-found: error
-
   python-test:
     name: Python ${{ matrix.python }} installed wheel
     needs: python-build
@@ -278,7 +242,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-dist-linux
+          name: python-test-dist-linux
           path: dist
       - name: Install fixture generator and the built wheel
         run: |
@@ -287,3 +251,33 @@ jobs:
           python -m pip install --no-deps dist/*.whl
       - name: Full Python tests against the installed extension
         run: python -I -X faulthandler src-python/scripts/run-tests.py
+
+  trigger-release:
+    name: Trigger matching release
+    needs: [prek, rust, python-build, python-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - name: Fetch tags published while CI was running
+        run: git fetch --tags origin
+      - name: Dispatch release for the tested workspace-version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(python scripts/ci/check-release.py --matching-tag)
+          if [ -z "$tag" ]; then
+            echo "No workspace-version tag on the tested commit; skipping release."
+            exit 0
+          fi
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$tag" \
+            -f ci_run_id="$GITHUB_RUN_ID" -f ci_run_attempt="$GITHUB_RUN_ATTEMPT"

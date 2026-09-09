@@ -270,18 +270,26 @@ validation.
 
 ## CI/CD
 
-`.github/workflows/ci.yml` runs on `master` pushes, manual dispatch, and
-reusable workflow calls. Pull requests and other branch pushes do not trigger
-it; dispatch CI explicitly when branch validation is needed.
+`.github/workflows/ci.yml` owns all test suites and runs on `master` pushes and
+manual dispatch. Pull requests, tags, and other branch pushes do not trigger it;
+dispatch CI explicitly when branch validation is needed. Linux runs the
+test/lint matrix and Python 3.10-3.14 tests against a wheel built for testing.
 
-Linux runs the test/lint matrix and Python 3.10-3.14 wheel tests. Linux, macOS,
-and Windows build wheels; macOS/Windows wheel jobs do not run runtime test
-suites. The shared source-built FFmpeg SDK is prepared and reused by Linux jobs.
-Native build cache identities come from the checked-in builder scripts.
+After all checks pass, CI fetches tags and dispatches `release.yml` on the
+stable `vMAJOR.MINOR.PATCH` tag matching both the workspace version and tested
+commit. A tag pushed after CI finishes requires another CI run on that commit.
+Release accepts only `workflow_dispatch`, verifies the successful source CI run
+and attempt against the tag's commit, and builds fresh distributions. It never
+reuses CI's package artifacts or reruns its test suites. Rust publication keeps
+Cargo's package build verification and archive-size checks enabled.
 
-`.github/workflows/release.yml` starts on `v*` tag pushes, validates the
-version, calls CI at that commit, and publishes the three Rust crates and Python
-distributions. Stable `vMAJOR.MINOR.PATCH` tags are required. The Python
+Release builds Linux, macOS ARM64/x86_64, and Windows x86_64 wheels and a Linux
+source distribution; both publishing jobs wait for every wheel build. macOS and
+Windows jobs build and repair wheels without runtime test suites. The shared
+source-built Linux FFmpeg SDK uses an exact native/image cache key, then falls
+back to the verified CI run's SDK artifact, then compilation if unavailable.
+Other platforms keep target-specific caches. Keep the existing Rust profiles and
+Maturin build settings unchanged unless explicitly requested. The Python
 extension keeps `publish = false` for crates.io.
 
 `[workspace.package].version` is the package-version authority. All four crates
