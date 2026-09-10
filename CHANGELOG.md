@@ -8,6 +8,13 @@ details are intentionally omitted.
 
 ### Features
 
+- Select housing corrections automatically from recorded settings, with
+  independent housing, environment, lens-accessory and mounting controls.
+  7f8324f
+- Stitch registered camera families from supported dual-track, two-file and
+  packed panoramas, including V1 calibration. 7f8324f
+- Apply optional underwater color restoration with Legacy or AI processing.
+  7f8324f
 - Export compatible split recordings as continuous 360° videos with original
   audio, or extract synchronized fisheye frames and complete source archives.
   84430e5
@@ -18,6 +25,10 @@ details are intentionally omitted.
 
 ### Fixes
 
+- Correct X5 Dive Case Pro selection, radial housing masks and recorded
+  sensor-window calibration. 7f8324f
+- Correct polynomial projection and housing conversion for unequal lens
+  calibrations. 7f8324f
 - Improve recording discovery, exact frame selection, and stabilization across
   split-video boundaries. a5aec20
 - Preserve original audio timing in stitched video exports, including trimmed
