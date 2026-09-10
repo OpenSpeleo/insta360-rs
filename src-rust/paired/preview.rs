@@ -37,13 +37,12 @@ struct Request {
 struct LensFrame {
     frame: ffmpeg::frame::Video,
     time_base: ffmpeg::Rational,
-    origin_micros: i64,
     origin_pts: i64,
 }
 
 struct Worker {
     sender: Option<mpsc::SyncSender<Request>>,
-    receiver: mpsc::Receiver<Result<LensFrame>>,
+    receiver: mpsc::Receiver<Result<Option<LensFrame>>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -164,72 +163,79 @@ impl PairedPreviewReader {
     /// Returns the first simultaneous native pair at or after recording time.
     pub fn frame_at(&mut self, time: Duration, cancel: Arc<AtomicBool>) -> Result<FramePair> {
         check_cancel(&cancel)?;
-        let chapter_index = self
+        let mut chapter_index = self
             .chapters
             .iter()
             .position(|chapter| time >= chapter.start && time < chapter.start + chapter.duration)
             .ok_or_else(|| invalid("preview time lies outside the recording"))?;
-        let chapter = &self.chapters[chapter_index];
-        for worker in &self.workers {
-            worker
-                .sender
-                .as_ref()
-                .ok_or_else(|| invalid("preview worker stopped"))?
-                .send(Request {
-                    chapter: chapter_index,
-                    time: time - chapter.start,
-                    cancel: cancel.clone(),
-                })
-                .map_err(|_| invalid("preview worker stopped"))?;
+        loop {
+            let chapter = &self.chapters[chapter_index];
+            for worker in &self.workers {
+                worker
+                    .sender
+                    .as_ref()
+                    .ok_or_else(|| invalid("preview worker stopped"))?
+                    .send(Request {
+                        chapter: chapter_index,
+                        time: time.saturating_sub(chapter.start),
+                        cancel: cancel.clone(),
+                    })
+                    .map_err(|_| invalid("preview worker stopped"))?;
+            }
+            // Always drain both replies, even on a decode error, so the next request
+            // cannot accidentally consume the previous request's other-camera frame.
+            let a = self.workers[0]
+                .receiver
+                .recv()
+                .map_err(|_| invalid("camera A preview worker stopped"));
+            let b = self.workers[1]
+                .receiver
+                .recv()
+                .map_err(|_| invalid("camera B preview worker stopped"));
+            let a = a??;
+            let b = b??;
+            check_cancel(&cancel)?;
+            let (a, b) = match (a, b) {
+                (Some(a), Some(b)) => (a, b),
+                (None, None) if chapter_index + 1 < self.chapters.len() => {
+                    chapter_index += 1;
+                    continue;
+                }
+                (None, None) => return Err(invalid("no paired frame at this time")),
+                _ => return Err(invalid("chapter ended with an unmatched camera frame")),
+            };
+            let a_pts = a
+                .frame
+                .pts()
+                .ok_or_else(|| invalid("camera A preview timestamp missing"))?;
+            let b_pts = b
+                .frame
+                .pts()
+                .ok_or_else(|| invalid("camera B preview timestamp missing"))?;
+            if compare_pts(a_pts, a.time_base, b_pts, b.time_base) != 0
+                || compare_pts(a.origin_pts, a.time_base, b.origin_pts, b.time_base) != 0
+            {
+                return Err(invalid("preview lens frames are not simultaneous"));
+            }
+            if a.frame.width() != b.frame.width() || a.frame.height() != b.frame.height() {
+                return Err(invalid("paired camera dimensions differ"));
+            }
+            let source_timestamp_micros = a_pts.rescale(a.time_base, (1, 1_000_000));
+            let timestamp_micros = micros(chapter.start)?
+                .checked_add(relative_timestamp_micros(a_pts, a.origin_pts, a.time_base)?)
+                .ok_or_else(|| invalid("preview timestamp overflow"))?;
+            return Ok(FramePair {
+                a: a.frame,
+                b: b.frame,
+                a_pts,
+                b_pts,
+                a_time_base: a.time_base,
+                b_time_base: b.time_base,
+                chapter_index,
+                source_timestamp_micros,
+                timestamp_micros,
+            });
         }
-        // Always drain both replies, even on a decode error, so the next request
-        // cannot accidentally consume the previous request's other-camera frame.
-        let a = self.workers[0]
-            .receiver
-            .recv()
-            .map_err(|_| invalid("camera A preview worker stopped"));
-        let b = self.workers[1]
-            .receiver
-            .recv()
-            .map_err(|_| invalid("camera B preview worker stopped"));
-        let a = a??;
-        let b = b??;
-        check_cancel(&cancel)?;
-        let a_pts = a
-            .frame
-            .pts()
-            .ok_or_else(|| invalid("camera A preview timestamp missing"))?;
-        let b_pts = b
-            .frame
-            .pts()
-            .ok_or_else(|| invalid("camera B preview timestamp missing"))?;
-        if compare_pts(a_pts, a.time_base, b_pts, b.time_base) != 0
-            || compare_pts(a.origin_pts, a.time_base, b.origin_pts, b.time_base) != 0
-        {
-            return Err(invalid("preview lens frames are not simultaneous"));
-        }
-        if a.frame.width() != b.frame.width() || a.frame.height() != b.frame.height() {
-            return Err(invalid("paired camera dimensions differ"));
-        }
-        let source_timestamp_micros = a_pts.rescale(a.time_base, (1, 1_000_000));
-        let timestamp_micros = micros(chapter.start)?
-            .checked_add(
-                source_timestamp_micros
-                    .checked_sub(a.origin_micros)
-                    .ok_or_else(|| invalid("preview timestamp overflow"))?,
-            )
-            .ok_or_else(|| invalid("preview timestamp overflow"))?;
-        Ok(FramePair {
-            a: a.frame,
-            b: b.frame,
-            a_pts,
-            b_pts,
-            a_time_base: a.time_base,
-            b_time_base: b.time_base,
-            chapter_index,
-            source_timestamp_micros,
-            timestamp_micros,
-        })
     }
 }
 
@@ -294,7 +300,7 @@ impl LensReader {
         })
     }
 
-    fn frame_at(&mut self, time: Duration, cancel: &AtomicBool) -> Result<LensFrame> {
+    fn frame_at(&mut self, time: Duration, cancel: &AtomicBool) -> Result<Option<LensFrame>> {
         let target = self
             .origin_micros
             .checked_add(micros(time)?)
@@ -323,18 +329,17 @@ impl LensReader {
                         ));
                     }
                     self.last_pts = Some(pts);
-                    if compare_pts(pts, self.time_base, target, (1, 1_000_000).into()) < 0 {
+                    if pts_before_time(pts, self.origin_pts, self.time_base, time) {
                         continue;
                     }
                     let frame = transfer_native_frame(frame)?;
-                    return Ok(LensFrame {
+                    return Ok(Some(LensFrame {
                         frame,
                         time_base: self.time_base,
-                        origin_micros: self.origin_micros,
                         origin_pts: self.origin_pts,
-                    });
+                    }));
                 }
-                Err(ffmpeg::Error::Eof) => return Err(invalid("no paired frame at this time")),
+                Err(ffmpeg::Error::Eof) => return Ok(None),
                 Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::ffi::EAGAIN => {}
                 Err(error) => return Err(media(error)),
             }
@@ -351,7 +356,7 @@ impl LensReader {
                         // reference picture and all pictures at/after target, using
                         // packet PTS (never DTS) so B-frame reordering stays exact.
                         let discard = if packet.pts().is_some_and(|pts| {
-                            compare_pts(pts, self.time_base, target, (1, 1_000_000).into()) < 0
+                            pts_before_time(pts, self.origin_pts, self.time_base, time)
                         }) {
                             ffmpeg::Discard::NonReference
                         } else {

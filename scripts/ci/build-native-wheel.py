@@ -2,10 +2,8 @@
 
 import argparse
 import hashlib
-import json
 import os
 import platform
-import re
 import shutil
 import subprocess
 import sys
@@ -151,10 +149,6 @@ def main():
         sources.mkdir(parents=True)
         for path in (prefix / "share" / "insta360-rs").glob("*.txt"):
             shutil.copy2(path, notices)
-        project_notices = notices / "project"
-        project_notices.mkdir()
-        for name in ("LICENSE.md", "NOTICE.md"):
-            shutil.copy2(package / name, project_notices)
         for path in (
             native_script,
             runtime_config,
@@ -178,31 +172,12 @@ def main():
             )
             + "\n"
         )
-        metadata_path = package / "pyproject.toml"
-        text = metadata_path.read_text()
-        licenses = [
-            "python/insta360_rs/_licenses/project/*.md",
-            "python/insta360_rs/_licenses/*.txt",
-        ]
-        if "license-files" in tomllib.loads(text)["project"]:
-            text, count = re.subn(
-                r"(?m)^license-files\s*=\s*\[[^\]]*\]",
-                "license-files = " + json.dumps(licenses),
-                text,
-                count=1,
-            )
-        else:
-            text, count = re.subn(
-                r"(?m)^license\s*=.*$",
-                lambda match: (
-                    match.group(0) + "\nlicense-files = " + json.dumps(licenses)
-                ),
-                text,
-                count=1,
-            )
-        if count != 1:
-            raise RuntimeError("Expected a project.license declaration")
-        metadata_path.write_text(text)
+        run(
+            sys.executable,
+            package / "scripts" / "stage-project-licenses.py",
+            package,
+            "--runtime",
+        )
         unrepaired = temporary / "unrepaired"
         # Maturin 1.15 builds wheels from the generated sdist with this flag.
         run(

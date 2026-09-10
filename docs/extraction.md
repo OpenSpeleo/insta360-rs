@@ -110,15 +110,17 @@ total because preserved metadata can appear in several artifacts. Phase changes
 and successful publication are always reported; intermediate events are limited
 to one every 100 ms. `completed` becomes true only after publication.
 
-`extract_sequence(sequence, target, cancelled, callback)` requires a complete
-recording. It archives every original file under `parts/0001/input-00`,
-`parts/0002/input-00`, and so on. These directories retain all container bytes,
-ExtraInfo records, raw encoded packets, packet indexes, codec configuration, and
-stream metadata described below. They do not include redundant playable copies.
-Compatible video/audio streams instead get one continuous playable file at the
-root. Declared lens ordering yields `camera_A.mp4` and `camera_B.mp4`; unknown
-lens ordering uses neutral `video_001` names. Audio copies use `audio_001.m4a`
-or a compatible Matroska extension.
+`extract_sequence(sequence, target, cancelled, callback)` processes validated
+available chapters without claiming complete recording coverage. Split sequences
+retain `complete = false` in the manifest. It archives every original file under
+`parts/0001/input-00`, `parts/0002/input-00`, and so on. These directories
+retain all container bytes, ExtraInfo records, raw encoded packets, packet
+indexes, codec configuration, and stream metadata described below. They do not
+include redundant playable copies. Compatible video/audio streams instead get
+one continuous playable file at the root. Declared lens ordering yields
+`camera_A.mp4` and `camera_B.mp4`; unknown lens ordering uses neutral
+`video_001` names. Audio copies use `audio_001.m4a` or a compatible Matroska
+extension.
 
 The sequence manifest uses schema version 2 and records every chapter's source,
 timeline start, preserved component paths, and continuous stream mapping. All

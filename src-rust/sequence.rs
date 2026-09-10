@@ -54,6 +54,9 @@ impl RecordingSequence {
             .into_iter()
             .map(inspect_chapter)
             .collect::<Result<Vec<_>>>()?;
+        for chapter in &chapters {
+            validate_sequence_metadata(&chapter.inspection)?;
+        }
         if chapters.len() == 1
             && chapters[0].inspection.metadata.file_split_type != Some(FileSplitType::Split)
         {
@@ -72,11 +75,16 @@ impl RecordingSequence {
     /// Invalid/unrelated neighbors never change the selected file's association.
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let selected = inspect_chapter(InputSet::discover(path.as_ref())?)?;
+        validate_sequence_metadata(&selected.inspection)?;
         if selected.inspection.metadata.file_split_type != Some(FileSplitType::Split) {
             return Self::single(selected.inputs);
         }
         let identity = chapter_group(&selected)?.clone();
-        let parent = path.as_ref().parent().unwrap_or_else(|| Path::new("."));
+        let parent = path
+            .as_ref()
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         let entries = fs::read_dir(parent).map_err(|error| io_error(parent, error))?;
         let mut chapters = vec![selected];
         let mut seen = BTreeSet::new();
@@ -317,6 +325,14 @@ fn chapter_group(chapter: &RecordingChapter) -> Result<&RecordingGroup> {
         .as_ref()
         .filter(|group| !group.identity.is_empty())
         .ok_or_else(|| invalid("split recording is missing its group identity"))
+}
+
+fn validate_sequence_metadata(inspection: &InsvInspection) -> Result<()> {
+    if inspection.metadata.sequence_metadata_invalid {
+        Err(invalid("recording has malformed or conflicting sequence metadata; select a single chapter explicitly"))
+    } else {
+        Ok(())
+    }
 }
 
 fn canonical_paths(inputs: &InputSet) -> Result<Vec<PathBuf>> {

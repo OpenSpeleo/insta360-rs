@@ -17,12 +17,12 @@ export currently accepts one chapter; direct fisheye frame access uses
 
 Call `exporter.preflight_video(&options)` off the UI thread before presenting a
 confirmed export. It resolves calibration, color and motion for every chapter,
-validates the projection and selected time interval, checks the selected encoder
-policy, and checks copied audio compatibility. `VideoPreflight` contains the
-effective projection, duration, frame rate, chapter count, audio track count,
-eligible encoder names, and warnings. It does not create output files. Encoder
-candidates describe availability; opening a hardware encoder can still fail at
-export time.
+validates declared camera A/B track ordering, the projection and selected time
+interval, checks the selected encoder policy, and checks copied audio
+compatibility. `VideoPreflight` contains the effective projection, duration,
+frame rate, chapter count, audio track count, eligible encoder names, and
+warnings. It does not create output files. Encoder candidates describe
+availability; opening a hardware encoder can still fail at export time.
 
 All existing `StitchConfig` and `VideoExportOptions` fields apply. Output is
 8-bit YUV420 HEVC in MP4 with an even 2:1 equirectangular projection. Quality is
@@ -49,7 +49,9 @@ chapter files and concatenate them afterward.
 At each chapter boundary, calibration and color settings are refreshed. Motion
 continues on the recorded camera clock from the preceding pose, unwrapped
 heading, and residual bias. Repeated telemetry must match the preceding sensor
-samples exactly. A small non-overlapping tail is bridged using the last sensor
+samples exactly, and each lens's frame capture clock must advance beyond the
+preceding chapter. Matching repeated gyro data alone cannot qualify a reset
+capture clock. A small non-overlapping tail is bridged using the last sensor
 measurement, subject to the normal maximum telemetry gap. Clock resets,
 conflicting overlaps, or missing coverage fail explicitly; no arbitrary clock
 offset is inferred. Gravity and Direction Lock orientation are initialized only
@@ -77,11 +79,12 @@ offsets, including after clipping, instead of rounding them to milliseconds.
 Audio packets retain their sample-based time base.
 
 Only complete compressed packets inside the selected recording/chapter interval
-are copied. Thus cuts can leave a gap of up to one compressed packet at a
-boundary. Packet timestamps/durations must be present and valid, and output DTS
-must increase. The reader drains the final audio tail without further video
-decoding when a clip ends. Missing timing, corrupt packets and overlapping
-output timestamps fail rather than being guessed.
+are copied. A cut can omit a partial compressed packet on each side of a chapter
+boundary, so the combined gap can span two packet durations. Packet
+timestamps/durations must be present and valid, and output DTS must increase.
+The reader drains the final audio tail without further video decoding when a
+clip ends. Missing timing, corrupt packets and overlapping output timestamps
+fail rather than being guessed.
 
 ## Publication and verification
 
@@ -92,8 +95,10 @@ atomically publishes without overwriting an existing destination.
 `tests/sequence_export.rs` generates unsplit and split dual-track recordings and
 compares every decoded output pixel, checks global clipping and one encoder
 selection, verifies original audio packet identity and A/V offsets, and tests
-preflight, silent audio, cancellation and no-clobber behavior. Fusion tests
-compare continued pose/heading with an uninterrupted track and reject
-conflicting or reset clocks. These synthetic checks establish the stated
+preflight, missing A/B ordering, silent audio, incompatible audio layouts,
+cancellation and no-clobber behavior. Mixed AAC/ALAC tests verify multiple
+tracks, metadata, dispositions and a clip that begins between video frames.
+Fusion tests compare continued pose/heading with an uninterrupted track and
+reject conflicting or reset clocks. These synthetic checks establish the stated
 contracts; real X5 split recordings and each physical GPU/encoder platform still
 need release qualification.

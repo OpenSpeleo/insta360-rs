@@ -110,6 +110,8 @@ single-file, dual-track recordings. Keep these support boundaries explicit.
     blending, and color transforms.
   - `stream.rs`, `extraction/`, `extraction.rs`: Direct packet/frame access and
     original stream/metadata extraction.
+  - `sequence.rs`, `paired.rs`, `paired/preview.rs`: Chapter association, exact
+    native frame pairs, and reusable preview decoding.
   - `media/`, `media.rs`: FFmpeg export pipeline, stabilization preparation,
     jobs, cancellation, and CLI implementation.
   - `assets/`, `assets.rs`: Verified bundled and application-supplied resources.
@@ -142,7 +144,11 @@ single-file, dual-track recordings. Keep these support boundaries explicit.
   Color compensation must not change feature ownership or projected coordinates.
 - Validate exposure/video clock mapping, IMU axes, units, gravity, and telemetry
   coverage before preparing stabilization. File renderers receive prepared
-  poses.
+  poses. Chapter capture clocks must advance even when overlapping gyro values
+  are identical.
+- Compare native frame timestamps relative to their native stream origin before
+  rounding for display or FFmpeg seeking. A rounded origin must not discard an
+  exact first frame.
 - Stream extraction preserves original encoded packets and metadata; it must not
   acquire the camera/calibration restrictions of the stitched exporter.
 - Keep Python wrappers focused on conversion and delegation. Update native
@@ -341,8 +347,9 @@ Before finishing a relevant change, verify:
    ownership without introducing decoding or transcoding.
 3. Calibration, source masks, motion, and color behavior agree across CPU/GPU.
 4. GPU resources are reused and queues/frame retention stay bounded.
-5. Stitch backend and HEVC encoder selection remain independent; decoding is
-   currently software and GPU output uses synchronous readback.
+5. Stitch backend and HEVC encoder selection remain independent; export decoding
+   is software and GPU output uses synchronous readback. Native random-access
+   previews have a separate hardware-decoding policy with software fallback.
 6. Automatic GPU fallback restarts the whole job on CPU only for typed GPU
    failures. Explicit backends stay strict.
 7. Cancellation and failure clean only job-owned temporary outputs. Successful

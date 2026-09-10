@@ -201,8 +201,10 @@ demuxers trade duplicated compressed reads for lens concurrency; OS caching
 normally shares the reads, but slow uncached storage can affect that tradeoff.
 
 Set `INSTA360_RS_PREVIEW_SAMPLE` to a real X5 original and run
-`cargo test --locked --features media --test paired_preview` for exact hardware
-versus serial-software native-pixel qualification. The test compares both
+`cargo test --locked --features media --test paired_preview` to compare `Auto`
+preview decoding with serial-software native pixels. The test compares both
 lenses' Y/U/V samples, dimensions, range, color space and rational pair
-identities at five seeks, deinterleaving hardware NV12 and excluding unspecified
-row padding.
+identities at five seeks, deinterleaving NV12 and excluding unspecified row
+padding. `Auto` can fall back to software, so a passing test establishes parity
+for the selected path; hardware qualification additionally requires independent
+evidence that a hardware decoder was used.

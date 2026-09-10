@@ -17,8 +17,11 @@ python src-python/scripts/test.py
 
 The runner:
 
-1. Requires Cargo, `ffmpeg`, and `ffprobe`, then builds a wheel and source
-   archive using PEP 517 build isolation.
+1. Requires Cargo, `ffmpeg`, and `ffprobe`, then snapshots the workspace into a
+   temporary directory. It stages byte-identical project notices at the same
+   distinct package paths used by release builders, avoiding collisions with
+   root Cargo notices, and builds a wheel and source archive using PEP 517 build
+   isolation.
 2. Verifies stable ABI tags, distribution metadata, license/notice files, native
    module, type stubs, and `py.typed`; rejects leaked development artifacts.
 3. Checks that the source archive includes docs, tests, build scripts, core Rust
@@ -29,9 +32,9 @@ The runner:
    installation and suite using the tests shipped in that archive.
 
 Build artifacts and test environments use temporary directories; Cargo output is
-cached in `src-python/target/python-tests`, or your `CARGO_TARGET_DIR` if set.
-The interpreter that launches the runner needs the `build` package. Fresh test
-interpreters need standard-library `venv` and `ensurepip` support.
+cached in the workspace's `target/python-tests`, or your `CARGO_TARGET_DIR` if
+set. The interpreter that launches the runner needs the `build` package. Fresh
+test interpreters need standard-library `venv` and `ensurepip` support.
 
 Test one compiled ABI wheel on multiple CPython versions by repeating
 `--python`:
@@ -114,11 +117,16 @@ decoded and inspected. Byte comparisons verify preservation and frame selection
 without depending on encoder output being identical across FFmpeg releases.
 
 Video success coverage needs a software HEVC encoder in the linked FFmpeg.
-Capability-dependent tests report unavailable hardware explicitly. A full
-validation run must include software HEVC success tests; a run with skips does
-not prove video export. GPU-unavailable/fallback behavior is testable on CPU
-hosts. GPU and hardware-encoder qualification also needs suitable devices and
-the platform release matrix.
+Audio-copy tests exercise both synchronous and asynchronous exports with default
+and explicit `COPY`, compare compressed packet hashes and rational PTS/DTS with
+FFprobe, and repeat clipped exports with sub-millisecond A/V offsets. They also
+cover ALAC, silent-source warnings, and unsupported AC3 rejection with `DROP` as
+an explicit fallback. Fixture generation therefore also needs FFmpeg's native
+ALAC and AC3 encoders. Capability-dependent tests report unavailable hardware
+explicitly. A full validation run must include software HEVC success tests; a
+run with skips does not prove video export. GPU-unavailable/fallback behavior is
+testable on CPU hosts. GPU and hardware-encoder qualification also needs
+suitable devices and the platform release matrix.
 
 These fixtures establish Python packaging, FFI contracts, and deterministic API
 behavior. They do not establish real-camera stitch quality, every codec's

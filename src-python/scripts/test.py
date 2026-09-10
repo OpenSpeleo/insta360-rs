@@ -32,6 +32,34 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+def stage_source(workspace, destination):
+    development = shutil.ignore_patterns(
+        ".git", "target", ".cache", "dist", ".venv", "__pycache__", ".DS_Store"
+    )
+    extensions = shutil.ignore_patterns("_native*.so", "_native*.pyd")
+
+    def ignore(directory, names):
+        ignored = development(directory, names)
+        if Path(directory) == workspace / "src-python" / "python" / "insta360_rs":
+            ignored.update(extensions(directory, names))
+        return ignored
+
+    shutil.copytree(
+        workspace,
+        destination,
+        ignore=ignore,
+    )
+    package = destination / "src-python"
+    # Use the same notice paths as release builders. Root Cargo and Python
+    # LICENSE.md files otherwise collide in Maturin's workspace source archive.
+    run(
+        sys.executable,
+        Path(__file__).with_name("stage-project-licenses.py"),
+        package,
+    )
+    return package
+
+
 def check_wheel(path):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
@@ -95,6 +123,7 @@ def check_sdist(path, destination):
             "tests/test_public_api.py",
             "scripts/test.py",
             "scripts/run-tests.py",
+            "scripts/stage-project-licenses.py",
         ]:
             require(
                 any(name.endswith("/" + filename) for name in names),
@@ -255,6 +284,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="insta360-python-build-") as temporary:
         root = Path(temporary)
         artifacts = root / "artifacts"
+        package = stage_source(PACKAGE.parent, root / "checkout")
         run(
             sys.executable,
             "-m",
@@ -263,12 +293,12 @@ def main():
             "--wheel",
             "--outdir",
             artifacts,
-            PACKAGE,
+            package,
             env=env,
         )
         wheel = next(artifacts.glob("*.whl"))
         source = check_sdist(next(artifacts.glob("*.tar.gz")), root / "source")
-        test_installation(wheel, root, PACKAGE / "tests", interpreters)
+        test_installation(wheel, root, package / "tests", interpreters)
         rebuilt = root / "rebuilt"
         run(
             sys.executable,

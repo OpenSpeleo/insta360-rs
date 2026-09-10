@@ -4,6 +4,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
 
 import insta360_rs as api
@@ -17,6 +18,7 @@ from export_fixtures import (
     rgb_pixels,
     trailer,
 )
+from media_fixtures import ffprobe, run_tool
 
 
 class ExportValidationTests(unittest.TestCase):
@@ -613,14 +615,174 @@ class VideoExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
                         previous_dts = dts
                         self.assertAlmostEqual(float(packet["duration_time"]), 0.1)
 
-    def test_audio_copy_and_default_export_succeed(self):
-        for index, options in enumerate(({}, {"audio": api.AudioPolicy.COPY})):
-            output = self.root / f"video-{index}.mp4"
-            result = api.export_video(
-                self.source, output, config=cpu_config(), **options
+    def audio_source(self, *, codec="aac", offset="0", silent=False):
+        source = self.root / "audio-source.insv"
+        arguments = ["-v", "error", "-nostdin", "-i", self.source, "-map", "0:v"]
+        if not silent:
+            arguments += [
+                "-map",
+                "0:a",
+                "-c:a",
+                codec,
+                "-af",
+                f"asetpts=PTS+{offset}/TB",
+            ]
+        run_tool(
+            "ffmpeg",
+            *arguments,
+            "-c:v",
+            "copy",
+            "-movie_timescale",
+            "1000000",
+            "-f",
+            "mp4",
+            source,
+        )
+        with source.open("ab") as output:
+            output.write(trailer(calibrated_metadata()))
+        return source
+
+    def assert_copied_audio(
+        self, source, output, *, start=Fraction(0), end=Fraction(1)
+    ):
+        original = ffprobe(source)
+        copied = ffprobe(output)
+        source_audio = next(
+            s for s in original["streams"] if s["codec_type"] == "audio"
+        )
+        output_audio = next(s for s in copied["streams"] if s["codec_type"] == "audio")
+        self.assertEqual(
+            [s["codec_type"] for s in copied["streams"]], ["video", "audio"]
+        )
+        for field in ("codec_name", "sample_rate", "channels", "extradata_hash"):
+            self.assertEqual(output_audio[field], source_audio[field], field)
+        source_base = Fraction(source_audio["time_base"])
+        output_base = Fraction(output_audio["time_base"])
+        video = next(s for s in original["streams"] if s["codec_type"] == "video")
+        video_origin = int(video["start_pts"]) * Fraction(video["time_base"])
+        expected = [
+            packet
+            for packet in original["packets"]
+            if packet["stream_index"] == source_audio["index"]
+            and int(packet["pts"]) * source_base >= video_origin + start
+            and (int(packet["pts"]) + int(packet["duration"])) * source_base
+            <= video_origin + end
+        ]
+        actual = [
+            p for p in copied["packets"] if p["stream_index"] == output_audio["index"]
+        ]
+        self.assertGreater(len(expected), 0)
+        self.assertEqual(len(actual), len(expected))
+        for before, after in zip(expected, actual, strict=True):
+            self.assertEqual(after["data_hash"], before["data_hash"])
+            for field in ("pts", "dts"):
+                self.assertLessEqual(
+                    abs(
+                        int(after[field]) * output_base
+                        - (int(before[field]) * source_base - video_origin - start)
+                    ),
+                    output_base,
+                    field,
+                )
+            self.assertEqual(
+                int(after["duration"]) * output_base,
+                int(before["duration"]) * source_base,
             )
-            self.assertGreater(result.frames_written, 0)
-            self.assertTrue(output.is_file())
+        return actual, output_base
+
+    def test_default_and_explicit_audio_copy_preserve_packets_through_both_apis(self):
+        for export in (api.export_video, api.start_export_video):
+            for explicit in (False, True):
+                with self.subTest(api=export.__name__, explicit=explicit):
+                    output = self.root / f"{export.__name__}-{explicit}.mp4"
+                    result = export(
+                        self.source,
+                        output,
+                        config=cpu_config(),
+                        acceleration=api.MediaAcceleration.SOFTWARE,
+                        **({"audio": api.AudioPolicy.COPY} if explicit else {}),
+                    )
+                    if isinstance(result, api.ExportJob):
+                        result = result.wait()
+                    self.assert_cpu_result(result, 10)
+                    self.assert_copied_audio(self.source, output)
+
+    def test_repeated_audio_cuts_preserve_submillisecond_offsets_and_packet_boundaries(
+        self,
+    ):
+        source = self.audio_source(offset="0.05")
+        for repetition in range(3):
+            for start, end in (
+                (Fraction(0), Fraction(1)),
+                (Fraction(1, 5), Fraction(3, 5)),
+            ):
+                with self.subTest(repetition=repetition, start=start):
+                    output = self.root / f"offset-{repetition}-{float(start)}.mp4"
+                    result = api.export_video(
+                        source,
+                        output,
+                        config=cpu_config(),
+                        acceleration=api.MediaAcceleration.SOFTWARE,
+                        start=float(start),
+                        duration=float(end - start),
+                    )
+                    self.assert_cpu_result(result, int((end - start) * 10))
+                    packets, base = self.assert_copied_audio(
+                        source, output, start=start, end=end
+                    )
+                    first = int(packets[0]["pts"]) * base
+                    self.assertGreater(first, 0)
+                    self.assertNotEqual((first * 1000).denominator, 1)
+
+    def test_alac_audio_copy_preserves_lossless_packets(self):
+        source = self.audio_source(codec="alac")
+        output = self.root / "alac.mp4"
+        result = api.export_video(
+            source,
+            output,
+            config=cpu_config(),
+            acceleration=api.MediaAcceleration.SOFTWARE,
+        )
+        self.assert_cpu_result(result, 10)
+        self.assert_copied_audio(source, output)
+
+    def test_unsupported_audio_fails_without_output_and_drop_succeeds(self):
+        source = self.audio_source(codec="ac3")
+        output = self.root / "unsupported.mp4"
+        for export in (api.export_video, api.start_export_video):
+            with self.subTest(api=export.__name__):
+                with self.assertRaisesRegex(api.MissingCapabilityError, "ac3 audio"):
+                    result = export(source, output, config=cpu_config())
+                    if isinstance(result, api.ExportJob):
+                        result.wait()
+                self.assertFalse(output.exists())
+                self.assertEqual(list(self.root.iterdir()), [source])
+        result = api.export_video(
+            source,
+            output,
+            config=cpu_config(),
+            audio=api.AudioPolicy.DROP,
+            acceleration=api.MediaAcceleration.SOFTWARE,
+        )
+        self.assert_cpu_result(result, 10)
+        self.assertEqual(
+            [s["codec_type"] for s in ffprobe(output)["streams"]], ["video"]
+        )
+
+    def test_silent_audio_copy_warns_and_exports_video(self):
+        source = self.audio_source(silent=True)
+        output = self.root / "silent.mp4"
+        job = api.start_export_video(
+            source,
+            output,
+            config=cpu_config(),
+            acceleration=api.MediaAcceleration.SOFTWARE,
+        )
+        self.assert_cpu_result(job.wait(), 10)
+        self.assertTrue(any("no audio" in warning for warning in job.take_warnings()))
+        self.assertEqual(
+            [s["codec_type"] for s in ffprobe(output)["streams"]], ["video"]
+        )
 
     def test_existing_video_is_never_overwritten(self):
         output = self.root / "video.mp4"

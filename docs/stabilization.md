@@ -170,11 +170,15 @@ on CPU and GPU.
 
 Sequence video export continues the existing world pose and unwrapped heading on
 the recorded camera clock. It validates repeated sensor measurements at
-overlapping chapter tails and rejects clock resets or coverage gaps. Gravity
-initialization and Direction Lock are retained across the recording; a trim
-starting in a later chapter prepares the preceding motion first. Only adjacent
-chapters' bounded telemetry is retained during preparation. See
-[sequence stitching](sequence-stitching.md) for the processing and audio
+overlapping chapter tails and rejects clock resets or coverage gaps. Each lens's
+first exposure center must be later than its preceding chapter's last exposure
+center on the recorded camera clock, including after track-order reversal.
+Identical overlapping gyro measurements do not establish continuity when frame
+capture timestamps restart; retained gyro windows with advancing frame captures
+remain supported. Gravity initialization and Direction Lock are retained across
+the recording; a trim starting in a later chapter prepares the preceding motion
+first. Only adjacent chapters' bounded telemetry is retained during preparation.
+See [sequence stitching](sequence-stitching.md) for the processing and audio
 contract.
 
 ## Recorded factory calibration

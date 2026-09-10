@@ -56,12 +56,13 @@ combining it with required readout correction is an error.
 file profiles. See [stabilization](stabilization.md) for equations and limits.
 
 `VideoExportOptions::acceleration` is independent. Its `Auto`, `Software`, and
-`Hardware` policies currently control HEVC encoder selection, not stitching; the
-decoder remains software. Explicit `Hardware` fails if no named hardware encoder
-can be opened. Hardware decoding and native GPU codec surfaces are not part of
-the current public contract. `Auto` tries all eligible encoder candidates in its
-preference order when configuration/opening fails. It does not yet restart after
-a mid-stream encoder failure.
+`Hardware` policies currently control HEVC encoder selection, not stitching.
+Explicit `Hardware` fails if no named hardware encoder can be opened. Export
+decoding remains software, while native random-access previews have a separate
+hardware-decoding policy. Native GPU codec surfaces are not exposed. `Auto`
+tries all eligible encoder candidates in its preference order when
+configuration/opening fails. It does not yet restart after a mid-stream encoder
+failure.
 
 `VideoExportOptions::start` and `VideoExportOptions::duration` select a
 source-relative half-open interval `[start, start + duration)`. Either may be
@@ -173,16 +174,21 @@ requests never change backend; `Auto` follows its documented GPU-first,
 whole-job CPU fallback contract and records the selected renderer in
 `ExportResult::backend`.
 
-The error enum and public choice enums are non-exhaustive so callers must keep a
-fallback arm. Data structures are serializable where that is useful for CLI or
-IPC boundaries, but FFmpeg and `wgpu` types are never public.
+The error enum and enums marked `#[non_exhaustive]` require a fallback arm. Data
+structures are serializable where that is useful for CLI or IPC boundaries. Core
+geometry and motion APIs use library-owned values, and `wgpu` types remain
+private. With `media`, `FramePair` exposes FFmpeg-owned video frames and native
+timestamp rationals; `FramePairIdentity` retains those rationals, and
+`PairedReader::take_audio_packets` returns original FFmpeg packets. These native
+Rust interfaces are not exposed by the Python package.
 
 ## Ownership
 
 `InputSet` owns normalized input paths. `InsvReader` works with any
-`Read + Seek` source and bounds record allocations. Image buffers are owned and
-tightly packed, allowing the same API on macOS, Windows, and Linux without
-native surface handles.
+`Read + Seek` source and bounds record allocations. Stitching's RGB8 image
+buffers and `MediaSource` RGB24 previews are owned and tightly packed. Native
+`FramePair` buffers instead retain their decoded pixel format and plane strides;
+consumers must inspect those properties when accessing their pixels.
 
 `StitchConfig::color_conversion` defaults to `ColorConversion::Auto`, which
 selects the bundled X5 LUT for explicit I-Log metadata. `Preserve` disables the

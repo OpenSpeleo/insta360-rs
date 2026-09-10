@@ -416,7 +416,7 @@ pub struct UnknownMetadataField {
     pub value: UnknownMetadataValue,
 }
 
-/// Metadata required by calibration and motion processing.
+/// Camera recording identity and raw submedia association, including previews.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct RecordingGroup {
     /// Raw capture subtype, independent of physical lens organization.
@@ -441,7 +441,7 @@ pub enum FileSplitType {
 /// Metadata required by calibration and motion processing.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct InsvMetadata {
-    /// Recording identity and chapter position from protobuf field 26.
+    /// Recording identity and raw submedia position from protobuf field 26.
     pub recording_group: Option<RecordingGroup>,
     /// Temporal split declaration from protobuf field 88.
     pub file_split_type: Option<FileSplitType>,

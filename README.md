@@ -56,11 +56,12 @@ those assets does not imply that their algorithms are implemented or qualified.
 - Offers PyO3 bindings for Python 3.10+.
 
 Packet-preserving extraction does not spatially split a packed dual-fisheye
-frame. The crate does **not** currently use hardware decoding, run AI seam
-inference or ColorPlus, apply general crop-aware optical projection, or preserve
-10-bit depth in stitched output. Supported X5 recordings have gravity-referenced
-stabilization and sensor readout correction on both CPU and GPU; see
-[stabilization](docs/stabilization.md).
+frame. Stitched exports use software decoding; native random-access previews can
+use hardware decoding with software fallback. The crate does **not** currently
+run AI seam inference or ColorPlus, apply general crop-aware optical projection,
+or preserve 10-bit depth in stitched output. Supported X5 recordings have
+gravity-referenced stabilization and sensor readout correction on both CPU and
+GPU; see [stabilization](docs/stabilization.md).
 
 ## Camera support
 
@@ -723,8 +724,9 @@ See [Python bindings](docs/python.md) for examples and wheel targets.
 ## Current limitations
 
 - High-level media export requires X5 single-file, two-track input per chapter.
-  Rust `Exporter::from_sequence` exports a complete recording through one video
-  writer; see [sequence stitching](docs/sequence-stitching.md).
+  Rust `Exporter::from_sequence` exports the available validated chapters
+  through one video writer; split metadata does not establish whole-recording
+  coverage. See [sequence stitching](docs/sequence-stitching.md).
 - Packed ONE X-X3 video is preserved as one encoded stream; extraction does not
   synthesize separate decoded lens tracks from that packed frame.
 - V1 calibration is parse-only and fails stitch preflight.

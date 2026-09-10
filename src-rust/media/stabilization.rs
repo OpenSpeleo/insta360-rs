@@ -76,6 +76,7 @@ pub(super) struct FileStabilizer {
     samples: Vec<MotionSample>,
     clocks: [FrameClock; 2],
     camera_origin_micros: i64,
+    last_capture_micros: [f64; 2],
     gyro_adjust_micros: f64,
     mode: Stabilization,
     readout: Option<SensorReadout>,
@@ -302,17 +303,31 @@ impl FileStabilizer {
             Some(VideoPtsMapType::DecoderWithFirstFrameTimestamp);
         let mut samples = decode_motion_record(gyro_payload, &normalized_metadata)?;
         profile.normalize_samples(&mut samples)?;
-        let first_capture = clocks
-            .iter()
-            .zip(&presentation)
-            .map(|(clock, pts)| {
-                let (timestamp, shutter) = clock.exposure_at(pts[0], camera_origin_micros)?;
-                Ok(timestamp + gyro_adjust_micros - shutter.as_secs_f64() * 500_000.0)
-            })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .reduce(f64::min)
-            .unwrap();
+        let capture_at = |lens: usize, pts: i64| -> Result<f64> {
+            let (timestamp, shutter) = clocks[lens].exposure_at(pts, camera_origin_micros)?;
+            Ok(timestamp + gyro_adjust_micros - shutter.as_secs_f64() * 500_000.0)
+        };
+        let mut first_capture = f64::INFINITY;
+        let mut last_capture_micros = [0.0; 2];
+        for lens in 0..2 {
+            let first = capture_at(lens, presentation[lens][0])?;
+            first_capture = first_capture.min(first);
+            last_capture_micros[lens] = capture_at(
+                lens,
+                *presentation[lens].last().expect("validated video PTS"),
+            )?;
+            if let Some(previous) = previous {
+                // Subtract integer origins before converting to preserve fractional
+                // shutter centers even near the exact camera-clock limits.
+                let previous_origin =
+                    i128::from(previous.camera_origin_micros) - i128::from(camera_origin_micros);
+                if first <= previous_origin as f64 + previous.last_capture_micros[lens] {
+                    return Err(Error::InvalidMedia(format!(
+                        "lens {lens} chapter capture clock repeats or moves backwards"
+                    )));
+                }
+            }
+        }
         let initialization_window = if previous.is_some() {
             FusionOptions::default().initialization_window
         } else {
@@ -389,6 +404,7 @@ impl FileStabilizer {
             samples,
             clocks,
             camera_origin_micros,
+            last_capture_micros,
             gyro_adjust_micros,
             mode: config.stabilization,
             readout,
@@ -767,6 +783,84 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("conflicting"));
+    }
+
+    #[test]
+    fn chapter_capture_clock_must_advance_even_when_all_gyro_samples_overlap() {
+        let config = StitchConfig::default();
+        let previous = prepare(&metadata(), &config, None).unwrap();
+        // Cameras may retain a common gyro window across short chapters. This
+        // is safe when actual frame capture times continue moving forwards.
+        let mut advanced = metadata();
+        advanced.first_frame_timestamp = Some(FFT + 140_000);
+        let continued = FileStabilizer::from_payloads_continuing(
+            &advanced,
+            &config,
+            &gyro(),
+            exposures(140_000),
+            None,
+            vec![vec![0, 33_333, 100_000]; 2],
+            Some(&previous),
+        )
+        .unwrap();
+        assert_yaw(
+            continued.frame_motion(0).unwrap().correction(),
+            yaw_rate() * 0.237,
+        );
+        // Identical sensor values cannot establish continuity if both video
+        // and sensor clocks restart: accepting this would repeat the old yaw.
+        let error = FileStabilizer::from_payloads_continuing(
+            &metadata(),
+            &config,
+            &gyro(),
+            exposures(0),
+            None,
+            vec![vec![0, 33_333, 100_000]; 2],
+            Some(&previous),
+        )
+        .err()
+        .expect("repeated capture clocks must be rejected");
+        assert!(error.to_string().contains("capture clock"), "{error}");
+    }
+
+    #[test]
+    fn chapter_capture_clock_checks_both_lenses_after_track_reversal() {
+        for reverse in [false, true] {
+            let mut metadata = metadata();
+            metadata.video_pts_map_type = Some(VideoPtsMapType::DecoderWithFirstFrameTimestamp);
+            metadata.reverse_video_track_order = Some(reverse);
+            let config = StitchConfig::default();
+            let previous = FileStabilizer::from_payloads(
+                &metadata,
+                &config,
+                &gyro(),
+                exposures(0),
+                None,
+                vec![vec![0, 33_333], vec![0, 100_000]],
+            )
+            .unwrap();
+            // This capture advances past the first track's last frame but is
+            // earlier than the second track's last frame. Check both lenses.
+            metadata.first_frame_timestamp = Some(FFT + 60_000);
+            let error = FileStabilizer::from_payloads_continuing(
+                &metadata,
+                &config,
+                &gyro(),
+                exposures(0),
+                None,
+                vec![vec![0]; 2],
+                Some(&previous),
+            )
+            .err()
+            .expect("one overlapping lens must reject chapter continuation");
+            let lens = usize::from(!reverse);
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("lens {lens} chapter capture clock")),
+                "{error}"
+            );
+        }
     }
 
     #[test]

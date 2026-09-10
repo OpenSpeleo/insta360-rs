@@ -93,6 +93,16 @@ fn inspect_video(
             inspection: chapter.inspection.clone(),
             stabilizer: None,
         })?;
+        if chapter
+            .inspection
+            .metadata
+            .reverse_video_track_order
+            .is_none()
+        {
+            return Err(Error::MissingCapability(
+                "recording does not declare which video track belongs to camera A/B".into(),
+            ));
+        }
         resolve_calibration(&chapter.inspection.metadata, config)?.validate_for_stitching()?;
         resolve_color_lut(&chapter.inspection.metadata, config.color_conversion)?;
         if chapter

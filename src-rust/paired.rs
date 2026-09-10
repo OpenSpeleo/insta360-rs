@@ -128,7 +128,8 @@ impl PairedReader {
             target,
             current.origin_micros,
         )?;
-        current.discard_before = target;
+        current.discard_before =
+            Duration::from_micros(target.saturating_sub(current.origin_micros) as u64);
         reader.exact_start = Some(identity);
         Ok(reader)
     }
@@ -253,9 +254,8 @@ impl PairedReader {
                     self.exact_start = None;
                 }
                 let source_timestamp_micros = a_pts.rescale(a_time_base, (1, 1_000_000));
-                let relative = source_timestamp_micros
-                    .checked_sub(current.origin_micros)
-                    .ok_or_else(|| invalid("frame timestamp overflow"))?;
+                let relative =
+                    relative_timestamp_micros(a_pts, current.decoders[0].start_pts, a_time_base)?;
                 let global = micros(chapter.timeline_start)?
                     .checked_add(relative)
                     .ok_or_else(|| invalid("recording timestamp overflow"))?;
@@ -409,12 +409,12 @@ impl PairedReader {
         }
         let origin_micros = a.start_pts.rescale(a.time_base, (1, 1_000_000));
         let local = self.start.saturating_sub(chapter.timeline_start);
-        let discard_before = origin_micros
+        let seek_target = origin_micros
             .checked_add(micros(local)?)
             .ok_or_else(|| invalid("seek timestamp overflow"))?;
         let decoders = [a, b];
         if !local.is_zero() {
-            seek_with_pair_preroll(&mut input, &decoders, discard_before, origin_micros)?;
+            seek_with_pair_preroll(&mut input, &decoders, seek_target, origin_micros)?;
         }
         let audio_streams = input
             .streams()
@@ -428,7 +428,7 @@ impl PairedReader {
             queued_bytes: 0,
             eof: false,
             origin_micros,
-            discard_before,
+            discard_before: local,
             audio_streams,
         });
         Ok(())
@@ -499,7 +499,7 @@ struct ChapterReader {
     queued_bytes: usize,
     eof: bool,
     origin_micros: i64,
-    discard_before: i64,
+    discard_before: Duration,
     audio_streams: Vec<usize>,
 }
 
@@ -547,13 +547,12 @@ impl ChapterReader {
                 ));
             }
             decoder.last_pts = Some(pts);
-            if compare_pts(
+            if pts_before_time(
                 pts,
+                decoder.start_pts,
                 decoder.time_base,
                 self.discard_before,
-                (1, 1_000_000).into(),
-            ) < 0
-            {
+            ) {
                 continue;
             }
             self.queued_bytes = self
@@ -615,6 +614,20 @@ fn frame_bytes(frame: &ffmpeg::frame::Video) -> usize {
 }
 fn compare_pts(a: i64, a_base: ffmpeg::Rational, b: i64, b_base: ffmpeg::Rational) -> i32 {
     unsafe { ffmpeg::ffi::av_compare_ts(a, a_base.into(), b, b_base.into()) }
+}
+
+/// Compare relative source time without rounding either the origin or request.
+/// Positive i32 time bases and Duration's u64 seconds keep these products in i128.
+fn pts_before_time(pts: i64, origin: i64, time_base: ffmpeg::Rational, time: Duration) -> bool {
+    (i128::from(pts) - i128::from(origin)) * i128::from(time_base.numerator()) * 1_000_000_000
+        < time.as_nanos() as i128 * i128::from(time_base.denominator())
+}
+
+fn relative_timestamp_micros(pts: i64, origin: i64, time_base: ffmpeg::Rational) -> Result<i64> {
+    Ok(pts
+        .checked_sub(origin)
+        .ok_or_else(|| invalid("frame timestamp overflow"))?
+        .rescale(time_base, (1, 1_000_000)))
 }
 fn micros(duration: Duration) -> Result<i64> {
     i64::try_from(duration.as_micros())

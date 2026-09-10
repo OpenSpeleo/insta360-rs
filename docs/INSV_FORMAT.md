@@ -1108,7 +1108,7 @@ and end-to-end media export are separate support levels.
 | Frame PTS, GPS, secondary IMU, other telemetry | Raw record access; no complete typed processing path                                                          |
 | Calibrated panorama image/video export         | X5 single-file recordings with exactly two video tracks; other stitched input layouts are not implemented     |
 | Stabilization                                  | X5 compact-raw normalization, gravity fusion, exposure/PTS alignment, and supported sensor readout correction |
-| Audio in video export                          | Dropped; audio-copy mode is not implemented                                                                   |
+| Audio in video export                          | Optional AAC/ALAC packet copy preserving video-relative timing, with complete-packet cuts                     |
 | Tail rewriting                                 | No complete preserving writer                                                                                 |
 
 Registered camera/lens geometry does not establish that every mode of that

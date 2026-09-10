@@ -197,6 +197,94 @@ fn discovery_does_not_group_nonsplit_identity_and_explicit_single_is_complete() 
     assert!(single.require_complete().is_ok());
 }
 
+#[test]
+fn discovery_accepts_a_bare_relative_filename() {
+    const CHILD: &str = "INSTA360_RS_RELATIVE_DISCOVERY_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let sequence = RecordingSequence::discover("VID_20260101_120000_00_000.insv")
+            .expect("discover split chapters from the current directory");
+        assert_eq!(sequence.chapters.len(), 2);
+        assert_eq!(sequence.duration, Duration::from_secs(2));
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), 0, 0, 2, "relative");
+    write(dir.path(), 2, 0, 2, "relative");
+    // Isolate cwd in a subprocess: changing it would race other fixture tests.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "discovery_accepts_a_bare_relative_filename",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn ambiguous_sequence_metadata_cannot_claim_complete_automatic_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), 0, 0, 2, "invalid");
+    for malformed in 0..6 {
+        let mut data = metadata(0, 0, 2, "invalid");
+        match malformed {
+            0 => integer(&mut data, 88, 1),
+            1 => integer(&mut data, 88, u64::MAX),
+            2 => bytes(&mut data, 88, b"wrong wire type"),
+            3 => integer(&mut data, 26, 2),
+            4 => bytes(&mut data, 26, &[0x1a, 1, 0xff]),
+            5 => bytes(&mut data, 26, &[0x12, 1, 0]),
+            _ => unreachable!(),
+        }
+        fs::write(&path, fixture(&data)).unwrap();
+        assert!(RecordingSequence::discover(&path).is_err());
+        let inputs = InputSet::new(vec![path.clone()]).unwrap();
+        assert!(RecordingSequence::new(vec![inputs.clone()]).is_err());
+        assert!(RecordingSequence::single(inputs).unwrap().complete);
+    }
+}
+
+#[test]
+fn actual_chapter_and_directory_limits_are_enforced() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut inputs = Vec::new();
+    for index in 0..4096 {
+        let path = write(dir.path(), index, 0, 2, "bounded");
+        inputs.push(InputSet::new(vec![path]).unwrap());
+    }
+    let sequence = RecordingSequence::new(inputs.clone()).unwrap();
+    assert_eq!(sequence.chapters.len(), 4096);
+    assert_eq!(sequence.duration, Duration::from_secs(4096));
+    assert_eq!(
+        sequence.chapter_at(Duration::from_millis(4_095_999)),
+        Some(4095)
+    );
+    inputs.push(inputs[0].clone());
+    assert!(RecordingSequence::new(inputs)
+        .unwrap_err()
+        .to_string()
+        .contains("4096"));
+    // Invalid unrelated files still count toward bounded directory inspection.
+    for index in 4096..8193 {
+        fs::write(dir.path().join(format!("unrelated-{index}.insv")), []).unwrap();
+    }
+    assert!(
+        RecordingSequence::discover(&sequence.chapters[0].inputs.paths()[0])
+            .unwrap_err()
+            .to_string()
+            .contains("too many INSV candidates")
+    );
+    assert!(RecordingSequence::new(Vec::new()).is_err());
+}
+
 fn assert_unverified_coverage(sequence: &RecordingSequence) {
     assert!(!sequence.complete);
     assert!(sequence.warnings.is_empty(), "{:?}", sequence.warnings);

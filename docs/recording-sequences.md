@@ -41,6 +41,11 @@ totals, incompatible properties, and conflicting or malformed declarations
 remain errors. Both recognized fields remain in the raw metadata collection,
 including unknown nested fields.
 
+Malformed or conflicting declarations on the selected input fail `discover()`
+and `new()` before they can be mistaken for a nonsplit recording. Applications
+can deliberately choose `single(inputs)` to open only that selected chapter.
+Discovery accepts bare filenames relative to the current working directory.
+
 Applications can assess positive continuity evidence without interpreting index
 gaps. `has_capture_gap()` reports a substantial uncovered interval between
 originals on the recorded raw-gyro microsecond clock. It excludes unknown clocks
@@ -82,16 +87,18 @@ Seeking uses FFmpeg's microsecond seek convention and retains a preceding
 indexed GOP for each lens: MP4 decode timestamps can otherwise skip dependencies
 of a requested B frame. If an index cannot establish that preroll, reading
 starts at the chapter beginning. Preroll frames are decoded and excluded from
-output. Delayed frames are drained before advancing chapters. Video queues are
-bounded by frame count and retained bytes, and cancellation is checked during
-demux and decode. No intermediate video is created. Optional audio forwarding
-retains original packets; consumers drain audio batches after each returned pair
-and after EOF. `finish_audio()` reads the short packet tail at a clipped video
-boundary without decoding further video. `FramePair::identity()` retains both
-native timestamps and time bases, and `open_at_pair()` can recover that exact
-pair without rounding a displayed time. Applications may instead retain the
-displayed original frame handles for a current-pair export, avoiding another
-seek or decode.
+output using exact stream-relative timing, including fractional nonzero source
+origins; rounding is confined to seek and display timestamps. Delayed frames are
+drained before advancing chapters. Video queues are bounded by frame count and
+retained bytes, and cancellation is checked during demux and decode. No
+intermediate video is created. Optional audio forwarding retains original
+packets; consumers drain audio batches after each returned pair and after EOF.
+`finish_audio()` reads the short packet tail at a clipped video boundary without
+decoding further video. `FramePair::identity()` retains both native timestamps
+and time bases, and `open_at_pair()` can recover that exact pair without
+rounding a displayed time. Applications may instead retain the displayed
+original frame handles for a current-pair export, avoiding another seek or
+decode.
 
 Interactive applications can instead use `paired::PairedPreviewReader` with
 `PreviewAcceleration::Auto` or `Software`. It retains an independent demuxer and
@@ -101,6 +108,10 @@ avoid unnecessary non-reference preroll. Continuous exports retain the serial
 `PairedReader` so they do not read the container twice. See
 [performance](performance.md) for measured behavior, bounded ownership and
 hardware/software qualification.
+
+A preview request after a chapter's last presented frame advances to the first
+available pair in following chapters. Both lenses must reach EOF together;
+unmatched frames and decode errors remain failures.
 
 Tests generate independent ISO-BMFF/ExtraInfo fixtures for metadata discovery
 and small MPEG-4 dual-track recordings with delayed frames for decode, chapter

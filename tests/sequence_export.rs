@@ -35,6 +35,10 @@ fn bytes(out: &mut Vec<u8>, tag: u32, value: &[u8]) {
     out.extend(value);
 }
 fn tail(index: u32, total: u32) -> Vec<u8> {
+    tail_with_stream_type(index, total, 3)
+}
+
+fn tail_with_stream_type(index: u32, total: u32, stream_type: u64) -> Vec<u8> {
     let mut data = Vec::new();
     bytes(&mut data, 1, b"SEQUENCE-EXPORT-TEST");
     bytes(&mut data, 2, b"Insta360 X5");
@@ -45,8 +49,10 @@ fn tail(index: u32, total: u32) -> Vec<u8> {
             .raw_offset
             .as_bytes(),
     );
-    integer(&mut data, 80, 2);
-    integer(&mut data, 131, 3);
+    if stream_type != 0 {
+        integer(&mut data, 80, 2);
+    }
+    integer(&mut data, 131, stream_type);
     integer(&mut data, 88, if total == 1 { 1 } else { 2 });
     let mut group = Vec::new();
     integer(&mut group, 1, 20);
@@ -433,6 +439,200 @@ fn audio_copy_preserves_packet_payload_order_and_video_offset_across_chapters() 
     assert_audio_matches(&actual, &expected);
 }
 
+fn with_audio_tracks(directory: &Path, index: u32, codecs: &[&str]) -> PathBuf {
+    let video = source(directory, index, 2, false);
+    let path = directory.join(format!("audio-tracks-{index}.insv"));
+    let mut command = Command::new("ffmpeg");
+    command.args(["-v", "error", "-i"]).arg(&video);
+    for (index, _) in codecs.iter().enumerate() {
+        command.args([
+            "-f",
+            "lavfi",
+            "-i",
+            &format!(
+                "sine=frequency={}:sample_rate=48000:duration=0.5",
+                500 + index * 200
+            ),
+        ]);
+    }
+    command.args(["-map", "0:v", "-c:v", "copy"]);
+    for (index, codec) in codecs.iter().enumerate() {
+        command.args([
+            "-map",
+            &format!("{}:a", index + 1),
+            &format!("-c:a:{index}"),
+            codec,
+            &format!("-metadata:s:a:{index}"),
+            if index == 0 {
+                "language=eng"
+            } else {
+                "language=fra"
+            },
+            &format!("-disposition:a:{index}"),
+            if index == 0 { "default" } else { "0" },
+        ]);
+    }
+    let output = command.args(["-f", "mp4"]).arg(&path).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(&tail(index, 2))
+        .unwrap();
+    path
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct AudioTrackSnapshot {
+    codec: ffmpeg::codec::Id,
+    language: String,
+    disposition: i32,
+    packets: Vec<(i64, i64, Vec<u8>)>,
+}
+
+fn audio_tracks(path: &Path) -> Vec<AudioTrackSnapshot> {
+    ffmpeg::init().unwrap();
+    let mut input = ffmpeg::format::input(path).unwrap();
+    let indices: Vec<_> = input
+        .streams()
+        .filter(|stream| stream.parameters().medium() == ffmpeg::media::Type::Audio)
+        .map(|stream| stream.index())
+        .collect();
+    let mut result: Vec<_> = indices
+        .iter()
+        .map(|index| {
+            let stream = input.stream(*index).unwrap();
+            AudioTrackSnapshot {
+                codec: stream.parameters().id(),
+                language: stream.metadata().get("language").unwrap().to_owned(),
+                // SAFETY: the input owns the live stream during this scalar read.
+                disposition: unsafe { (*stream.as_ptr()).disposition },
+                packets: Vec::new(),
+            }
+        })
+        .collect();
+    for (stream, packet) in input.packets() {
+        if let Some(index) = indices.iter().position(|index| *index == stream.index()) {
+            result[index].packets.push((
+                packet
+                    .pts()
+                    .unwrap()
+                    .rescale(stream.time_base(), (1, 1_000_000)),
+                (packet.pts().unwrap() + packet.duration())
+                    .rescale(stream.time_base(), (1, 1_000_000)),
+                packet.data().unwrap().to_vec(),
+            ));
+        }
+    }
+    result
+}
+
+#[test]
+fn mixed_aac_alac_tracks_preserve_packets_tags_and_dispositions_after_nonframe_cut() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = with_audio_tracks(directory.path(), 0, &["aac", "alac"]);
+    let second = with_audio_tracks(directory.path(), 1, &["aac", "alac"]);
+    let mut expected = audio_tracks(&first);
+    let second_tracks = audio_tracks(&second);
+    for (track, second) in expected.iter_mut().zip(second_tracks) {
+        track
+            .packets
+            .retain(|(pts, end, _)| *pts >= 0 && *end <= 500_000);
+        track.packets.extend(
+            second
+                .packets
+                .into_iter()
+                .filter(|(pts, end, _)| *pts >= 0 && *end <= 500_000)
+                .map(|(pts, end, payload)| (pts + 500_000, end + 500_000, payload)),
+        );
+        // The 250 ms cut's first retained video frame is at 300 ms. Both audio
+        // tracks use that same origin, never their independent first packet.
+        track
+            .packets
+            .retain(|(pts, end, _)| *pts >= 300_000 && *end <= 850_000);
+        for (pts, end, _) in &mut track.packets {
+            *pts -= 300_000;
+            *end -= 300_000;
+        }
+    }
+    let exporter = exporter(
+        RecordingSequence::new(vec![
+            InputSet::discover(first).unwrap(),
+            InputSet::discover(second).unwrap(),
+        ])
+        .unwrap(),
+    );
+    let options = VideoExportOptions {
+        start: Some(Duration::from_millis(250)),
+        duration: Some(Duration::from_millis(600)),
+        ..options(AudioPolicy::Copy)
+    };
+    assert_eq!(exporter.preflight_video(&options).unwrap().audio_tracks, 2);
+    let output = directory.path().join("mixed.mp4");
+    let (frames, events) = run(&exporter, &output, options);
+    assert_eq!(frames, 6);
+    assert!(events.iter().any(
+        |event| matches!(event, ExportEvent::EncoderSelected(report) if report.audio_tracks == 2)
+    ));
+    let actual = audio_tracks(&output);
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual.codec, expected.codec);
+        assert_eq!(actual.language, expected.language);
+        assert_eq!(actual.disposition, expected.disposition);
+        assert!(!actual.packets.is_empty());
+        assert_audio_matches(
+            &actual
+                .packets
+                .iter()
+                .map(|(pts, _, payload)| (*pts, payload.clone()))
+                .collect::<Vec<_>>(),
+            &expected
+                .packets
+                .iter()
+                .map(|(pts, _, payload)| (*pts, payload.clone()))
+                .collect::<Vec<_>>(),
+        );
+    }
+}
+
+#[test]
+fn incompatible_audio_layouts_fail_preflight_and_export_but_can_be_dropped() {
+    for codecs in [vec!["alac"], vec!["aac", "alac"], vec!["ac3"]] {
+        let directory = tempfile::tempdir().unwrap();
+        let first = with_audio_tracks(directory.path(), 0, &["aac"]);
+        let second = with_audio_tracks(directory.path(), 1, &codecs);
+        let exporter = exporter(
+            RecordingSequence::new(vec![
+                InputSet::discover(first).unwrap(),
+                InputSet::discover(second).unwrap(),
+            ])
+            .unwrap(),
+        );
+        let copy = options(AudioPolicy::Copy);
+        assert!(matches!(
+            exporter.preflight_video(&copy),
+            Err(insta360_rs::Error::MissingCapability(_))
+        ));
+        let output = directory.path().join("copy.mp4");
+        assert!(matches!(
+            exporter.export_video(&output, copy).wait(),
+            Err(insta360_rs::Error::MissingCapability(_))
+        ));
+        assert!(!output.exists());
+        assert!(exporter
+            .preflight_video(&options(AudioPolicy::Drop))
+            .is_ok());
+        assert_eq!(run(&exporter, &output, options(AudioPolicy::Drop)).0, 10);
+        assert!(audio_tracks(&output).is_empty());
+    }
+}
+
 #[test]
 fn silent_copy_preflight_validation_cancellation_and_no_clobber_are_explicit() {
     let directory = tempfile::tempdir().unwrap();
@@ -507,4 +707,71 @@ fn configured_real_x5_gpu_audio_smoke() {
     assert!(events.iter().any(|event| matches!(event, ExportEvent::BackendSelected(report) if report.selected == insta360_rs::EffectiveBackend::Gpu)));
     assert!(!decoded(&path).is_empty());
     assert!(!audio_packets(&path).is_empty());
+}
+
+#[test]
+fn preflight_rejects_unknown_lens_order_before_export_confirmation() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = source(directory.path(), 0, 1, false);
+    let file = fs::OpenOptions::new().append(true).open(&source).unwrap();
+    file.set_len(file.metadata().unwrap().len() - tail(0, 1).len() as u64)
+        .unwrap();
+    (&file).write_all(&tail_with_stream_type(0, 1, 0)).unwrap();
+    let sequence = RecordingSequence::single(InputSet::discover(source).unwrap()).unwrap();
+    assert_eq!(
+        sequence.chapters[0]
+            .inspection
+            .metadata
+            .reverse_video_track_order,
+        None
+    );
+    let exporter = exporter(sequence);
+    let output = directory.path().join("unknown-order.mp4");
+    let error = exporter
+        .export_video(&output, options(AudioPolicy::Drop))
+        .wait()
+        .unwrap_err();
+    assert!(error.to_string().contains("camera A/B"), "{error}");
+    let error = exporter
+        .preflight_video(&options(AudioPolicy::Drop))
+        .unwrap_err();
+    assert!(error.to_string().contains("camera A/B"), "{error}");
+    assert!(!output.exists());
+}
+
+#[test]
+fn repeated_preflight_and_competing_exports_publish_once_without_leaking_temporary_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = source(directory.path(), 0, 2, true);
+    let second = source(directory.path(), 1, 2, true);
+    let exporter = exporter(
+        RecordingSequence::new(vec![
+            InputSet::discover(first).unwrap(),
+            InputSet::discover(second).unwrap(),
+        ])
+        .unwrap(),
+    );
+    let options = options(AudioPolicy::Copy);
+    let expected = exporter.preflight_video(&options).unwrap();
+    for _ in 0..16 {
+        assert_eq!(exporter.preflight_video(&options).unwrap(), expected);
+    }
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    let output = directory.path().join("competing.mp4");
+    let jobs: Vec<_> = (0..6)
+        .map(|_| exporter.export_video(&output, options.clone()))
+        .collect();
+    let results: Vec<_> = jobs.into_iter().map(|job| job.wait()).collect();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .into_iter()
+            .find_map(Result::ok)
+            .unwrap()
+            .frames_written,
+        10
+    );
+    assert_eq!(decoded(&output).len(), 128 * 64 * 3 * 10);
+    assert!(!audio_packets(&output).is_empty());
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 3);
 }

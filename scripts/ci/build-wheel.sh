@@ -106,9 +106,8 @@ rustup toolchain install "$toolchain" --profile minimal --no-self-update
 python -m pip install -r /build/source/scripts/ci/requirements-wheel.txt
 
 notices=/build/source/src-python/python/insta360_rs/_licenses
-mkdir -p "$notices/sources" "$notices/project" /dist/sources
+mkdir -p "$notices/sources" /dist/sources
 cp "$INSTA360_FFMPEG_PREFIX/share/insta360-rs/"*.txt "$notices/"
-cp /build/source/src-python/LICENSE.md /build/source/src-python/NOTICE.md "$notices/project/"
 cp /build/source/scripts/ci/build-{wheel,ffmpeg}.sh "$notices/sources/"
 cp /build/source/scripts/ci/ffmpeg-runtime-config.sh "$notices/sources/"
 cp /build/source/scripts/ci/requirements-wheel.txt "$notices/sources/"
@@ -125,29 +124,8 @@ cp "$notices/sources/"* /dist/sources/
 
 # These files exist only in the release staging directory. Register their
 # licenses in wheel metadata without imposing generated files on local builds.
-python - <<'PY'
-import json
-from pathlib import Path
-import re
-import tomllib
-
-path = Path("/build/source/src-python/pyproject.toml")
-text = path.read_text()
-metadata = tomllib.loads(text)
-licenses = [
-    "python/insta360_rs/_licenses/project/*.md",
-    "python/insta360_rs/_licenses/*.txt",
-]
-if "license-files" in metadata["project"]:
-    pattern = r"(?m)^license-files\s*=\s*\[[^\]]*\]"
-    replacement = "license-files = " + json.dumps(licenses)
-else:
-    pattern = r"(?m)^\[project\]$"
-    replacement = "[project]\nlicense-files = " + json.dumps(licenses)
-text, count = re.subn(pattern, replacement, text, count=1)
-assert count == 1, "expected project license metadata"
-path.write_text(text)
-PY
+python /build/source/src-python/scripts/stage-project-licenses.py \
+    /build/source/src-python --runtime
 
 cd /build/source/src-python
 # --sdist builds the wheel from the generated source archive, verifying that

@@ -694,6 +694,56 @@ mod tests {
     }
 
     #[test]
+    fn continuation_matches_uninterrupted_motion_across_many_overlapping_chapters() {
+        let samples = constant_samples(UP, [0.0, 0.0, 2.0], 120);
+        let options = FusionOptions::default();
+        let uninterrupted = AttitudeTrack::new(&samples, options).unwrap();
+        let mut previous = AttitudeTrack::new(&samples[..351], options).unwrap();
+        let mut previous_origin = Duration::ZERO;
+        for start in (300..samples.len() - 1).step_by(300) {
+            let origin = samples[start].timestamp;
+            let end = (start + 351).min(samples.len());
+            let chapter: Vec<_> = samples[start..end]
+                .iter()
+                .map(|sample| MotionSample {
+                    timestamp: sample.timestamp - origin,
+                    ..*sample
+                })
+                .collect();
+            let boundary = origin - previous_origin;
+            let continued = AttitudeTrack::from_state(
+                &chapter,
+                options,
+                previous.pose_at(boundary).unwrap(),
+                previous.heading_at(boundary).unwrap(),
+                previous.diagnostics().residual_gyro_bias_rad_s,
+            )
+            .unwrap();
+            for sample in &chapter {
+                let absolute = sample.timestamp + origin;
+                let actual = continued.pose_at(sample.timestamp).unwrap();
+                let expected = uninterrupted.pose_at(absolute).unwrap();
+                for axis in [[1.0, 0.0, 0.0], UP] {
+                    assert_vector(
+                        actual.rotate_vector(axis),
+                        expected.rotate_vector(axis),
+                        1e-10,
+                    );
+                }
+                assert!(
+                    (continued.heading_at(sample.timestamp).unwrap()
+                        - uninterrupted.heading_at(absolute).unwrap())
+                    .abs()
+                        < 1e-10
+                );
+            }
+            previous = continued;
+            previous_origin = origin;
+        }
+        assert!(previous.heading_at(previous.coverage().1).unwrap() > 30.0 * std::f64::consts::TAU);
+    }
+
+    #[test]
     fn levels_tilted_and_upside_down_initial_gravity() {
         for accel in [
             UP,

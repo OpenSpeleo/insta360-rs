@@ -62,11 +62,12 @@ target-specific.
 
 The separate system `ffmpeg`/`ffprobe` executables generate test fixtures; the
 application links the prepared FFmpeg libraries. Fixture generation needs
-MPEG-4, AAC, and libx265 encoders and lavfi sources. Linux GPU tests use Mesa's
-software Vulkan driver with `INSTA360_RS_REQUIRE_GPU=1`, so an absent adapter
-fails rather than silently skipping. This exercises Vulkan functionality without
-requiring a physical GPU. Licensed recordings, vendor-oracle comparisons, and
-physical GPU qualification remain separate; see [testing.md](testing.md).
+MPEG-4, AAC, ALAC, AC3, and libx265 encoders and lavfi sources. Linux GPU tests
+use Mesa's software Vulkan driver with `INSTA360_RS_REQUIRE_GPU=1`, so an absent
+adapter fails rather than silently skipping. This exercises Vulkan functionality
+without requiring a physical GPU. Licensed recordings, vendor-oracle
+comparisons, and physical GPU qualification remain separate; see
+[testing.md](testing.md).
 
 ## Checks and artifacts
 
