@@ -10,9 +10,11 @@ details are intentionally omitted.
 
 - Export compatible split recordings as continuous 360° videos with original
   audio, or extract synchronized fisheye frames and complete source archives.
-  77f570b
+  84430e5
 
 ### Performance
+
+- Faster synchronized fisheye previews when moving through a recording. 84430e5
 
 ## v0.1.0 - 2026-09-09
 
