@@ -99,22 +99,40 @@ impl MaskCache {
         // Drop our old entry before allocating another resolution. In-flight
         // calls own their Arc; one render cannot invalidate another's masks.
         *cache = None;
-        let masks = Arc::new([
+        let build = |index| {
             build_mask(
-                dimensions[0],
-                &key.lenses[0],
-                0,
-                key.recipes[0],
-                key.geometry[0],
-            )?,
-            build_mask(
-                dimensions[1],
-                &key.lenses[1],
-                1,
-                key.recipes[1],
-                key.geometry[1],
-            )?,
-        ]);
+                dimensions[index],
+                &key.lenses[index],
+                index,
+                key.recipes[index],
+                key.geometry[index],
+            )
+        };
+        let masks = if key.recipes.iter().all(Option::is_some) {
+            // Keep one preparation per shared cache. A Rayon join here could
+            // steal another caller that waits for this same mutex and deadlock.
+            // One scoped helper has a non-stealing wait and bounded scratch.
+            std::thread::scope(|scope| -> Result<_> {
+                match std::thread::Builder::new()
+                    .name("insta360-mask".into())
+                    .spawn_scoped(scope, || build(1))
+                {
+                    Ok(worker) => {
+                        let first = build(0);
+                        let second = worker
+                            .join()
+                            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+                        // Join even after a first-lens error before returning.
+                        Ok([first?, second?])
+                    }
+                    Err(_) => Ok([build(0)?, build(1)?]),
+                }
+            })?
+        } else {
+            // Bare and single-mask inputs need no helper thread.
+            [build(0)?, build(1)?]
+        };
+        let masks = Arc::new(masks);
         *cache = Some((key, Arc::clone(&masks)));
         Ok(masks)
     }
@@ -384,27 +402,71 @@ fn feather_mask(width: usize, height: usize, binary: &[u8], multiplier: f64) -> 
             *distance = 0;
         }
     }
-    for forward in [true, false] {
-        for step in 0..length {
-            let index = if forward { step } else { length - 1 - step };
+    // The eight offsets are fixed for interior pixels. Keeping the two scans
+    // separate avoids per-neighbor coordinate arithmetic and bounds branches,
+    // while the border follows the same clipped stencil as the scalar path.
+    // No padded image is allocated: narrow inputs retain the same memory bound.
+    let border_distance = |distances: &[u32], index: usize, x: usize, y: usize, forward| {
+        let mut shortest = distances[index];
+        for (dx, dy, cost) in PREVIOUS {
+            let (xx, yy) = if forward {
+                (x as isize + dx, y as isize + dy)
+            } else {
+                (x as isize - dx, y as isize - dy)
+            };
+            if xx >= 0 && yy >= 0 && xx < width as isize && yy < height as isize {
+                shortest =
+                    shortest.min(distances[yy as usize * width + xx as usize].saturating_add(cost));
+            }
+        }
+        shortest
+    };
+    for y in 0..height {
+        let row = y * width;
+        for x in 0..width {
+            let index = row + x;
             if distances[index] == 0 {
                 continue;
             }
-            let x = (index % width) as isize;
-            let y = (index / width) as isize;
-            let mut shortest = distances[index];
-            for (dx, dy, cost) in PREVIOUS {
-                let (xx, yy) = if forward {
-                    (x + dx, y + dy)
-                } else {
-                    (x - dx, y - dy)
-                };
-                if xx >= 0 && yy >= 0 && xx < width as isize && yy < height as isize {
-                    shortest = shortest
-                        .min(distances[yy as usize * width + xx as usize].saturating_add(cost));
-                }
+            distances[index] = if y >= 2 && x >= 2 && x + 2 < width {
+                let above = index - width;
+                let above_two = above - width;
+                distances[index]
+                    .min(distances[above_two - 1].saturating_add(KNIGHT))
+                    .min(distances[above_two + 1].saturating_add(KNIGHT))
+                    .min(distances[above - 2].saturating_add(KNIGHT))
+                    .min(distances[above - 1].saturating_add(DIAGONAL))
+                    .min(distances[above].saturating_add(HV))
+                    .min(distances[above + 1].saturating_add(DIAGONAL))
+                    .min(distances[above + 2].saturating_add(KNIGHT))
+                    .min(distances[index - 1].saturating_add(HV))
+            } else {
+                border_distance(&distances, index, x, y, true)
+            };
+        }
+    }
+    for y in (0..height).rev() {
+        let row = y * width;
+        for x in (0..width).rev() {
+            let index = row + x;
+            if distances[index] == 0 {
+                continue;
             }
-            distances[index] = shortest;
+            distances[index] = if y + 2 < height && x >= 2 && x + 2 < width {
+                let below = index + width;
+                let below_two = below + width;
+                distances[index]
+                    .min(distances[below_two + 1].saturating_add(KNIGHT))
+                    .min(distances[below_two - 1].saturating_add(KNIGHT))
+                    .min(distances[below + 2].saturating_add(KNIGHT))
+                    .min(distances[below + 1].saturating_add(DIAGONAL))
+                    .min(distances[below].saturating_add(HV))
+                    .min(distances[below - 1].saturating_add(DIAGONAL))
+                    .min(distances[below - 2].saturating_add(KNIGHT))
+                    .min(distances[index + 1].saturating_add(HV))
+            } else {
+                border_distance(&distances, index, x, y, false)
+            };
         }
     }
     let mut weights = filled(length, 0.0_f32)?;
@@ -427,6 +489,111 @@ mod tests {
     use crate::stitch::{low_frequency_rgb, CpuStitcher, LensFrame};
 
     const FEATHER: f64 = 0.243_902_444_839_477_54;
+
+    // Retained pre-optimization scan for exact output equivalence. The separate
+    // Dijkstra test below checks the metric independently of either raster scan.
+    fn scalar_feather_mask(
+        width: usize,
+        height: usize,
+        binary: &[u8],
+        multiplier: f64,
+    ) -> Result<Vec<f32>> {
+        let length = mask_len(width, height)?;
+        if binary.len() != length {
+            return Err(invalid(
+                "source mask raster length disagrees with its dimensions",
+            ));
+        }
+        // OpenCV 4.x distranform.cpp getDistanceTransformMask(52): 1, 1.4,
+        // 2.1969, rounded to 16 fractional bits by distanceTransform_5x5.
+        const HV: u32 = 65_536;
+        const DIAGONAL: u32 = 91_750;
+        const KNIGHT: u32 = 143_976;
+        const FAR: u32 = u32::MAX - KNIGHT;
+        const PREVIOUS: [(isize, isize, u32); 8] = [
+            (-1, -2, KNIGHT),
+            (1, -2, KNIGHT),
+            (-2, -1, KNIGHT),
+            (-1, -1, DIAGONAL),
+            (0, -1, HV),
+            (1, -1, DIAGONAL),
+            (2, -1, KNIGHT),
+            (-1, 0, HV),
+        ];
+        let mut distances = filled(length, FAR)?;
+        for (distance, pixel) in distances.iter_mut().zip(binary) {
+            if *pixel == 0 {
+                *distance = 0;
+            }
+        }
+        for forward in [true, false] {
+            for step in 0..length {
+                let index = if forward { step } else { length - 1 - step };
+                if distances[index] == 0 {
+                    continue;
+                }
+                let x = (index % width) as isize;
+                let y = (index / width) as isize;
+                let mut shortest = distances[index];
+                for (dx, dy, cost) in PREVIOUS {
+                    let (xx, yy) = if forward {
+                        (x + dx, y + dy)
+                    } else {
+                        (x - dx, y - dy)
+                    };
+                    if xx >= 0 && yy >= 0 && xx < width as isize && yy < height as isize {
+                        shortest = shortest
+                            .min(distances[yy as usize * width + xx as usize].saturating_add(cost));
+                    }
+                }
+                distances[index] = shortest;
+            }
+        }
+        let mut weights = filled(length, 0.0_f32)?;
+        for (weight, distance) in weights.iter_mut().zip(distances) {
+            // distanceTransform produces f32 before convertTo applies its double alpha.
+            let pixels = distance as f32 / HV as f32;
+            *weight = (f64::from(pixels) * multiplier).min(1.0) as f32;
+        }
+        Ok(weights)
+    }
+
+    #[test]
+    fn optimized_feather_matches_scalar_on_rectangular_narrow_and_random_masks() {
+        let mut random = 0x42f0_c391_u32;
+        for (width, height) in [
+            (1, 1),
+            (1, 31),
+            (31, 1),
+            (2, 17),
+            (17, 2),
+            (3, 3),
+            (4, 17),
+            (5, 29),
+            (7, 4),
+            (19, 23),
+            (65, 64),
+            (127, 9),
+        ] {
+            for density in [0, 1, 3, 7, 8] {
+                let binary: Vec<_> = (0..width * height)
+                    .map(|_| {
+                        random ^= random << 13;
+                        random ^= random >> 17;
+                        random ^= random << 5;
+                        u8::from(random % 8 < density)
+                    })
+                    .collect();
+                for multiplier in [FEATHER, 0.01, 0.75, 1.0] {
+                    assert_eq!(
+                        feather_mask(width, height, &binary, multiplier).unwrap(),
+                        scalar_feather_mask(width, height, &binary, multiplier).unwrap(),
+                        "{width}x{height}, density {density}, multiplier {multiplier}",
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn integer_circle_has_independent_scanline_golden() {
@@ -635,6 +802,182 @@ mod tests {
             low_frequency_rgb(&frame, 64.25, 64.25, Some(&mask)),
             [100.0; 3]
         );
+    }
+
+    #[test]
+    fn concurrent_cpu_clones_prepare_masks_inside_a_small_rayon_pool() {
+        use crate::StitchEngine;
+        use rayon::prelude::*;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        const CHILD: &str = "INSTA360_RS_CONCURRENT_MASK_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // A deadlock regression must fail in bounded time, not hang CI.
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "stitch::mask::tests::concurrent_cpu_clones_prepare_masks_inside_a_small_rayon_pool", "--nocapture"])
+                .env(CHILD, "1")
+                .stdout(Stdio::null())
+                .spawn().unwrap();
+            let started = Instant::now();
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(
+                        status.success(),
+                        "concurrent shared-cache child failed: {status}"
+                    );
+                    return;
+                }
+                if started.elapsed() > Duration::from_secs(30) {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    panic!("concurrent shared-cache mask preparation deadlocked");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        let mut calibration = synthetic_dual_fisheye_calibration(64, 64).unwrap();
+        calibration.camera_model = Some(crate::CameraModel::X5);
+        calibration.lens_geometry = [Some(ResolvedLensGeometry {
+            full_fov_degrees: 198.0,
+            blend_angle_degrees: 186.0,
+            blend_angle_recorded: false,
+        }); 2];
+        for lens in &mut calibration.lenses {
+            lens.lens_type = 117;
+            lens.xi = Some(2.0);
+            lens.fx = 48.0;
+            lens.fy = 48.0;
+        }
+        let lenses = [
+            LensFrame::new(64, 64, vec![40; 64 * 64 * 3]).unwrap(),
+            LensFrame::new(64, 64, vec![80; 64 * 64 * 3]).unwrap(),
+        ];
+        let projection = crate::EquirectangularProjection {
+            width: 16,
+            height: 8,
+        };
+        let mut variants = Vec::new();
+        for index in 0..4 {
+            let mut variant = calibration.clone();
+            variant.lenses[0].cx += f64::from(index) * 0.5;
+            let expected = CpuStitcher::new()
+                .stitch(&lenses, &variant, projection)
+                .unwrap();
+            variants.push((variant, expected));
+        }
+        let stitcher = CpuStitcher::new();
+        let clones = [stitcher.clone(), stitcher.clone()];
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            (0..64).into_par_iter().for_each(|index| {
+                let (calibration, expected) = &variants[index % variants.len()];
+                let actual = clones[index % clones.len()]
+                    .stitch(&lenses, calibration, projection)
+                    .unwrap();
+                assert_eq!(actual.as_rgb8(), expected.as_rgb8());
+            });
+        });
+    }
+
+    #[test]
+    fn paired_mask_preparation_matches_sequential_work_and_preserves_cache_error_contracts() {
+        let dimensions = [(64, 48), (48, 64)];
+        let mut calibration = synthetic_dual_fisheye_calibration(64, 64).unwrap();
+        calibration.camera_model = Some(crate::CameraModel::X5);
+        calibration.lens_geometry = [Some(ResolvedLensGeometry {
+            full_fov_degrees: 198.0,
+            blend_angle_degrees: 186.0,
+            blend_angle_recorded: false,
+        }); 2];
+        for lens in &mut calibration.lenses {
+            lens.xi = Some(2.0);
+            lens.fx = 48.0;
+            lens.fy = 48.0;
+        }
+        calibration.lenses[1].cx += 1.75;
+        calibration.lenses[1].cy -= 2.25;
+        let cache = MaskCache::default();
+        for enabled in [[false, false], [false, true], [true, false], [true, true]] {
+            for (lens, enabled) in calibration.lenses.iter_mut().zip(enabled) {
+                lens.lens_type = if enabled { 117 } else { 113 };
+            }
+            let actual = cache.prepare(dimensions, &calibration).unwrap();
+            let geometry = resolved_render_geometry(&calibration).unwrap();
+            for index in 0..2 {
+                let expected = build_mask(
+                    dimensions[index],
+                    &calibration.lenses[index],
+                    index,
+                    mask_recipe(&calibration, index),
+                    geometry[index],
+                )
+                .unwrap();
+                match (&actual[index], expected) {
+                    (Some(actual), Some(expected)) => {
+                        assert_eq!(
+                            (actual.width, actual.height),
+                            (expected.width, expected.height)
+                        );
+                        assert_eq!(actual.weights, expected.weights);
+                        assert!(actual.weights.iter().any(|weight| *weight > 0.0));
+                    }
+                    (None, None) => {}
+                    _ => panic!("lens {index} changed mask presence"),
+                }
+            }
+            assert!(Arc::ptr_eq(
+                &actual,
+                &cache.prepare(dimensions, &calibration).unwrap()
+            ));
+        }
+        let valid = cache.prepare(dimensions, &calibration).unwrap();
+        assert!(cache
+            .prepare([(8192, 8192); 2], &calibration)
+            .unwrap_err()
+            .to_string()
+            .contains("combined source masks"));
+        assert!(Arc::ptr_eq(
+            &valid,
+            &cache.prepare(dimensions, &calibration).unwrap()
+        ));
+        let mut invalid = calibration.clone();
+        invalid.lenses[0].cx = 1.0e12;
+        invalid.lenses[1].xi = None;
+        let geometry = resolved_render_geometry(&invalid).unwrap();
+        let first_error = build_mask(
+            dimensions[0],
+            &invalid.lenses[0],
+            0,
+            mask_recipe(&invalid, 0),
+            geometry[0],
+        )
+        .unwrap_err()
+        .to_string();
+        let second_error = build_mask(
+            dimensions[1],
+            &invalid.lenses[1],
+            1,
+            mask_recipe(&invalid, 1),
+            geometry[1],
+        )
+        .unwrap_err()
+        .to_string();
+        assert_ne!(first_error, second_error);
+        assert_eq!(
+            cache.prepare(dimensions, &invalid).unwrap_err().to_string(),
+            first_error
+        );
+        assert!(cache.0.lock().unwrap().is_none());
+        let recovered = cache.prepare(dimensions, &calibration).unwrap();
+        for index in 0..2 {
+            assert_eq!(
+                recovered[index].as_ref().unwrap().weights,
+                valid[index].as_ref().unwrap().weights
+            );
+        }
     }
 
     #[test]

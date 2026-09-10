@@ -217,28 +217,120 @@ fn options(audio: AudioPolicy) -> VideoExportOptions {
     }
 }
 
+fn motion_source(directory: &Path, index: u32, total: u32) -> InputSet {
+    use std::io::{Seek, SeekFrom};
+    let path = source(directory, index, total, false);
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let offset = file.metadata().unwrap().len() - tail(index, total).len() as u64;
+    file.set_len(offset).unwrap();
+    file.seek(SeekFrom::Start(offset)).unwrap();
+    file.write_all(&tail_with_motion(index, total, 3, true))
+        .unwrap();
+    InputSet::discover(path).unwrap()
+}
+
+#[test]
+fn source_motion_support_is_independent_of_rendering_and_preserves_readout_failures() {
+    use insta360_rs::container::{CropWindow, FileRotation};
+    use insta360_rs::media::inspect_motion_support;
+    use std::sync::atomic::AtomicBool;
+    let directory = tempfile::tempdir().unwrap();
+    let mut sequence = RecordingSequence::new(vec![
+        motion_source(directory.path(), 0, 2),
+        motion_source(directory.path(), 1, 2),
+    ])
+    .unwrap();
+    for chapter in &mut sequence.chapters {
+        let metadata = &mut chapter.inspection.metadata;
+        metadata.offsets.clear(); // geometry is deliberately unavailable
+        metadata.recorded_color_mode_invalid = true; // color must never be resolved
+        metadata.file_rotation = Some(FileRotation::Degrees0);
+        metadata.rolling_shutter_time = Some(10.0);
+        metadata.crop_window = Some(CropWindow {
+            source_width: 64,
+            source_height: 64,
+            destination_width: 64,
+            destination_height: 64,
+            x_offset: 0,
+            y_offset: 0,
+            unknown_fields: vec![],
+        });
+    }
+    let cancel = AtomicBool::new(false);
+    let supported = inspect_motion_support(&sequence, &cancel).unwrap();
+    assert_eq!(supported.stabilization_error, None);
+    assert_eq!(supported.rolling_shutter_error, None);
+    assert!(matches!(
+        inspect_motion_support(&sequence, &AtomicBool::new(true)),
+        Err(insta360_rs::Error::Cancelled)
+    ));
+    assert_eq!(
+        inspect_motion_support(&sequence, &cancel).unwrap(),
+        supported
+    );
+    let mut unavailable = sequence.clone();
+    unavailable.chapters[1].inspection.metadata.crop_window = None;
+    let report = inspect_motion_support(&unavailable, &cancel).unwrap();
+    assert_eq!(report.stabilization_error, None);
+    assert!(report
+        .rolling_shutter_error
+        .unwrap()
+        .contains("crop metadata is missing"));
+    unavailable = sequence.clone();
+    unavailable.chapters[1]
+        .inspection
+        .metadata
+        .rolling_shutter_time = Some(10_000.0);
+    let report = inspect_motion_support(&unavailable, &cancel).unwrap();
+    assert_eq!(report.stabilization_error, None);
+    assert!(report
+        .rolling_shutter_error
+        .unwrap()
+        .contains("readout duration exceeds"));
+    unavailable.chapters[1]
+        .inspection
+        .metadata
+        .rolling_shutter_time = Some(-1.0);
+    let report = inspect_motion_support(&unavailable, &cancel).unwrap();
+    for error in [report.stabilization_error, report.rolling_shutter_error] {
+        assert!(error.unwrap().contains("timing metadata is invalid"));
+    }
+    unavailable = sequence.clone();
+    unavailable.chapters[1]
+        .inspection
+        .metadata
+        .first_frame_timestamp = sequence.chapters[0]
+        .inspection
+        .metadata
+        .first_frame_timestamp;
+    let report = inspect_motion_support(&unavailable, &cancel).unwrap();
+    for error in [report.stabilization_error, report.rolling_shutter_error] {
+        assert!(error
+            .unwrap()
+            .contains("chapter capture clock repeats or moves backwards"));
+    }
+    unavailable = sequence;
+    unavailable.chapters[0].inspection.metadata.camera_name = Some("Insta360 X4".into());
+    let report = inspect_motion_support(&unavailable, &cancel).unwrap();
+    assert!(report.stabilization_error.is_some());
+    assert!(report.rolling_shutter_error.is_some());
+}
+
 #[test]
 fn exact_stills_replay_chapter_motion_on_late_backward_and_repeated_requests() {
     use insta360_rs::media::RecordingFrameRenderer;
-    use std::io::{Seek, SeekFrom};
     use std::sync::atomic::AtomicBool;
     let directory = tempfile::tempdir().unwrap();
-    let motion_source = |index, total| {
-        let path = source(directory.path(), index, total, false);
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-        let offset = file.metadata().unwrap().len() - tail(index, total).len() as u64;
-        file.set_len(offset).unwrap();
-        file.seek(SeekFrom::Start(offset)).unwrap();
-        file.write_all(&tail_with_motion(index, total, 3, true))
-            .unwrap();
-        InputSet::discover(path).unwrap()
-    };
-    let full = RecordingSequence::single(motion_source(0, 1)).unwrap();
-    let split = RecordingSequence::new(vec![motion_source(0, 2), motion_source(1, 2)]).unwrap();
+    let full = RecordingSequence::single(motion_source(directory.path(), 0, 1)).unwrap();
+    let split = RecordingSequence::new(vec![
+        motion_source(directory.path(), 0, 2),
+        motion_source(directory.path(), 1, 2),
+    ])
+    .unwrap();
     let settings = StitchConfig {
         housing: Housing::InvisibleDiveCase,
         environment: Environment::Underwater,

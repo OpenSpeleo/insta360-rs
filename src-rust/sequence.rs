@@ -16,6 +16,8 @@ const MAX_CHAPTERS: usize = 4096;
 pub struct RecordingChapter {
     pub inputs: InputSet,
     pub inspection: InsvInspection,
+    /// Declared audio tracks across all simultaneous input files.
+    pub audio_track_count: usize,
     pub timeline_start: Duration,
     pub duration: Duration,
     pub group_index: Option<u32>,
@@ -351,6 +353,7 @@ fn inspect_chapter(inputs: InputSet) -> Result<RecordingChapter> {
         let file = File::open(path).map_err(|error| io_error(path, error))?;
         inspections.push(InsvReader::new(file)?.inspect()?);
     }
+    let audio_track_count = inspections.iter().map(|item| item.audio_track_count).sum();
     let inspection = inspections.remove(0);
     for secondary in inspections {
         if inspection.metadata.recording_group != secondary.metadata.recording_group
@@ -403,6 +406,7 @@ fn inspect_chapter(inputs: InputSet) -> Result<RecordingChapter> {
     Ok(RecordingChapter {
         inputs,
         inspection,
+        audio_track_count,
         timeline_start: Duration::ZERO,
         duration,
         group_index,

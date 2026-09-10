@@ -111,9 +111,36 @@ resident; earlier-frame requests replay preceding metadata. Failed or cancelled
 preparation can be retried on the same session. The static `preflight` delegates
 to this method and discards its session for callers needing reports only.
 `inspect_frame_dimensions` performs cheaper layout-only inspection and reports
-one lens's dimensions even for packed input. Explicit panorama projections
-retain the SDK's existing ability to upscale; applications can impose a
-no-upscale policy before calling it.
+one lens's dimensions even for packed input. Its `FrameDimensions::scaled`
+method resolves the native image path's even dimensions without upscaling.
+Explicit panorama projections retain the SDK's existing ability to upscale;
+applications can impose a no-upscale policy before calling it. Preview hosts can
+skip `prepare_all` and let `render` prepare the requested chapter lazily;
+exports must still preflight the entire requested scope before creating output.
+Keep sessions alive across related requests to retain their motion, model and
+GPU resources. Reapplying the same shared LUT (or `None`) does not invalidate
+GPU frame allocations.
+
+For an import panel, `inspect_motion_support` checks source timing and telemetry
+across chapters without decoders, optical calibration, GPU initialization, or
+color assets. It returns independent stabilization and rolling-shutter errors:
+required readout is tried first; a failed readout check triggers a motion-only
+pass so missing or unsupported readout does not hide supported stabilization.
+Malformed timing remains an error under the normal motion validation rules. This
+still reads bounded telemetry and fuses attitudes, so hosts should defer it when
+immediate source selection matters. Only adjacent chapter motion is retained,
+and cancellation is checked between synchronous chapter preparations.
+`InsvInspection::audio_track_count` counts declared audio handlers without
+opening decoders; `RecordingChapter::audio_track_count` sums all simultaneous
+inputs during their existing header inspection. Neither establishes audio codec
+or packet validity.
+
+`validate_color_metadata(metadata, conversion, require_sdr)` checks the camera's
+I-Log/Dolby declarations without loading LUTs. Set `require_sdr` for panorama
+output or enabled restoration; encoded PQ/HLG checks remain in actual preflight.
+`UnderwaterColorOptions::validate_dimensions` checks settings, compiled feature,
+size and frame rate without models or allocation. These lightweight checks do
+not replace strict runtime/resource validation before export.
 
 `media::NativeColorProcessor` supplies the color-only route independently of
 calibration and stabilization. Its `preflight` validates all chapters and

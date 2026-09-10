@@ -9,7 +9,6 @@ mod guided;
 use super::ilut::IntegerLut;
 use crate::{Error, Result};
 
-const MAX_PIXELS: usize = 64 * 1024 * 1024;
 const UPDATE_RATE: f32 = 0.98;
 
 pub(super) struct LegacySession {
@@ -38,25 +37,15 @@ impl LegacySession {
         balance: f32,
         lut: IntegerLut,
     ) -> Result<Self> {
+        crate::UnderwaterColorOptions {
+            mode: crate::UnderwaterColorMode::Legacy,
+            strength: Some(strength),
+            balance: Some(balance),
+            style: None,
+        }
+        .validate_dimensions(width, height, fps_num, fps_den)?;
         let width = width as usize;
         let height = height as usize;
-        // Native Init 0x1f64964..78 rejects either dimension below 64.
-        if width < 64
-            || height < 64
-            || width
-                .checked_mul(height)
-                .is_none_or(|size| size > MAX_PIXELS)
-            || fps_num == 0
-            || fps_den == 0
-            || !strength.is_finite()
-            || !(0.0..=1.0).contains(&strength)
-            || !balance.is_finite()
-            || !(0.0..=1.0).contains(&balance)
-        {
-            return Err(invalid(
-                "legacy underwater restoration requires dimensions >=64, at most 64 megapixels, a positive frame rate, and controls in [0,1]",
-            ));
-        }
         let small_len = (width / 4) * (height / 4);
         Ok(Self {
             width,

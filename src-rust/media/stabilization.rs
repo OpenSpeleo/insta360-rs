@@ -1,7 +1,10 @@
 //! File-level camera-clock alignment and gravity-referenced stabilization.
 
 use std::io::{Read, Seek};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
 
 use crate::container::{InsvInspection, InsvMetadata, RecordInfo, VideoPtsMapType};
 use crate::motion::profile::X5MotionProfile;
@@ -16,6 +19,86 @@ use crate::{Error, InsvReader, Result, RollingShutterCorrection, Stabilization, 
 const MAX_GYRO_BYTES: u64 = 5_000_000 * 20;
 const MAX_EXPOSURE_BYTES: u64 = 10_000_000 * 16;
 const READOUT_POSES: usize = 129;
+
+/// Source telemetry support, independent of decoders, calibration and render resources.
+/// An absent error proves the corresponding motion preparation for every chapter.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MotionSupport {
+    pub stabilization_error: Option<String>,
+    pub rolling_shutter_error: Option<String>,
+}
+
+/// Checks timing and telemetry with bounded, adjacent-chapter motion state.
+///
+/// Reads sample tables and telemetry, but never decodes images or initializes GPU,
+/// color or model resources. The common case prepares required readout once;
+/// on failure a second pass with readout off distinguishes stabilization support
+/// from a readout-only failure. Malformed timing is retained in the error fields.
+/// Cancellation returns an error instead of a partial support report. Checks occur
+/// between chapters; one chapter's bounded telemetry preparation is synchronous.
+pub fn inspect_motion_support(
+    sequence: &crate::RecordingSequence,
+    cancel: &AtomicBool,
+) -> Result<MotionSupport> {
+    fn prepare(
+        sequence: &crate::RecordingSequence,
+        cancel: &AtomicBool,
+        rolling_shutter: RollingShutterCorrection,
+    ) -> Result<()> {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Cancelled);
+        }
+        if sequence.chapters.is_empty() {
+            return Err(Error::InvalidMedia("recording sequence is empty".into()));
+        }
+        let config = StitchConfig {
+            stabilization: Stabilization::DirectionLock,
+            rolling_shutter,
+            ..StitchConfig::default()
+        };
+        let mut previous = None;
+        for chapter in &sequence.chapters {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
+            let path = &chapter.inputs.paths()[0];
+            let file =
+                std::fs::File::open(path).map_err(|error| crate::error::io_error(path, error))?;
+            let mut reader = InsvReader::new(file)?;
+            let next = FileStabilizer::from_reader_continuing(
+                &mut reader,
+                &chapter.inspection,
+                &config,
+                previous.as_ref(),
+            );
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
+            previous = next?;
+        }
+        Ok(())
+    }
+    let rolling_shutter_error = match prepare(sequence, cancel, RollingShutterCorrection::Required)
+    {
+        Ok(()) => {
+            return Ok(MotionSupport {
+                stabilization_error: None,
+                rolling_shutter_error: None,
+            })
+        }
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(error) => Some(error.to_string()),
+    };
+    let stabilization_error = match prepare(sequence, cancel, RollingShutterCorrection::Off) {
+        Ok(()) => None,
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(error) => Some(error.to_string()),
+    };
+    Ok(MotionSupport {
+        stabilization_error,
+        rolling_shutter_error,
+    })
+}
 
 #[derive(Clone)]
 enum FrameClock {
@@ -1243,6 +1326,7 @@ mod tests {
             records: Vec::new(),
             metadata: InsvMetadata::default(),
             video_tracks: Vec::new(),
+            audio_track_count: 0,
             duration: None,
             fps: None,
             trailer: crate::TrailerInfo {

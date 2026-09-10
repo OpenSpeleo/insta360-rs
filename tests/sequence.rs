@@ -114,6 +114,28 @@ fn write(
     path
 }
 #[test]
+fn chapter_audio_count_includes_the_secondary_input_without_changing_primary_inspection() {
+    let directory = tempfile::tempdir().unwrap();
+    let primary = directory.path().join("VID_20260101_120000_00_001.insv");
+    let secondary = directory.path().join("VID_20260101_120000_10_001.insv");
+    let data = metadata(0, 1, 1, "audio-pair");
+    fs::write(&primary, fixture(&data)).unwrap();
+    let mut handler = vec![0; 8];
+    handler.extend(b"soun");
+    let mut tracks = track();
+    tracks.extend(track());
+    tracks.extend(bmff(b"trak", &bmff(b"mdia", &bmff(b"hdlr", &handler))));
+    let mut second = bmff(b"ftyp", b"isom\0\0\0\0isom");
+    second.extend(bmff(b"moov", &tracks));
+    second.extend(trailer(&data));
+    fs::write(&secondary, second).unwrap();
+    let sequence = RecordingSequence::single(InputSet::discover(&primary).unwrap()).unwrap();
+    assert_eq!(sequence.chapters[0].inputs.paths().len(), 2);
+    assert_eq!(sequence.chapters[0].inspection.audio_track_count, 0);
+    assert_eq!(sequence.chapters[0].audio_track_count, 1);
+}
+
+#[test]
 fn decodes_split_group_and_retains_original_fields() {
     let data = fixture(&metadata(1, 3, 2, "camera-group"));
     let inspection = InsvReader::new(std::io::Cursor::new(data))

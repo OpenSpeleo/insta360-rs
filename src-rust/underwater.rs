@@ -62,21 +62,8 @@ impl UnderwaterColorSession {
         fps_denominator: u32,
         provider: &dyn AssetProvider,
     ) -> Result<Self> {
-        options.validate_capabilities()?;
-        let area = (width as usize)
-            .checked_mul(height as usize)
-            .filter(|area| *area > 0 && *area <= 64 * 1024 * 1024)
-            .ok_or_else(|| {
-                Error::InvalidMedia(
-                    "underwater color requires positive dimensions and at most 64 megapixels"
-                        .into(),
-                )
-            })?;
-        if fps_numerator == 0 || fps_denominator == 0 {
-            return Err(Error::InvalidMedia(
-                "underwater color requires a positive rational frame rate".into(),
-            ));
-        }
+        options.validate_dimensions(width, height, fps_numerator, fps_denominator)?;
+        let area = width as usize * height as usize;
         let engine = match options.mode {
             UnderwaterColorMode::Off => Engine::Off,
             UnderwaterColorMode::Legacy => {
@@ -161,6 +148,38 @@ impl UnderwaterColorOptions {
         self.validate()?;
         if self.mode == UnderwaterColorMode::Ai && !cfg!(feature = "underwater-ai") {
             return Err(Error::MissingCapability("underwater AI restoration requires the underwater-ai feature and its pinned MNN CPU build".into()));
+        }
+        Ok(())
+    }
+
+    /// Validates settings, compiled capability and frame shape without loading assets.
+    /// Model availability and allocation are checked when a session is prepared.
+    pub fn validate_dimensions(
+        &self,
+        width: u32,
+        height: u32,
+        fps_numerator: u32,
+        fps_denominator: u32,
+    ) -> Result<()> {
+        self.validate_capabilities()?;
+        (width as usize)
+            .checked_mul(height as usize)
+            .filter(|area| *area > 0 && *area <= 64 * 1024 * 1024)
+            .ok_or_else(|| {
+                Error::InvalidMedia(
+                    "underwater color requires positive dimensions and at most 64 megapixels"
+                        .into(),
+                )
+            })?;
+        if fps_numerator == 0 || fps_denominator == 0 {
+            return Err(Error::InvalidMedia(
+                "underwater color requires a positive rational frame rate".into(),
+            ));
+        }
+        if self.mode == UnderwaterColorMode::Legacy && (width < 64 || height < 64) {
+            return Err(Error::InvalidMedia(
+                "legacy underwater restoration requires dimensions >=64".into(),
+            ));
         }
         Ok(())
     }
@@ -308,6 +327,52 @@ mod tests {
             UnderwaterColorSession::prepare(options, 64, 64, 30, 1, &MissingAssets),
             Err(Error::MissingCapability(_))
         ));
+    }
+
+    #[test]
+    fn lightweight_dimension_checks_match_preparation_before_asset_access() {
+        let off = UnderwaterColorOptions::default();
+        off.validate_dimensions(1, 1, 30, 1).unwrap();
+        off.validate_dimensions(8192, 8192, 30, 1).unwrap();
+        for (width, height, numerator, denominator) in [
+            (0, 64, 30, 1),
+            (64, 0, 30, 1),
+            (8192, 8193, 30, 1),
+            (u32::MAX, u32::MAX, 30, 1),
+            (64, 64, 0, 1),
+            (64, 64, 30, 0),
+        ] {
+            let expected = off
+                .validate_dimensions(width, height, numerator, denominator)
+                .unwrap_err()
+                .to_string();
+            let actual = UnderwaterColorSession::prepare(
+                off,
+                width,
+                height,
+                numerator,
+                denominator,
+                &MissingAssets,
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert_eq!(actual, expected);
+        }
+        let legacy = UnderwaterColorOptions {
+            mode: UnderwaterColorMode::Legacy,
+            ..off
+        };
+        legacy.validate_dimensions(64, 64, 30, 1).unwrap();
+        for (width, height) in [(63, 64), (64, 63)] {
+            assert!(legacy.validate_dimensions(width, height, 30, 1).is_err());
+            let actual =
+                UnderwaterColorSession::prepare(legacy, width, height, 30, 1, &MissingAssets)
+                    .err()
+                    .unwrap()
+                    .to_string();
+            assert!(actual.contains("dimensions >=64"));
+        }
     }
 
     #[test]

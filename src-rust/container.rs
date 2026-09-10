@@ -556,6 +556,8 @@ pub struct InsvInspection {
     pub metadata: InsvMetadata,
     /// Video tracks found in the ISO-BMFF movie box.
     pub video_tracks: Vec<VideoTrackInfo>,
+    /// Audio tracks declared by `soun` handlers; codecs and packets are not validated.
+    pub audio_track_count: usize,
     /// Longest video-track duration.
     pub duration: Option<Duration>,
     /// Frame rate derived from sample timing.
@@ -612,6 +614,7 @@ impl<R: Read + Seek> InsvReader<R> {
             records,
             metadata,
             video_tracks: movie.video_tracks,
+            audio_track_count: movie.audio_track_count,
             duration: movie.duration,
             fps,
         })
@@ -1223,31 +1226,39 @@ impl<R: Read + Seek> InsvReader<R> {
         let children =
             self.child_boxes(moov.offset + header.header_size, moov.offset + moov.size)?;
         let mut video_tracks = Vec::new();
+        let mut audio_track_count = 0;
         let mut duration = None;
         let mut fps = None;
         for child in children.into_iter().filter(|item| item.kind == *b"trak") {
-            if let Some(track) = self.read_track(&child)? {
-                let index = video_tracks.len();
-                video_tracks.push(VideoTrackInfo {
-                    index,
-                    width: track.width,
-                    height: track.height,
-                    codec: track.codec,
-                });
-                duration = max_duration(duration, track.duration);
-                if fps.is_none() {
-                    fps = track.fps;
+            let track = match self.read_track(&child)? {
+                Some(MovieTrack::Video(track)) => track,
+                Some(MovieTrack::Audio) => {
+                    audio_track_count += 1;
+                    continue;
                 }
+                None => continue,
+            };
+            let index = video_tracks.len();
+            video_tracks.push(VideoTrackInfo {
+                index,
+                width: track.width,
+                height: track.height,
+                codec: track.codec,
+            });
+            duration = max_duration(duration, track.duration);
+            if fps.is_none() {
+                fps = track.fps;
             }
         }
         Ok(MovieInfo {
             video_tracks,
+            audio_track_count,
             duration,
             fps,
         })
     }
 
-    fn read_track(&mut self, track: &BoxHeader) -> Result<Option<TrackInfo>> {
+    fn read_track(&mut self, track: &BoxHeader) -> Result<Option<MovieTrack>> {
         let children = self.child_boxes(track.payload_offset(), track.end())?;
         let Some(mdia) = children.iter().find(|item| item.kind == *b"mdia") else {
             return Ok(None);
@@ -1258,6 +1269,9 @@ impl<R: Read + Seek> InsvReader<R> {
             .find(|item| item.kind == *b"hdlr")
             .map(|item| self.read_handler(item))
             .transpose()?;
+        if handler == Some(*b"soun") {
+            return Ok(Some(MovieTrack::Audio));
+        }
         if handler != Some(*b"vide") {
             return Ok(None);
         }
@@ -1296,13 +1310,13 @@ impl<R: Read + Seek> InsvReader<R> {
             }
             _ => None,
         };
-        Ok(Some(TrackInfo {
+        Ok(Some(MovieTrack::Video(TrackInfo {
             width,
             height,
             codec,
             duration,
             fps,
-        }))
+        })))
     }
 
     fn find_descendant(
@@ -1585,8 +1599,14 @@ impl BoxHeader {
 #[derive(Default)]
 struct MovieInfo {
     video_tracks: Vec<VideoTrackInfo>,
+    audio_track_count: usize,
     duration: Option<Duration>,
     fps: Option<f64>,
+}
+
+enum MovieTrack {
+    Video(TrackInfo),
+    Audio,
 }
 
 struct TrackInfo {

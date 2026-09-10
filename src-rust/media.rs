@@ -21,9 +21,11 @@ mod pipeline_impl;
 mod stabilization;
 
 pub use pipeline_impl::{
-    inspect_frame_dimensions, FrameCalibrationInfo, FrameDimensions, FrameRenderInfo,
-    NativeColorProcessor, RecordingFrameRenderer, RenderedFrame,
+    inspect_frame_dimensions, validate_color_metadata, FrameCalibrationInfo, FrameDimensions,
+    FrameRenderInfo, NativeColorProcessor, RecordingFrameRenderer, RenderedFrame,
 };
+
+pub use stabilization::{inspect_motion_support, MotionSupport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]

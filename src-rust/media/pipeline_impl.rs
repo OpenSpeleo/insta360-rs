@@ -460,10 +460,16 @@ fn unsupported_hdr() -> Error {
     Error::MissingCapability("stitched export produces 8-bit SDR output; Dolby, PQ and HLG input require a verified HDR tone mapper; original encoded extraction remains available".into())
 }
 
-fn validate_source_color(chapter: &crate::RecordingChapter) -> Result<()> {
-    if chapter.inspection.metadata.recorded_color_mode == Some(RecordedColorMode::Dolby) {
-        return Err(unsupported_hdr());
+fn validate_sdr_metadata(metadata: &InsvMetadata) -> Result<()> {
+    if metadata.recorded_color_mode == Some(RecordedColorMode::Dolby) {
+        Err(unsupported_hdr())
+    } else {
+        Ok(())
     }
+}
+
+fn validate_source_color(chapter: &crate::RecordingChapter) -> Result<()> {
+    validate_sdr_metadata(&chapter.inspection.metadata)?;
     for path in chapter.inputs.paths() {
         let input = crate::stream::open_input(path)?;
         for stream in input
@@ -488,10 +494,10 @@ fn validate_transfer(transfer: ffmpeg::util::color::TransferCharacteristic) -> R
     }
 }
 
-fn resolve_color_lut(
+fn color_lut_id(
     metadata: &InsvMetadata,
     conversion: ColorConversion,
-) -> Result<Option<Arc<CubeLut>>> {
+) -> Result<Option<&'static str>> {
     // Studio's older X5 path recognizes this exact spelling in gamma_mode.
     // The legacy "log" string denotes a different curve and is insufficient.
     let gamma_is_ilog = metadata.gamma_mode.as_deref() == Some("I_Log");
@@ -536,9 +542,32 @@ fn resolve_color_lut(
                 .into(),
         ));
     }
-    CubeLut::load_bundled("studio-i-log-x5-rec709")
-        .map(Arc::new)
-        .map(Some)
+    Ok(Some("studio-i-log-x5-rec709"))
+}
+
+/// Checks capture color compatibility without loading or verifying LUT assets.
+/// Set `require_sdr` for panoramas or enabled underwater restoration. A selected
+/// I-Log LUT also requires SDR. Dolby metadata is rejected for these paths;
+/// encoded PQ/HLG transfer and resource availability are checked at preparation.
+pub fn validate_color_metadata(
+    metadata: &InsvMetadata,
+    conversion: ColorConversion,
+    require_sdr: bool,
+) -> Result<()> {
+    let lut = color_lut_id(metadata, conversion)?;
+    if require_sdr || lut.is_some() {
+        validate_sdr_metadata(metadata)?;
+    }
+    Ok(())
+}
+
+fn resolve_color_lut(
+    metadata: &InsvMetadata,
+    conversion: ColorConversion,
+) -> Result<Option<Arc<CubeLut>>> {
+    color_lut_id(metadata, conversion)?
+        .map(|id| CubeLut::load_bundled(id).map(Arc::new))
+        .transpose()
 }
 
 /// One renderer for the complete lifetime of an export attempt.
@@ -2103,6 +2132,37 @@ mod tests {
             cancel: Arc::new(AtomicBool::new(false)),
             events,
         }
+    }
+
+    #[test]
+    fn metadata_color_validation_handles_sdr_and_ilog_without_resources() {
+        let mut metadata = InsvMetadata {
+            camera_name: Some("Insta360 X5".into()),
+            recorded_color_mode: Some(RecordedColorMode::Dolby),
+            ..InsvMetadata::default()
+        };
+        for conversion in [ColorConversion::Auto, ColorConversion::Preserve] {
+            validate_color_metadata(&metadata, conversion, false).unwrap();
+            assert!(matches!(
+                validate_color_metadata(&metadata, conversion, true),
+                Err(Error::MissingCapability(_))
+            ));
+        }
+        assert!(validate_color_metadata(&metadata, ColorConversion::ILogToRec709, false).is_err());
+        metadata.recorded_color_mode = Some(RecordedColorMode::ILog);
+        validate_color_metadata(&metadata, ColorConversion::Auto, true).unwrap();
+        metadata.camera_name = Some("Insta360 X4".into());
+        assert!(matches!(
+            validate_color_metadata(&metadata, ColorConversion::Auto, false),
+            Err(Error::MissingCapability(_))
+        ));
+        validate_color_metadata(&metadata, ColorConversion::Preserve, true).unwrap();
+        metadata.recorded_color_mode_invalid = true;
+        assert!(matches!(
+            validate_color_metadata(&metadata, ColorConversion::Auto, false),
+            Err(Error::InvalidMedia(_))
+        ));
+        validate_color_metadata(&metadata, ColorConversion::Preserve, false).unwrap();
     }
 
     #[test]

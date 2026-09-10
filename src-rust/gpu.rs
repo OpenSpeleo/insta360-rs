@@ -387,8 +387,16 @@ impl GpuStitcher {
     /// Applies a 3D color LUT after stitching and before RGB/YUV output conversion.
     ///
     /// The table is uploaded once when frame resources are prepared. Passing `None`
-    /// disables the transform. Geometry and source sampling are unaffected.
+    /// disables the transform. Reapplying `None` or the same shared table retains
+    /// existing frame resources. Geometry and source sampling are unaffected.
     pub fn set_color_lut(&mut self, lut: Option<Arc<CubeLut>>) {
+        if match (&self.color_lut, &lut) {
+            (None, None) => true,
+            (Some(current), Some(next)) => Arc::ptr_eq(current, next),
+            _ => false,
+        } {
+            return;
+        }
         self.color_lut = lut;
         *self
             .resources
@@ -1691,6 +1699,83 @@ fn gpu_processing(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unchanged_color_lut_reuses_gpu_resources_and_changes_invalidate_them() {
+        use crate::calibration::synthetic_dual_fisheye_calibration;
+        use crate::{EquirectangularProjection, LensFrame, Orientation};
+        use std::sync::Arc;
+        if super::available_adapters().is_empty() {
+            assert!(
+                std::env::var_os("INSTA360_RS_REQUIRE_GPU").is_none(),
+                "GPU is required"
+            );
+            return;
+        }
+        let mut stitcher = super::GpuStitcher::new().unwrap();
+        let lenses = [
+            LensFrame::new(16, 16, vec![96; 16 * 16 * 3]).unwrap(),
+            LensFrame::new(16, 16, vec![96; 16 * 16 * 3]).unwrap(),
+        ];
+        let calibration = synthetic_dual_fisheye_calibration(16, 16).unwrap();
+        let projection = EquirectangularProjection {
+            width: 16,
+            height: 8,
+        };
+        let render = |stitcher: &super::GpuStitcher| {
+            stitcher
+                .stitch_with_orientation(&lenses, &calibration, projection, Orientation::IDENTITY)
+                .unwrap()
+        };
+        let buffer = |stitcher: &super::GpuStitcher| {
+            stitcher
+                .resources
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .output_buffer
+                .clone()
+        };
+        let uncorrected = render(&stitcher);
+        let original_buffer = buffer(&stitcher);
+        stitcher.set_color_lut(None);
+        assert_eq!(buffer(&stitcher), original_buffer);
+        assert_eq!(render(&stitcher).as_rgb8(), uncorrected.as_rgb8());
+        let red = Arc::new(
+            crate::color::CubeLut::parse_cube(
+                format!("LUT_3D_SIZE 2\n{}", "1 0 0\n".repeat(8)).as_bytes(),
+            )
+            .unwrap(),
+        );
+        stitcher.set_color_lut(Some(Arc::clone(&red)));
+        assert!(stitcher.resources.lock().unwrap().is_none());
+        let corrected = render(&stitcher);
+        assert!(corrected
+            .as_rgb8()
+            .chunks_exact(3)
+            .all(|pixel| pixel == [255, 0, 0]));
+        let corrected_buffer = buffer(&stitcher);
+        assert_ne!(corrected_buffer, original_buffer);
+        stitcher.set_color_lut(Some(Arc::clone(&red)));
+        assert_eq!(buffer(&stitcher), corrected_buffer);
+        assert_eq!(render(&stitcher).as_rgb8(), corrected.as_rgb8());
+        let blue = Arc::new(
+            crate::color::CubeLut::parse_cube(
+                format!("LUT_3D_SIZE 2\n{}", "0 0 1\n".repeat(8)).as_bytes(),
+            )
+            .unwrap(),
+        );
+        stitcher.set_color_lut(Some(blue));
+        assert!(stitcher.resources.lock().unwrap().is_none());
+        assert!(render(&stitcher)
+            .as_rgb8()
+            .chunks_exact(3)
+            .all(|pixel| pixel == [0, 0, 255]));
+        stitcher.set_color_lut(None);
+        assert!(stitcher.resources.lock().unwrap().is_none());
+        assert_eq!(render(&stitcher).as_rgb8(), uncorrected.as_rgb8());
+    }
+
     #[test]
     fn frame_allocation_validation_returns_an_error_and_allows_recovery() {
         if super::available_adapters().is_empty() {

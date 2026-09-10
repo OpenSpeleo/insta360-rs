@@ -60,7 +60,31 @@ The opt-in `wgpu` renderer now moves radiometric estimation, projection,
 sampling, mask/seam evaluation, two-band blending, and video RGB-to-YUV420
 conversion to GPU compute. It uploads decoded YUV420P directly; unsupported
 decoded formats first pass through CPU `swscale` to RGB. Frame-size-dependent
-GPU resources are cached and reused.
+GPU resources are cached and reused. Reapplying the same shared color LUT or
+leaving it disabled preserves that cache. Hosts should retain preview renderers
+across view changes rather than reconstructing their mask, motion and color
+state for each frame.
+
+Source housing masks are prepared at decoded lens resolution even for a small
+panorama preview. The fixed-point distance transform uses separate forward and
+reverse row scans with fixed interior neighbors, avoiding repeated coordinate
+checks without changing contour or feather values. Border handling remains
+clipped, and scratch storage stays proportional to the original image size,
+including one-pixel-wide inputs. Random rectangular-mask equivalence tests and
+an independent shortest-path reference verify the optimization. This removes CPU
+overhead from initial preparation; subsequent requests reuse the prepared mask.
+When both lenses need a housing mask, the caller prepares one while a single
+scoped helper thread prepares the other, after checking the combined
+64-megapixel limit. Bare and single-mask inputs stay serial; a helper startup
+failure falls back to serial work. The shared cache lock permits only one
+preparation, and the helper wait does not steal tasks from a caller's Rayon pool
+(which could deadlock on the same cache lock). The temporary raster, distance
+and output fields can overlap at up to nine bytes per combined source pixel (576
+MiB at the limit); final cached masks use four bytes per pixel. For two 3840²
+masks this can add about 70 MiB of peak scratch compared with serial
+preparation. Failed preparation leaves no cached partial pair and preserves the
+first lens's error. Downscaled previews still incur full-resolution source-mask
+and upload costs.
 
 GPU preparation validates source texture dimensions, storage-buffer sizes,
 dispatch counts, and representable shader parameters. Allocation and binding
@@ -75,6 +99,32 @@ software; random-access previews have a separate hardware-decoding policy.
 Native codec surface sharing is not implemented. These synchronization and
 transfer costs can dominate smaller outputs, so adapter discovery or successful
 shader tests do not establish an end-to-end speedup.
+
+## Interactive host measurements (2026-09-10)
+
+FrameForge measured the SDK changes together with its retained preview sessions
+and deferred import checks on real X5 recordings on macOS ARM64. Runs used the
+same unoptimized Rust test profile, with build and test jobs stopped. These are
+host integration measurements, not standalone SDK or shipping-release timings.
+
+| Operation                  |   Before |   After |
+| -------------------------- | -------: | ------: |
+| Cold panorama, median      | 10.590 s | 4.070 s |
+| Return to panorama, median | 10.478 s | 0.878 s |
+| Cold panorama with AI      | 12.387 s | 5.875 s |
+| Return to panorama with AI | 12.488 s | 0.932 s |
+
+The fixed-stencil optimization alone brought cold panorama preparation to 5.484
+s; the scoped lens helper reduced that to 4.070 s. Its bounded temporary scratch
+increase was accepted for this workload. The host's initial import returned in
+15.2 ms for a single recording and 12.6 ms for a split recording, compared with
+approximately 3.3 s and 4.9 s when full checks were eager.
+
+Deferred source capability assessment still took 3.000 s initially and about
+1.55 s on later checks. Only metadata-based processing selections were below 1
+ms. Deferring telemetry and runtime preparation keeps source selection quick; it
+does not eliminate that work or guarantee immediate first rendering. The results
+cover these sources and host, not all cameras, resolutions or platforms.
 
 ## Stabilization preparation and readout cost
 

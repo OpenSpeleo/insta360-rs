@@ -28,7 +28,10 @@ impl FrameDimensions {
         Ok(self)
     }
 
-    fn scaled(self, width: Option<u32>) -> Result<Self> {
+    /// Resolves an optional width without upscaling, rounding both dimensions down
+    /// to even pixels while preserving the source aspect ratio. Zero dimensions
+    /// and results outside the bounded media limit are rejected.
+    pub fn scaled(self, width: Option<u32>) -> Result<Self> {
         self.validate()?;
         if width == Some(0) {
             return Err(Error::InvalidMedia("image width must be positive".into()));

@@ -17,6 +17,43 @@ use tempfile::tempdir;
 const MAGIC: &[u8; 32] = b"8db42d694ccc418790edff439fe026bf";
 
 #[test]
+fn audio_handlers_are_counted_without_requiring_audio_packets_or_codec_headers() {
+    let original = x5_fixture();
+    let inspect = |data| {
+        InsvReader::new(Cursor::new(data))
+            .unwrap()
+            .inspect()
+            .unwrap()
+    };
+    let reference = inspect(original.clone());
+    assert_eq!(reference.audio_track_count, 0);
+    let moov = reference
+        .boxes
+        .iter()
+        .find(|item| item.kind == *b"moov")
+        .unwrap();
+    let start = moov.offset as usize;
+    let end = start + moov.size as usize;
+    let mut payload = original[start + 8..end].to_vec();
+    for kind in [b"soun", b"meta", b"soun"] {
+        let mut handler = vec![0; 8];
+        handler.extend_from_slice(kind);
+        payload.extend_from_slice(&bmff_box(
+            *b"trak",
+            &bmff_box(*b"mdia", &bmff_box(*b"hdlr", &handler)),
+        ));
+    }
+    let mut with_audio = original[..start].to_vec();
+    with_audio.extend_from_slice(&bmff_box(*b"moov", &payload));
+    with_audio.extend_from_slice(&original[end..]);
+    let actual = inspect(with_audio);
+    assert_eq!(actual.audio_track_count, 2);
+    assert_eq!(actual.video_tracks, reference.video_tracks);
+    assert_eq!(actual.duration, reference.duration);
+    assert_eq!(actual.fps, reference.fps);
+}
+
+#[test]
 fn parses_indexed_x5_container_without_scanning_media_payloads() {
     let fixture = x5_fixture();
     let mut reader = InsvReader::new(Cursor::new(fixture)).expect("reader");
