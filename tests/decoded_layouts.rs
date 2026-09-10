@@ -1163,6 +1163,7 @@ fn reusable_exact_frame_rendering_matches_still_export_for_every_layout() {
         let info = RecordingFrameRenderer::preflight(&sequence, &settings, None, &cancel).unwrap();
         assert_eq!(info[0].projection, projection);
         let mut renderer = RecordingFrameRenderer::new(sequence.clone(), settings.clone()).unwrap();
+        assert_eq!(renderer.prepare_all(None, &cancel).unwrap(), info);
         let mut reader = PairedReader::open(&sequence, Duration::ZERO).unwrap();
         let pair = reader.next_pair(&cancel).unwrap().unwrap();
         let identity = pair.identity();
@@ -1202,6 +1203,87 @@ fn reusable_exact_frame_rendering_matches_still_export_for_every_layout() {
             output.frame.as_rgb8()
         );
     }
+}
+
+#[test]
+fn instance_preflight_retains_preparation_and_recovers_after_failed_rechecks() {
+    use insta360_rs::media::RecordingFrameRenderer;
+    let directory = tempfile::tempdir().unwrap();
+    let inputs = fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        2,
+        "0",
+        false,
+    );
+    let path = inputs.paths()[0].clone();
+    let sequence = RecordingSequence::single(inputs).unwrap();
+    let cancel = AtomicBool::new(false);
+    let pair = PairedReader::open(&sequence, Duration::ZERO)
+        .unwrap()
+        .next_pair(&cancel)
+        .unwrap()
+        .unwrap();
+    let mut settings = config();
+    settings.projection = None;
+    settings.underwater_color.mode = if cfg!(feature = "underwater-ai") {
+        insta360_rs::UnderwaterColorMode::Ai
+    } else {
+        insta360_rs::UnderwaterColorMode::Legacy
+    };
+    let mut renderer = RecordingFrameRenderer::new(sequence, settings).unwrap();
+    let reports = renderer.prepare_all(None, &cancel).unwrap();
+    let projection = EquirectangularProjection {
+        width: 128,
+        height: 64,
+    };
+    assert_eq!(reports[0].projection, projection, "native lens default");
+    let expected = renderer.render_strict(&pair, projection, &cancel).unwrap();
+    assert!(matches!(
+        renderer.prepare_all(None, &AtomicBool::new(true)),
+        Err(insta360_rs::Error::Cancelled)
+    ));
+    assert!(renderer
+        .prepare_all(
+            Some(EquirectangularProjection {
+                width: 16384,
+                height: 8192,
+            }),
+            &cancel,
+        )
+        .is_err());
+    // A metadata reload would now fail. Rendering the retained exact pair must
+    // still work, and even a failed decoder recheck must leave preparation usable.
+    let moved = directory.path().join("temporarily-moved.insv");
+    std::fs::rename(&path, &moved).unwrap();
+    assert!(renderer.prepare_all(None, &cancel).is_err());
+    let reused = renderer.render_strict(&pair, projection, &cancel).unwrap();
+    assert_eq!(reused.frame.as_rgb8(), expected.frame.as_rgb8());
+    assert_eq!(reused.info, reports[0]);
+    std::fs::rename(moved, path).unwrap();
+    let override_projection = EquirectangularProjection {
+        width: 256,
+        height: 128,
+    };
+    assert_eq!(
+        renderer
+            .prepare_all(Some(override_projection), &cancel)
+            .unwrap()[0]
+            .projection,
+        override_projection
+    );
+    assert_eq!(renderer.prepare_all(None, &cancel).unwrap(), reports);
+    assert_eq!(
+        renderer
+            .render_strict(&pair, projection, &cancel)
+            .unwrap()
+            .frame
+            .as_rgb8(),
+        expected.frame.as_rgb8()
+    );
 }
 
 #[test]

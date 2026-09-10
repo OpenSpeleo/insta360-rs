@@ -103,10 +103,17 @@ hosts can roll back their owned outputs and restart the entire attempt. Existing
 optics, motion, selected backend, output dimensions and required color assets
 without creating outputs or requiring an HEVC encoder. An omitted projection
 uses the config projection, then twice the decoded single-lens width by that
-lens width. `inspect_frame_dimensions` performs cheaper layout-only inspection
-and reports one lens's dimensions even for packed input. Explicit panorama
-projections retain the SDK's existing ability to upscale; applications can
-impose a no-upscale policy before calling it.
+lens width. Hosts that will render should construct one session and call its
+`prepare_all` method instead: it performs those same checks while retaining the
+backend and loaded color resources for subsequent frames at the prepared size.
+This avoids loading the AI models twice. Only the final chapter's motion stays
+resident; earlier-frame requests replay preceding metadata. Failed or cancelled
+preparation can be retried on the same session. The static `preflight` delegates
+to this method and discards its session for callers needing reports only.
+`inspect_frame_dimensions` performs cheaper layout-only inspection and reports
+one lens's dimensions even for packed input. Explicit panorama projections
+retain the SDK's existing ability to upscale; applications can impose a
+no-upscale policy before calling it.
 
 `media::NativeColorProcessor` supplies the color-only route independently of
 calibration and stabilization. Its `preflight` validates all chapters and

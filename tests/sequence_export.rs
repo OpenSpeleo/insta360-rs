@@ -279,6 +279,12 @@ fn exact_stills_replay_chapter_motion_on_late_backward_and_repeated_requests() {
         })
         .collect();
     let mut renderer = RecordingFrameRenderer::new(split, settings).unwrap();
+    let reports = renderer.prepare_all(Some(projection), &cancel).unwrap();
+    assert_eq!(reports.len(), 2);
+    assert_eq!(
+        renderer.prepare_all(Some(projection), &cancel).unwrap(),
+        reports
+    );
     for index in [7, 2, 9, 0, 5, 4, 7, 7] {
         let actual = renderer
             .render_strict(&split_pairs[index], projection, &cancel)

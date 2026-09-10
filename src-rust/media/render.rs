@@ -256,17 +256,32 @@ impl RecordingFrameRenderer {
         cancel: &AtomicBool,
     ) -> Result<Vec<FrameRenderInfo>> {
         check_cancel(cancel)?;
-        let mut session = Self::new(sequence.clone(), config.clone())?;
-        let mut reports = Vec::with_capacity(sequence.chapters.len());
-        for (index, chapter) in sequence.chapters.iter().enumerate() {
+        Self::new(sequence.clone(), config.clone())?.prepare_all(projection, cancel)
+    }
+
+    /// Validates every chapter and retains this session's prepared backend and
+    /// color resources for rendering. Only the final chapter's motion is retained;
+    /// an earlier render replays preceding metadata with bounded memory. Resources
+    /// are reused while output dimensions and source frame rate remain unchanged.
+    /// A failure or cancellation permits retrying this same session.
+    pub fn prepare_all(
+        &mut self,
+        projection: Option<EquirectangularProjection>,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<FrameRenderInfo>> {
+        check_cancel(cancel)?;
+        let mut reports = Vec::with_capacity(self.prepared.sequence.chapters.len());
+        for index in 0..self.prepared.sequence.chapters.len() {
             check_cancel(cancel)?;
+            let chapter = &self.prepared.sequence.chapters[index];
             crate::PairedReader::validate_chapter(chapter)?;
             let projection = projection
-                .or(config.projection)
+                .or(self.prepared.config.projection)
                 .map(Ok)
-                .unwrap_or_else(|| session.dimensions[index].panorama())?;
-            reports.push(session.prepare(index, projection, cancel)?);
+                .unwrap_or_else(|| self.dimensions[index].panorama())?;
+            reports.push(self.prepare(index, projection, cancel)?);
         }
+        check_cancel(cancel)?;
         Ok(reports)
     }
 
