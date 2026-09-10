@@ -2,15 +2,16 @@
 
 `Exporter::from_sequence` accepts a validated `RecordingSequence` and produces
 one finalized HEVC MP4. `Exporter::new` retains its single-input contract and
-uses the same video engine. Sequence discovery and completeness rules are
-described in [recording sequences](recording-sequences.md).
+uses the same video engine. Exports process available validated original
+chapters; raw group submedia counts do not establish whole-recording coverage.
+Discovery rules are described in [recording sequences](recording-sequences.md).
 
 Each chapter must have the supported X5 single-file, two-video-track layout,
 compatible source properties, established camera A/B ordering, and usable
 per-recording calibration. Unsupported camera, layout, accessory, color, or
 motion combinations return a capability or validation error. Stitched still
 export currently accepts one chapter; direct fisheye frame access uses
-`PairedReader` across the complete sequence without intermediate videos.
+`PairedReader` across the selected sequence without intermediate videos.
 
 ## Preflight and options
 
@@ -25,7 +26,7 @@ export time.
 
 All existing `StitchConfig` and `VideoExportOptions` fields apply. Output is
 8-bit YUV420 HEVC in MP4 with an even 2:1 equirectangular projection. Quality is
-1–100. Start/duration select a half-open interval on the complete recording
+1–100. Start/duration select a half-open interval on the selected recording
 timeline, and the first included video frame becomes output time zero.
 
 `ExportEvent::BackendSelected` reports the renderer actually opened, and

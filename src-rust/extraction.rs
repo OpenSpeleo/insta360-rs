@@ -177,6 +177,7 @@ pub fn extract_controlled(
 
 /// Unpacks every chapter and makes continuous compatible camera/audio copies.
 /// Original packets, timestamp indexes and all metadata remain in per-part archives.
+/// Processes available original chapters without claiming whole-recording coverage.
 pub fn extract_sequence(
     sequence: &RecordingSequence,
     output_dir: impl AsRef<Path>,
@@ -186,7 +187,6 @@ pub fn extract_sequence(
     if sequence.chapters.is_empty() {
         return Err(Error::InvalidMedia("recording sequence is empty".into()));
     }
-    sequence.require_complete()?;
     let inputs = sequence
         .chapters
         .iter()

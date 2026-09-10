@@ -47,7 +47,7 @@ fn tail(index: u32, total: u32) -> Vec<u8> {
     );
     integer(&mut data, 80, 2);
     integer(&mut data, 131, 3);
-    integer(&mut data, 88, if total > 1 { 2 } else { 1 });
+    integer(&mut data, 88, if total == 1 { 1 } else { 2 });
     let mut group = Vec::new();
     integer(&mut group, 1, 20);
     integer(&mut group, 2, index.into());
@@ -75,6 +75,16 @@ fn tail(index: u32, total: u32) -> Vec<u8> {
 }
 
 fn source(directory: &Path, index: u32, total: u32, audio: bool) -> PathBuf {
+    source_with_group(directory, index, total, audio, (index, total))
+}
+
+fn source_with_group(
+    directory: &Path,
+    index: u32,
+    total: u32,
+    audio: bool,
+    group: (u32, u32),
+) -> PathBuf {
     let path = directory.join(format!("source_{total}_{index}.insv"));
     let start = if total == 1 { 0 } else { index * 5 };
     let end = if total == 1 { 10 } else { start + 5 };
@@ -132,7 +142,7 @@ fn source(directory: &Path, index: u32, total: u32, audio: bool) -> PathBuf {
         .append(true)
         .open(&path)
         .unwrap()
-        .write_all(&tail(index, total))
+        .write_all(&tail(group.0, group.1))
         .unwrap();
     path
 }
@@ -239,6 +249,63 @@ fn chapter_boundary_matches_unsplit_frames_with_one_encoder_and_global_clipping(
     assert_eq!(report.duration, Duration::from_millis(400));
     let clip_path = directory.path().join("clip.mp4");
     assert_eq!(run(&sequence, &clip_path, clip).0, 4);
+}
+
+#[test]
+fn sparse_member_indices_and_submedia_totals_export_available_chapters_continuously() {
+    let directory = tempfile::tempdir().unwrap();
+    let full = source(directory.path(), 0, 1, false);
+    let full = exporter(RecordingSequence::single(InputSet::discover(full).unwrap()).unwrap());
+    let whole_path = directory.path().join("whole.mp4");
+    assert_eq!(run(&full, &whole_path, options(AudioPolicy::Drop)).0, 10);
+    let expected = decoded(&whole_path);
+
+    for (origin, total) in [(0, 0), (37, 4)] {
+        let source_directory = directory.path().join(format!("total-{total}"));
+        fs::create_dir(&source_directory).unwrap();
+        let first = source_with_group(&source_directory, 0, 2, false, (origin, total));
+        let second = source_with_group(&source_directory, 1, 2, false, (origin + 2, total));
+        let sequence = RecordingSequence::new(vec![
+            InputSet::discover(second).unwrap(),
+            InputSet::discover(&first).unwrap(),
+        ])
+        .unwrap();
+        assert!(!sequence.complete);
+        assert!(sequence.warnings.is_empty());
+        let export = exporter(sequence);
+        let preflight = export.preflight_video(&options(AudioPolicy::Drop)).unwrap();
+        assert_eq!(preflight.chapter_count, 2);
+        assert_eq!(preflight.duration, Duration::from_secs(1));
+        assert!(preflight.warnings.is_empty());
+        let output = source_directory.join("continuous.mp4");
+        let (frames, events) = run(&export, &output, options(AudioPolicy::Drop));
+        assert_eq!(frames, 10);
+        assert_eq!(decoded(&output), expected);
+        for is_encoder in [true, false] {
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| if is_encoder {
+                        matches!(event, ExportEvent::EncoderSelected(_))
+                    } else {
+                        matches!(event, ExportEvent::BackendSelected(_))
+                    })
+                    .count(),
+                1
+            );
+        }
+        if total == 0 {
+            let available =
+                RecordingSequence::new(vec![InputSet::discover(first).unwrap()]).unwrap();
+            assert!(!available.complete);
+            assert!(available.warnings.is_empty());
+            let output = source_directory.join("available.mp4");
+            assert_eq!(
+                run(&exporter(available), &output, options(AudioPolicy::Drop)).0,
+                5
+            );
+        }
+    }
 }
 
 fn audio_packets(path: &Path) -> Vec<(i64, i64, Vec<u8>)> {

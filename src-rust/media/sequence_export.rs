@@ -1,4 +1,4 @@
-//! One renderer and muxer for a complete, validated camera recording.
+//! One renderer and muxer for available, validated camera recording chapters.
 
 use super::*;
 use crate::media::VideoPreflight;
@@ -39,7 +39,6 @@ fn inspect_video(
     config: &StitchConfig,
     options: &VideoExportOptions,
 ) -> Result<VideoPreflight> {
-    sequence.require_complete()?;
     let first = sequence
         .chapters
         .first()

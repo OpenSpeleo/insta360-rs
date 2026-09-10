@@ -21,11 +21,13 @@ pub struct RecordingChapter {
     pub group_index: Option<u32>,
 }
 
-/// Camera-declared temporal sequence. Unknown totals remain visibly incomplete.
+/// Camera-associated original chapters; group submedia metadata does not prove coverage.
 #[derive(Clone, Debug)]
 pub struct RecordingSequence {
     pub chapters: Vec<RecordingChapter>,
     pub duration: Duration,
+    /// Coverage of the selected scope is verified. Split-group submedia metadata
+    /// cannot establish this; nonsplit and explicit single selections can.
     pub complete: bool,
     pub warnings: Vec<String>,
 }
@@ -136,12 +138,18 @@ impl RecordingSequence {
         })
     }
 
-    /// Rejects an unresolved recording before an operation promises whole-recording output.
+    /// Rejects unresolved coverage before promising the entire recording.
+    ///
+    /// Split-group indices and totals enumerate submedia, including previews;
+    /// they cannot establish how many original video chapters should exist.
+    /// Export operations process validated available chapters without this guard.
     pub fn require_complete(&self) -> Result<()> {
         if self.complete {
             Ok(())
         } else {
-            Err(invalid(format!("recording is incomplete: {}; select a single chapter explicitly to process only that file", self.warnings.join("; "))))
+            Err(invalid(
+                "recording completeness is unknown; group metadata cannot verify that all original recording parts are available",
+            ))
         }
     }
 
@@ -159,11 +167,6 @@ impl RecordingSequence {
                     "chapters do not share a camera recording identity and capture type",
                 ));
             }
-            if group.total > MAX_CHAPTERS as u32 || group.index >= MAX_CHAPTERS as u32 {
-                return Err(invalid(
-                    "recording chapter index or count exceeds the supported limit",
-                ));
-            }
             if group.total != 0 {
                 if known_total.is_some_and(|total| total != group.total) {
                     return Err(invalid("chapters declare conflicting recording totals"));
@@ -173,26 +176,10 @@ impl RecordingSequence {
             validate_compatibility(&first_inspection, &chapter.inspection)?;
         }
         chapters.sort_by_key(|chapter| chapter.group_index);
-        let mut warnings = Vec::new();
         for pair in chapters.windows(2) {
             if pair[0].group_index == pair[1].group_index {
                 return Err(invalid("duplicate recording chapter index"));
             }
-            if pair[0].group_index.and_then(|index| index.checked_add(1)) != pair[1].group_index {
-                warnings.push("one or more middle chapters are missing".into());
-            }
-        }
-        if chapters[0].group_index != Some(0) {
-            warnings.push("the first chapter (index 0) is missing".into());
-        }
-        match known_total {
-            Some(total) => {
-                if chapters.iter().any(|chapter| chapter.group_index.is_some_and(|index| index >= total)) {
-                    return Err(invalid("chapter index lies outside the declared recording total"));
-                }
-                if total as usize != chapters.len() { warnings.push(format!("found {} of {total} declared chapters", chapters.len())); }
-            }
-            None => warnings.push("the camera did not declare the total chapter count; completeness cannot be verified".into()),
         }
         let mut duration = Duration::ZERO;
         for chapter in &mut chapters {
@@ -204,8 +191,8 @@ impl RecordingSequence {
         Ok(Self {
             chapters,
             duration,
-            complete: warnings.is_empty(),
-            warnings,
+            complete: false,
+            warnings: Vec::new(),
         })
     }
 }

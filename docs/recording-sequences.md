@@ -12,17 +12,34 @@ geometry/codec/rate, recorded lens order, crop, and color compatibility.
 Metadata identities on files explicitly marked not split do not trigger
 grouping. A proxy never substitutes for a missing original lens.
 
-The field-26 protobuf schema and field-88 enum were checked against the supplied
-SDK's embedded descriptors as data. The Android SDK group assembler uses the raw
-member index as an array position, establishing zero-based ordering. This does
-not establish completeness: missing positions, inconsistent totals, and
-duplicate members require independent validation. Unknown total `0` remains an
-explicit warning and `complete = false`. `require_complete()` guards operations
-promising the entire recording. `single(inputs)` explicitly selects one
-available chapter when other chapters are absent; it never pretends to recover
-missing footage. Both recognized fields remain in the raw metadata collection,
-including unknown nested fields. Conflicting or malformed declarations are not
-used for discovery.
+The field-26 protobuf schema and field-88 enum were checked against supplied SDK
+metadata. Field-26 `type` is the capture subtype (`VIDEO_HDR=6`,
+`VIDEO_PURE=20`); it is independent of the split flag. The iOS SDK's
+`INSExtraMetadata.h` identifies that field as `INSSubMediaType`. The Android
+SDK's split path in `UrlAsset.fillFiles()` orders inputs by raw member index
+without using a declared total to establish completeness.
+
+**Group members are not original video chapters.** A real X5 HDR recording from
+firmware `v1.11.10_build1` has original indices `0, 2` and matching LRV preview
+indices `1, 3`, all sharing a group identity. Its group total is `0`. Thus
+neither an index gap nor a filename counter proves an original chapter is
+absent. A nonzero group total is submedia metadata without a verified mapping to
+the number of original video chapters. Do not assume an index origin,
+consecutive original indices, or a fixed stride such as dividing every index by
+two. Absolute indices may be any `u32`; allocation and the 4096-chapter limit
+apply to actual inputs, never metadata positions.
+
+Discovery validates and orders available originals without claiming complete
+capture coverage. Split sequences have `complete = false` and no warning solely
+because that coverage is unknown. Export operations process those validated
+chapters; `require_complete()` remains a stricter API for callers that require
+verified whole-recording coverage and reports that coverage is unknown. Nonsplit
+recordings and explicit `single(inputs)` selections have `complete = true` for
+their selected scope. Missing paths and simultaneous lens partners still fail
+normal input validation. Duplicate member indices, conflicting nonzero group
+totals, incompatible properties, and conflicting or malformed declarations
+remain errors. Both recognized fields remain in the raw metadata collection,
+including unknown nested fields.
 
 Chapter durations come from container track timing and are accumulated as
 checked `Duration` values. `chapter_at()` uses half-open intervals, so a time
@@ -60,7 +77,10 @@ seek or decode.
 Tests generate independent ISO-BMFF/ExtraInfo fixtures for metadata discovery
 and small MPEG-4 dual-track recordings with delayed frames for decode, chapter
 joins, seek, and cancellation. Native rational tests include distinct timestamps
-that round to the same microsecond. These establish algorithmic behavior. Real
-camera-split sources are still needed to qualify automatic continuation handling
-across camera models and firmware; the currently supplied X5 sample is
-explicitly not split.
+that round to the same microsecond. Chapter fixtures cover the observed HDR
+original/preview index pattern, arbitrary origins and filenames, unknown and
+nonzero submedia totals, invalid associations, and extreme indices. Continuous
+export tests compare decoded output with the unsplit original. These establish
+specific algorithmic behavior. The real X5 HDR files establish the observed
+grouping semantics; other camera/firmware combinations and exact Studio boundary
+behavior still require qualification.

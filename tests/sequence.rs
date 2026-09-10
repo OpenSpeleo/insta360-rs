@@ -27,11 +27,20 @@ fn bmff(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     out
 }
 fn metadata(index: u32, total: u32, split: u32, identity: &str) -> Vec<u8> {
+    metadata_for_capture(index, total, split, identity, 20)
+}
+fn metadata_for_capture(
+    index: u32,
+    total: u32,
+    split: u32,
+    identity: &str,
+    capture_type: u32,
+) -> Vec<u8> {
     let mut data = Vec::new();
     bytes(&mut data, 1, b"SERIAL-1");
     bytes(&mut data, 2, b"Insta360 X5");
     let mut group = Vec::new();
-    integer(&mut group, 1, 20);
+    integer(&mut group, 1, capture_type.into());
     integer(&mut group, 2, index.into());
     bytes(&mut group, 3, identity.as_bytes());
     integer(&mut group, 4, total.into());
@@ -162,7 +171,8 @@ fn orders_camera_chapters_and_resolves_half_open_global_timeline() {
         InputSet::discover(a).unwrap(),
     ])
     .unwrap();
-    assert!(sequence.complete);
+    assert!(!sequence.complete);
+    assert!(sequence.warnings.is_empty());
     assert_eq!(sequence.duration, Duration::from_secs(2));
     assert_eq!(sequence.chapters[0].group_index, Some(0));
     assert_eq!(sequence.chapter_at(Duration::from_millis(999)), Some(0));
@@ -170,40 +180,179 @@ fn orders_camera_chapters_and_resolves_half_open_global_timeline() {
     assert_eq!(sequence.chapter_at(Duration::from_secs(2)), None);
 }
 #[test]
-fn discovery_does_not_group_nonsplit_identity_and_reports_missing_parts() {
+fn discovery_does_not_group_nonsplit_identity_and_explicit_single_is_complete() {
     let dir = tempfile::tempdir().unwrap();
     let a = write(dir.path(), 0, 3, 1, "same");
     write(dir.path(), 1, 3, 1, "same");
-    assert_eq!(RecordingSequence::discover(&a).unwrap().chapters.len(), 1);
+    let nonsplit = RecordingSequence::discover(&a).unwrap();
+    assert_eq!(nonsplit.chapters.len(), 1);
+    assert!(nonsplit.complete);
     write(dir.path(), 0, 3, 2, "same");
     write(dir.path(), 2, 3, 2, "same");
     let sequence = RecordingSequence::discover(&a).unwrap();
     assert_eq!(sequence.chapters.len(), 2);
-    assert!(!sequence.complete);
-    assert!(sequence.require_complete().is_err());
-    assert!(
-        RecordingSequence::single(InputSet::discover(a).unwrap())
-            .unwrap()
-            .complete
-    );
+    assert_unverified_coverage(&sequence);
+    let single = RecordingSequence::single(InputSet::discover(a).unwrap()).unwrap();
+    assert!(single.complete);
+    assert!(single.require_complete().is_ok());
 }
+
+fn assert_unverified_coverage(sequence: &RecordingSequence) {
+    assert!(!sequence.complete);
+    assert!(sequence.warnings.is_empty(), "{:?}", sequence.warnings);
+    let error = sequence.require_complete().unwrap_err().to_string();
+    assert!(error.contains("completeness is unknown"), "{error}");
+    assert!(!error.contains("missing"), "{error}");
+}
+
 #[test]
-fn unknown_total_and_duplicate_or_unrelated_members_are_explicit() {
+fn duplicate_unrelated_and_conflicting_members_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let a = write(dir.path(), 0, 0, 2, "same");
-    let b = write(dir.path(), 1, 0, 2, "same");
-    assert!(!RecordingSequence::discover(&a).unwrap().complete);
+    let b = write(dir.path(), 2, 0, 2, "same");
     assert!(RecordingSequence::new(vec![
         InputSet::discover(&a).unwrap(),
         InputSet::discover(&a).unwrap()
     ])
-    .is_err());
-    fs::write(&b, fixture(&metadata(1, 2, 2, "different"))).unwrap();
+    .unwrap_err()
+    .to_string()
+    .contains("duplicate"));
+    fs::write(&b, fixture(&metadata(2, 2, 2, "different"))).unwrap();
     assert!(RecordingSequence::new(vec![
-        InputSet::discover(a).unwrap(),
-        InputSet::discover(b).unwrap()
+        InputSet::discover(&a).unwrap(),
+        InputSet::discover(&b).unwrap()
     ])
-    .is_err());
+    .unwrap_err()
+    .to_string()
+    .contains("identity"));
+    fs::write(&a, fixture(&metadata(0, 4, 2, "same"))).unwrap();
+    fs::write(&b, fixture(&metadata(2, 3, 2, "same"))).unwrap();
+    assert!(RecordingSequence::discover(a)
+        .unwrap_err()
+        .to_string()
+        .contains("conflicting recording totals"));
+}
+
+#[test]
+fn shared_group_identity_does_not_bypass_camera_compatibility() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = write(dir.path(), 0, 0, 2, "same");
+    let second = write(dir.path(), 2, 0, 2, "same");
+    let mut data = metadata(2, 0, 2, "same");
+    let serial = data
+        .windows(8)
+        .position(|bytes| bytes == b"SERIAL-1")
+        .unwrap();
+    data[serial + 7] = b'2';
+    fs::write(second, fixture(&data)).unwrap();
+    assert!(RecordingSequence::discover(first)
+        .unwrap_err()
+        .to_string()
+        .contains("incompatible camera"));
+}
+
+#[test]
+fn hdr_originals_with_interleaved_preview_indices_are_available_chapters() {
+    for total in [0, 4] {
+        let dir = tempfile::tempdir().unwrap();
+        let originals = [
+            dir.path().join("VID_20260823_123154_00_003.insv"),
+            dir.path().join("VID_20260823_123154_00_004.insv"),
+        ];
+        let proxies = [
+            dir.path().join("LRV_20260823_123154_01_003.lrv"),
+            dir.path().join("LRV_20260823_123154_01_004.lrv"),
+        ];
+        for (position, (original, proxy)) in originals.iter().zip(&proxies).enumerate() {
+            let index = position as u32 * 2;
+            fs::write(
+                original,
+                fixture(&metadata_for_capture(index, total, 2, "hdr-group", 6)),
+            )
+            .unwrap();
+            fs::write(
+                proxy,
+                fixture(&metadata_for_capture(index + 1, total, 2, "hdr-group", 6)),
+            )
+            .unwrap();
+        }
+        let sequence = RecordingSequence::discover(&originals[1]).unwrap();
+        assert_unverified_coverage(&sequence);
+        assert_eq!(
+            sequence.paths().collect::<Vec<_>>(),
+            originals.iter().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            sequence
+                .chapters
+                .iter()
+                .map(|chapter| chapter.group_index)
+                .collect::<Vec<_>>(),
+            [Some(0), Some(2)]
+        );
+        assert_eq!(sequence.duration, Duration::from_secs(2));
+        assert_eq!(sequence.chapter_at(Duration::from_secs(1)), Some(1));
+        // An absent proxy cannot change original chapter selection or duration.
+        fs::remove_file(&proxies[0]).unwrap();
+        assert_eq!(
+            RecordingSequence::discover(&originals[0]).unwrap().duration,
+            sequence.duration
+        );
+    }
+}
+
+#[test]
+fn member_indices_and_filename_counters_do_not_imply_a_missing_prefix() {
+    for origin in [1, 27, 9000, u32::MAX - 1] {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write(dir.path(), origin, 2, 2, "same");
+        let second = write(dir.path(), origin + 1, 2, 2, "same");
+        let arbitrary_name = dir.path().join("VID_20260101_120000_00_9876.insv");
+        fs::rename(&first, &arbitrary_name).unwrap();
+        let sequence = RecordingSequence::discover(second).unwrap();
+        assert_unverified_coverage(&sequence);
+        assert_eq!(sequence.chapters.len(), 2);
+        assert_eq!(sequence.chapters[0].group_index, Some(origin));
+        assert_eq!(sequence.chapters[0].inputs.paths(), &[arbitrary_name]);
+        assert_eq!(sequence.duration, Duration::from_secs(2));
+    }
+}
+
+#[test]
+fn unknown_totals_allow_one_or_multiple_available_chapters() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = write(dir.path(), 42, 0, 2, "same");
+    for expected_count in [1, 2] {
+        if expected_count == 2 {
+            write(dir.path(), 44, 0, 2, "same");
+        }
+        let sequence = RecordingSequence::discover(&first).unwrap();
+        assert_eq!(sequence.chapters.len(), expected_count);
+        assert_unverified_coverage(&sequence);
+    }
+}
+
+#[test]
+fn submedia_totals_are_not_compared_with_original_chapter_counts() {
+    for total in [1, 2, 3, 4, u32::MAX] {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write(dir.path(), 17, 0, 2, "same");
+        write(dir.path(), 19, total, 2, "same");
+        let sequence = RecordingSequence::discover(first).unwrap();
+        assert_eq!(sequence.chapters.len(), 2);
+        assert_unverified_coverage(&sequence);
+    }
+}
+
+#[test]
+fn extreme_indices_and_declared_counts_do_not_allocate_by_metadata_position() {
+    let dir = tempfile::tempdir().unwrap();
+    for total in [0, u32::MAX] {
+        let path = write(dir.path(), u32::MAX, total, 2, "same");
+        let sequence = RecordingSequence::discover(path).unwrap();
+        assert_eq!(sequence.chapters.len(), 1);
+        assert_unverified_coverage(&sequence);
+    }
 }
 
 #[cfg(feature = "media")]

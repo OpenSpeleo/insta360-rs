@@ -152,8 +152,8 @@ impl Exporter {
     }
 
     /// Configures one output across ordered, validated recording chapters.
+    /// Processes available original chapters without claiming whole-recording coverage.
     pub fn from_sequence(sequence: RecordingSequence, config: StitchConfig) -> Result<Self> {
-        sequence.require_complete()?;
         let inputs = sequence
             .chapters
             .first()

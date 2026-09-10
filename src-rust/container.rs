@@ -421,11 +421,11 @@ pub struct UnknownMetadataField {
 pub struct RecordingGroup {
     /// Raw capture subtype, independent of physical lens organization.
     pub capture_type: u32,
-    /// Zero-based chapter position used by the camera group assembler.
+    /// Raw submedia ordering value; preview files may occupy intervening positions.
     pub index: u32,
     /// Camera-provided recording identity; empty means unavailable.
     pub identity: String,
-    /// Declared member count; zero means not declared.
+    /// Declared submedia count, not an original-chapter count; zero is unspecified.
     pub total: u32,
 }
 
