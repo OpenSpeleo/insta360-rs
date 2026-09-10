@@ -16,6 +16,11 @@ details are intentionally omitted.
 
 - Faster synchronized fisheye previews when moving through a recording. 84430e5
 
+### Fixes
+
+- Preserve original audio timing in stitched video exports, including trimmed
+  clips. bc10f30
+
 ## v0.1.0 - 2026-09-09
 
 ### Features
