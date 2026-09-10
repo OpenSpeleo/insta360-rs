@@ -13,8 +13,8 @@ details are intentionally omitted.
   7f8324f
 - Stitch registered camera families from supported dual-track, two-file and
   packed panoramas, including V1 calibration. 7f8324f
-- Apply optional underwater color restoration with Legacy or AI processing.
-  7f8324f
+- Apply Legacy or AI underwater color restoration to native fisheye images and
+  stitched panoramas. b7081c3
 - Export compatible split recordings as continuous 360° videos with original
   audio, or extract synchronized fisheye frames and complete source archives.
   84430e5
