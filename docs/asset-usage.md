@@ -140,3 +140,10 @@ Studio's alternate `Contents/data/models/underwater.ilut`. AI loads verified
 original model 197/198, the diving feature database and all four style presets.
 No Insta360 runtime library is loaded. MNN is an optional independently compiled
 CPU dependency, pinned by source commit and archive digest.
+
+The exact-frame media API also applies these color stages to original native
+lens images without optical reprojection. Full-tensor reference tests exercise
+the adapter against a separate C++ Interpreter executable; temporal RGB
+snapshots cover all four styles but are self-derived regression expectations.
+See [reference provenance](../tests/reference/README.md) for regeneration and
+qualification limits.

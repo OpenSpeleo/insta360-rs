@@ -85,6 +85,7 @@ pub(super) struct FileStabilizer {
 }
 
 impl FileStabilizer {
+    #[cfg(test)]
     pub(super) fn from_reader<R: Read + Seek>(
         reader: &mut InsvReader<R>,
         inspection: &InsvInspection,

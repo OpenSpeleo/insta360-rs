@@ -16,6 +16,21 @@ mod style;
 use crate::assets::{AssetPolicy, AssetProvider, BundledAssetProvider};
 use crate::{Error, Result, UnderwaterColorMode, UnderwaterColorOptions};
 
+/// Returns the actual linked independent MNN library's version, not a build marker.
+/// Builds without `underwater-ai` return [`Error::MissingCapability`].
+pub fn mnn_runtime_version() -> Result<&'static str> {
+    #[cfg(feature = "underwater-ai")]
+    {
+        model::runtime_version()
+    }
+    #[cfg(not(feature = "underwater-ai"))]
+    {
+        Err(Error::MissingCapability(
+            "underwater AI was not compiled into this build".into(),
+        ))
+    }
+}
+
 /// Reusable restoration state for one decoded RGB8 image or continuous video job.
 ///
 /// Prepare once per output size. Frames use packed RGB channel order; processing
@@ -276,6 +291,10 @@ mod tests {
     #[cfg(not(feature = "underwater-ai"))]
     #[test]
     fn ai_capability_fails_before_requesting_resources_without_native_feature() {
+        assert!(matches!(
+            mnn_runtime_version(),
+            Err(Error::MissingCapability(_))
+        ));
         let options = UnderwaterColorOptions {
             mode: UnderwaterColorMode::Ai,
             ..Default::default()

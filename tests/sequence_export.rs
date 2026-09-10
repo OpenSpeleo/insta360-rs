@@ -40,6 +40,10 @@ fn tail(index: u32, total: u32) -> Vec<u8> {
 }
 
 fn tail_with_stream_type(index: u32, total: u32, stream_type: u64) -> Vec<u8> {
+    tail_with_motion(index, total, stream_type, false)
+}
+
+fn tail_with_motion(index: u32, total: u32, stream_type: u64, motion: bool) -> Vec<u8> {
     let mut data = Vec::new();
     bytes(&mut data, 1, b"SEQUENCE-EXPORT-TEST");
     bytes(&mut data, 2, b"Insta360 X5");
@@ -61,13 +65,43 @@ fn tail_with_stream_type(index: u32, total: u32, stream_type: u64) -> Vec<u8> {
     bytes(&mut group, 3, b"synthetic-export-group");
     integer(&mut group, 4, total.into());
     bytes(&mut data, 26, &group);
-    let mut payload = data.clone();
-    payload.extend([1, 1]);
-    payload.extend((data.len() as u32).to_le_bytes());
-    let mut directory = vec![0u8; 20];
-    directory[10] = 1;
-    directory[11] = 1;
-    directory[12..16].copy_from_slice(&(data.len() as u32).to_le_bytes());
+    let mut motion_records = Vec::new();
+    if motion {
+        integer(&mut data, 24, 1_100_000 + u64::from(index) * 500_000);
+        integer(&mut data, 62, 1); // compact raw IMU samples
+        integer(&mut data, 64, 1); // native video PTS + first-frame camera timestamp
+        integer(&mut data, 29, 0); // explicitly no gyro adjustment
+        let mut range = Vec::new();
+        integer(&mut range, 1, 32);
+        integer(&mut range, 2, 2000);
+        bytes(&mut data, 65, &range);
+        let mut gyro = Vec::new();
+        for sample in 0_i64..=1200 {
+            gyro.extend_from_slice(&(1_000_000 + sample * 1000).to_le_bytes());
+            for value in [1024, 0, 0, 1000, 0, 0] {
+                gyro.extend_from_slice(&((32768 + value) as u16).to_le_bytes());
+            }
+        }
+        let mut exposure = Vec::new();
+        for sample in 0_i64..=12 {
+            exposure.extend_from_slice(&(1_000_000 + sample * 100_000).to_le_bytes());
+            exposure.extend_from_slice(&0.01_f64.to_le_bytes());
+        }
+        motion_records.push((3, 0, gyro));
+        motion_records.push((4, 0, exposure));
+    }
+    let mut records = vec![(1, 1, data)];
+    records.extend(motion_records);
+    let mut payload = Vec::new();
+    let mut directory = vec![0u8; 10];
+    for (id, format, record) in records {
+        directory.extend([id, format]);
+        directory.extend((record.len() as u32).to_le_bytes());
+        directory.extend((payload.len() as u32).to_le_bytes());
+        payload.extend(&record);
+        payload.extend([format, id]);
+        payload.extend((record.len() as u32).to_le_bytes());
+    }
     payload.extend(&directory);
     payload.extend([0, 0]);
     payload.extend((directory.len() as u32).to_le_bytes());
@@ -181,6 +215,85 @@ fn options(audio: AudioPolicy) -> VideoExportOptions {
         acceleration: MediaAcceleration::Software,
         ..VideoExportOptions::default()
     }
+}
+
+#[test]
+fn exact_stills_replay_chapter_motion_on_late_backward_and_repeated_requests() {
+    use insta360_rs::media::RecordingFrameRenderer;
+    use std::io::{Seek, SeekFrom};
+    use std::sync::atomic::AtomicBool;
+    let directory = tempfile::tempdir().unwrap();
+    let motion_source = |index, total| {
+        let path = source(directory.path(), index, total, false);
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let offset = file.metadata().unwrap().len() - tail(index, total).len() as u64;
+        file.set_len(offset).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.write_all(&tail_with_motion(index, total, 3, true))
+            .unwrap();
+        InputSet::discover(path).unwrap()
+    };
+    let full = RecordingSequence::single(motion_source(0, 1)).unwrap();
+    let split = RecordingSequence::new(vec![motion_source(0, 2), motion_source(1, 2)]).unwrap();
+    let settings = StitchConfig {
+        housing: Housing::InvisibleDiveCase,
+        environment: Environment::Underwater,
+        stabilization: Stabilization::DirectionLock,
+        rolling_shutter: RollingShutterCorrection::Off,
+        backend: ProcessingBackend::Cpu,
+        underwater_color: insta360_rs::UnderwaterColorOptions {
+            mode: insta360_rs::UnderwaterColorMode::Legacy,
+            ..Default::default()
+        },
+        ..StitchConfig::default()
+    };
+    let projection = EquirectangularProjection {
+        width: 128,
+        height: 64,
+    };
+    let cancel = AtomicBool::new(false);
+    let collect = |sequence: &RecordingSequence| {
+        let mut reader = insta360_rs::PairedReader::open(sequence, Duration::ZERO).unwrap();
+        let mut pairs = Vec::new();
+        while let Some(pair) = reader.next_pair(&cancel).unwrap() {
+            pairs.push(pair);
+        }
+        pairs
+    };
+    let full_pairs = collect(&full);
+    let split_pairs = collect(&split);
+    assert_eq!(full_pairs.len(), 10);
+    assert_eq!(split_pairs.len(), 10);
+    let mut reference = RecordingFrameRenderer::new(full, settings.clone()).unwrap();
+    let expected: Vec<_> = full_pairs
+        .iter()
+        .map(|pair| {
+            reference
+                .render_strict(pair, projection, &cancel)
+                .unwrap()
+                .frame
+        })
+        .collect();
+    let mut renderer = RecordingFrameRenderer::new(split, settings).unwrap();
+    for index in [7, 2, 9, 0, 5, 4, 7, 7] {
+        let actual = renderer
+            .render_strict(&split_pairs[index], projection, &cancel)
+            .unwrap();
+        assert_eq!(
+            actual.frame.as_rgb8(),
+            expected[index].as_rgb8(),
+            "frame {index}"
+        );
+    }
+    assert_ne!(
+        expected[0].as_rgb8(),
+        expected[7].as_rgb8(),
+        "fixture must vary over time"
+    );
 }
 
 fn run(exporter: &Exporter, path: &Path, options: VideoExportOptions) -> (u64, Vec<ExportEvent>) {

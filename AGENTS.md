@@ -359,8 +359,10 @@ Before finishing a relevant change, verify:
 5. Stitch backend and HEVC encoder selection remain independent; export decoding
    is software and GPU output uses synchronous readback. Native random-access
    previews have a separate hardware-decoding policy with software fallback.
-6. Automatic GPU fallback restarts the whole job on CPU only for typed GPU
-   failures. Explicit backends stay strict.
+6. Automatic GPU fallback restarts file-export jobs on CPU only for typed GPU
+   failures. A reusable preview renderer may retry its unpublished frame; batch
+   callers use its strict method and own whole-attempt rollback. Explicit
+   backends stay strict.
 7. Cancellation and failure clean only job-owned temporary outputs. Successful
    publication never overwrites an existing destination and finalized video has
    its encoder flushed and MP4 trailer written.

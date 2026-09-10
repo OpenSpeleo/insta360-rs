@@ -263,6 +263,30 @@ mod tests {
     use super::*;
     #[test]
     fn verified_models_execute_all_styles_and_reuse_temporal_buffers() {
+        // Complete output snapshots, explicitly self-derived: the independent
+        // model-adapter reference is tested separately in model.rs.
+        let reference = include_bytes!("../../tests/fixtures/underwater-sequence-reference-v1.bin");
+        assert_eq!(&reference[..8], b"MNNRGB1\0");
+        let mut references = reference[8..].chunks_exact(64 * 64 * 3);
+        let mut compare = |actual: &[u8]| {
+            let expected = references.next().expect("complete RGB reference");
+            let error: u64 = actual
+                .iter()
+                .zip(expected)
+                .map(|(actual, expected)| {
+                    let difference = actual.abs_diff(*expected);
+                    assert!(
+                        difference <= 2,
+                        "temporal reference channel changed by {difference}"
+                    );
+                    u64::from(difference)
+                })
+                .sum();
+            assert!(
+                (error as f64 / actual.len() as f64) < 0.05,
+                "temporal reference mean error changed"
+            );
+        };
         let original: Vec<_> = (0..64 * 64)
             .flat_map(|i| {
                 [
@@ -285,6 +309,7 @@ mod tests {
             ];
             let mut first = original.clone();
             session.process_rgb8(&mut first).unwrap();
+            compare(&first);
             assert_ne!(first, original, "style {style} did not restore the image");
             assert!(session.output.iter().all(|value| value.is_finite()));
             let initial_output = session.output.clone();
@@ -297,6 +322,9 @@ mod tests {
                     }
                 }
                 session.process_rgb8(&mut pixels).unwrap();
+                if [9, 10, 59, 60, 61].contains(&frame) {
+                    compare(&pixels);
+                }
                 if frame < 10 {
                     assert_eq!(
                         pixels, first,
@@ -329,6 +357,7 @@ mod tests {
             outputs.windows(2).all(|pair| pair[0] != pair[1]),
             "styles must select distinct trained vectors"
         );
+        assert!(references.next().is_none());
     }
     #[test]
     fn public_ai_identity_missing_assets_and_invalid_frames_are_checked() {

@@ -206,12 +206,33 @@ def build(output: Path, jobs: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", "--prefix", required=True, type=Path)
+    parser.add_argument("--output", "--prefix", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--configuration",
+        action="store_true",
+        help="Print cache identity JSON without building",
+    )
+    mode.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Verify an existing prefix without building",
+    )
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 1, 8))
     args = parser.parse_args()
+    if args.configuration:
+        print(json.dumps(build_configuration(), sort_keys=True))
+        return
+    if args.output is None:
+        parser.error("--output is required unless --configuration is selected")
     if args.jobs < 1:
         parser.error("--jobs must be positive")
-    build(args.output, args.jobs)
+    if args.verify_only:
+        if not verify_prefix(args.output, build_configuration()):
+            parser.error(f"MNN prefix is incomplete or incompatible: {args.output}")
+        print(args.output)
+    else:
+        build(args.output, args.jobs)
 
 
 if __name__ == "__main__":

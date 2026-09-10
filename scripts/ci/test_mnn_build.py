@@ -7,6 +7,7 @@ import json
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,40 @@ SPEC.loader.exec_module(mnn)
 
 
 class MnnBuildTests(unittest.TestCase):
+    def test_cli_configuration_is_read_only(self):
+        output = io.StringIO()
+        with (
+            patch("sys.argv", ["build-mnn.py", "--configuration"]),
+            patch.object(mnn, "build") as build,
+            redirect_stdout(output),
+        ):
+            mnn.main()
+        self.assertEqual(json.loads(output.getvalue()), mnn.build_configuration())
+        build.assert_not_called()
+
+    def test_cli_verification_never_builds_or_downloads(self):
+        for valid in (True, False):
+            with (
+                self.subTest(valid=valid),
+                patch(
+                    "sys.argv", ["build-mnn.py", "--output", "prefix", "--verify-only"]
+                ),
+                patch.object(mnn, "verify_prefix", return_value=valid) as verify,
+                patch.object(mnn, "build") as build,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                if valid:
+                    mnn.main()
+                else:
+                    with self.assertRaises(SystemExit) as failure:
+                        mnn.main()
+                    self.assertEqual(failure.exception.code, 2)
+                verify.assert_called_once_with(
+                    Path("prefix"), mnn.build_configuration()
+                )
+                build.assert_not_called()
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="mnn builder test ")
         self.addCleanup(temporary.cleanup)

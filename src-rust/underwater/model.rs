@@ -63,6 +63,7 @@ pub(super) fn decode_model(original: &[u8], id: u32) -> Result<Vec<u8>> {
 }
 
 unsafe extern "C" {
+    fn insta360_mnn_version() -> *const c_char;
     fn insta360_mnn_create(
         bytes: *const u8,
         length: usize,
@@ -84,6 +85,17 @@ unsafe extern "C" {
         capacity: usize,
     ) -> c_int;
     fn insta360_mnn_destroy(session: *mut c_void);
+}
+
+pub(super) fn runtime_version() -> Result<&'static str> {
+    // SAFETY: MNN returns its linked library's immutable static version string.
+    let pointer = unsafe { insta360_mnn_version() };
+    if pointer.is_null() {
+        return Err(Error::Media("MNN returned no runtime version".into()));
+    }
+    unsafe { CStr::from_ptr(pointer) }
+        .to_str()
+        .map_err(|_| Error::Media("MNN returned an invalid runtime version".into()))
 }
 
 pub(super) struct Model {
@@ -183,6 +195,85 @@ impl Drop for Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linked_runtime_is_the_pinned_mnn_version() {
+        assert_eq!(runtime_version().unwrap(), "3.6.1");
+    }
+
+    #[test]
+    fn model_varied_tensors_match_complete_reference() {
+        // See tests/reference/README.md: generated through a standalone C++
+        // Interpreter, without this adapter, with two nonuniform input patterns.
+        let bytes = include_bytes!("../../tests/fixtures/underwater-mnn-reference-v1.bin");
+        assert_eq!(&bytes[..8], b"MNNREF1\0");
+        let mut references = bytes[8..]
+            .chunks_exact(4)
+            .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()));
+        for id in [197, 198] {
+            let original = if id == 197 {
+                let mut original = insta360_rs_data_underwater_model_a::PAYLOADS[0].1.to_vec();
+                original.extend_from_slice(insta360_rs_data_underwater_model_b::PAYLOADS[0].1);
+                original
+            } else {
+                insta360_rs_data_underwater_resources::PAYLOADS
+                    .iter()
+                    .find(|(path, _)| *path == "underwater/model198.ins")
+                    .unwrap()
+                    .1
+                    .to_vec()
+            };
+            let mut model = Model::open(&original, id).unwrap();
+            for pattern in 0..2 {
+                let sample = |input: usize, index: usize| -> f32 {
+                    if id == 198 {
+                        (((index * if pattern == 0 { 17 } else { 71 } + 23 + pattern * 37) % 257)
+                            as i32
+                            - 128) as f32
+                            / 128.0
+                    } else {
+                        let factor = match input {
+                            0 => pattern + 3,
+                            1 => pattern + 7,
+                            _ => 13,
+                        };
+                        let offset = match input {
+                            0 => 19,
+                            1 => 43,
+                            _ => pattern * 31,
+                        };
+                        ((index * factor + offset) % 257) as f32 / 256.0
+                    }
+                };
+                let lengths = if id == 197 {
+                    [3 * 17 * 17 * 17, 3 * 256 * 256, 256]
+                } else {
+                    [3 * 224 * 224, 0, 0]
+                };
+                let inputs: [Vec<f32>; 3] = std::array::from_fn(|input| {
+                    (0..lengths[input])
+                        .map(|index| sample(input, index))
+                        .collect()
+                });
+                let mut actual = vec![0.0; if id == 197 { 3 * 17 * 17 * 17 } else { 576 }];
+                model
+                    .run(&inputs[0], &inputs[1], &inputs[2], &mut actual)
+                    .unwrap();
+                for (index, value) in actual.into_iter().enumerate() {
+                    let expected = references.next().expect("complete reference tensor");
+                    let tolerance = 0.0005 + expected.abs() * 0.0005;
+                    assert!(
+                        (value - expected).abs() <= tolerance,
+                        "model {id}, pattern {pattern}, element {index}: {value} vs {expected}"
+                    );
+                }
+            }
+        }
+        assert!(
+            references.next().is_none(),
+            "no unconsumed reference elements"
+        );
+    }
 
     #[test]
     fn model_tensors_match_independent_mnn_reference_and_reject_invalid_inputs() {

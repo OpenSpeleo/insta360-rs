@@ -91,9 +91,15 @@ void error(char* destination, size_t capacity, const char* message) noexcept {
 }
 
 extern "C" {
+const char* insta360_mnn_version() noexcept {
+    return MNN::getVersion();
+}
+
 void* insta360_mnn_create(const unsigned char* bytes, size_t length, int id,
                          char* message, size_t capacity) noexcept {
     try {
+        if (std::strcmp(MNN::getVersion(), "3.6.1") != 0)
+            throw std::runtime_error("Linked MNN runtime must be version 3.6.1");
         if (!bytes || !length || (id != 197 && id != 198))
             throw std::runtime_error("Invalid underwater MNN model arguments");
         return new Model(bytes, length, id);

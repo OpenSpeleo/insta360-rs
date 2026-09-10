@@ -1459,6 +1459,11 @@ fn capabilities(py: Python<'_>) -> PyCapabilities {
     py.detach(MediaCapabilities::detect).into()
 }
 
+#[pyfunction]
+fn mnn_runtime_version() -> PyResult<&'static str> {
+    insta360_rs::underwater::mnn_runtime_version().map_err(to_py_error)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn start_video_job(
     inputs: Vec<PathBuf>,
@@ -1769,6 +1774,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(py_export_frames, module)?)?;
     module.add_function(wrap_pyfunction!(py_start_export_frames, module)?)?;
     module.add_function(wrap_pyfunction!(capabilities, module)?)?;
+    module.add_function(wrap_pyfunction!(mnn_runtime_version, module)?)?;
     Ok(())
 }
 

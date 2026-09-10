@@ -71,6 +71,7 @@ from ._native import (
     _start_export_frames,
     _start_export_video,
     capabilities,
+    mnn_runtime_version,
 )
 
 PathInput: TypeAlias = str | PathLike[str]
@@ -287,6 +288,7 @@ __all__ = [
     "VideoTrackInfo",
     "VideoFrameReader",
     "capabilities",
+    "mnn_runtime_version",
     "export_frames",
     "export_video",
     "extract",

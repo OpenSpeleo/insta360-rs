@@ -1138,3 +1138,213 @@ fn unavailable_ai_fails_preflight_and_both_exports_before_creating_outputs() {
         .is_err());
     assert!(!video.exists());
 }
+
+#[test]
+fn reusable_exact_frame_rendering_matches_still_export_for_every_layout() {
+    use insta360_rs::media::{inspect_frame_dimensions, RecordingFrameRenderer};
+    let cancel = AtomicBool::new(false);
+    for layout in [Layout::Tracks, Layout::Legacy, Layout::Packed] {
+        let directory = tempfile::tempdir().unwrap();
+        let inputs = fixture(
+            directory.path(),
+            "Insta360 X5",
+            113,
+            6,
+            layout,
+            3,
+            "0.25",
+            false,
+        );
+        let sequence = RecordingSequence::single(inputs.clone()).unwrap();
+        let dimensions = inspect_frame_dimensions(&sequence).unwrap();
+        assert_eq!((dimensions[0].width, dimensions[0].height), (64, 64));
+        let settings = config();
+        let projection = settings.projection.unwrap();
+        let info = RecordingFrameRenderer::preflight(&sequence, &settings, None, &cancel).unwrap();
+        assert_eq!(info[0].projection, projection);
+        let mut renderer = RecordingFrameRenderer::new(sequence.clone(), settings.clone()).unwrap();
+        let mut reader = PairedReader::open(&sequence, Duration::ZERO).unwrap();
+        let pair = reader.next_pair(&cancel).unwrap().unwrap();
+        let identity = pair.identity();
+        let originals = [pair.a.data(0).to_vec(), pair.b.data(0).to_vec()];
+        let output = renderer.render(&pair, projection, &cancel).unwrap();
+        assert_eq!(output.info, info[0]);
+        assert_eq!(output.backend.selected, insta360_rs::EffectiveBackend::Cpu);
+        assert_eq!(pair.identity(), identity);
+        assert_eq!(pair.a.data(0), originals[0]);
+        assert_eq!(pair.b.data(0), originals[1]);
+        let exported = Exporter::new(inputs, settings)
+            .unwrap()
+            .export_frames(
+                directory.path().join("still"),
+                FrameSelection::Indices(vec![0]),
+                ImageExportOptions::default(),
+            )
+            .wait()
+            .unwrap();
+        assert_eq!(
+            output.frame.as_rgb8(),
+            image::open(&exported.outputs[0])
+                .unwrap()
+                .to_rgb8()
+                .as_raw()
+        );
+        assert!(matches!(
+            renderer.render(&pair, projection, &AtomicBool::new(true)),
+            Err(insta360_rs::Error::Cancelled)
+        ));
+        assert_eq!(
+            renderer
+                .render(&pair, projection, &cancel)
+                .unwrap()
+                .frame
+                .as_rgb8(),
+            output.frame.as_rgb8()
+        );
+    }
+}
+
+#[test]
+fn native_color_needs_no_calibration_and_applies_ilog_before_independent_restoration() {
+    use insta360_rs::media::NativeColorProcessor;
+    use insta360_rs::{ColorConversion, UnderwaterColorMode, UnderwaterColorOptions};
+    let directory = tempfile::tempdir().unwrap();
+    let inputs = fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        3,
+        "0.25",
+        false,
+    );
+    let mut sequence = RecordingSequence::single(inputs).unwrap();
+    sequence.chapters[0].inspection.metadata.offsets.clear();
+    sequence.chapters[0].inspection.metadata.recorded_color_mode =
+        Some(insta360_rs::container::RecordedColorMode::ILog);
+    let cancel = AtomicBool::new(false);
+    let mut reader = PairedReader::open(&sequence, Duration::ZERO).unwrap();
+    let pair = reader.next_pair(&cancel).unwrap().unwrap();
+    let mut original = NativeColorProcessor::new(
+        sequence.clone(),
+        ColorConversion::Preserve,
+        UnderwaterColorOptions::default(),
+    )
+    .unwrap();
+    assert!(!original.requires_processing(0).unwrap());
+    let original = original.process(&pair, None, &cancel).unwrap();
+    let lut = insta360_rs::color::CubeLut::load_bundled("studio-i-log-x5-rec709").unwrap();
+    #[cfg(not(feature = "underwater-ai"))]
+    let modes = [UnderwaterColorMode::Off, UnderwaterColorMode::Legacy];
+    #[cfg(feature = "underwater-ai")]
+    let modes = [
+        UnderwaterColorMode::Off,
+        UnderwaterColorMode::Legacy,
+        UnderwaterColorMode::Ai,
+    ];
+    for mode in modes {
+        let options = UnderwaterColorOptions {
+            mode,
+            ..UnderwaterColorOptions::default()
+        };
+        let mut processor =
+            NativeColorProcessor::new(sequence.clone(), ColorConversion::Auto, options).unwrap();
+        assert!(
+            processor.requires_processing(0).unwrap(),
+            "Auto resolves I-Log even when restoration is Off"
+        );
+        assert_eq!(
+            processor.preflight(Some(128), &cancel).unwrap()[0].width,
+            64,
+            "native processing does not upscale"
+        );
+        let actual = processor.process(&pair, None, &cancel).unwrap();
+        let repeated = processor.process(&pair, None, &cancel).unwrap();
+        let mut reference = insta360_rs::underwater::UnderwaterColorSession::prepare(
+            options,
+            64,
+            64,
+            12,
+            1,
+            &insta360_rs::assets::BundledAssetProvider,
+        )
+        .unwrap();
+        for index in 0..2 {
+            let mut expected = original[index].as_rgb8().to_vec();
+            lut.apply_rgb8(&mut expected).unwrap();
+            reference.reset();
+            reference
+                .process_rgb8(&mut expected, pair.timestamp_micros as f64 / 1_000_000.0)
+                .unwrap();
+            assert_eq!(actual[index].as_rgb8(), expected);
+            assert_eq!(actual[index].as_rgb8(), repeated[index].as_rgb8());
+        }
+        assert!(matches!(
+            processor.process(&pair, None, &AtomicBool::new(true)),
+            Err(insta360_rs::Error::Cancelled)
+        ));
+        if mode == UnderwaterColorMode::Legacy {
+            assert!(processor.preflight(Some(32), &cancel).is_err());
+        } else {
+            let scaled = processor.process(&pair, Some(32), &cancel).unwrap();
+            assert_eq!((scaled[0].width(), scaled[0].height()), (32, 32));
+        }
+    }
+}
+
+#[test]
+fn frame_preflight_checks_dimensions_color_resources_and_exact_pair_contract() {
+    use insta360_rs::media::RecordingFrameRenderer;
+    let directory = tempfile::tempdir().unwrap();
+    let inputs = fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        2,
+        "0",
+        false,
+    );
+    let sequence = RecordingSequence::single(inputs).unwrap();
+    let mut settings = config();
+    settings.underwater_color.mode = insta360_rs::UnderwaterColorMode::Legacy;
+    let cancel = AtomicBool::new(false);
+    for projection in [
+        EquirectangularProjection {
+            width: 64,
+            height: 32,
+        },
+        EquirectangularProjection {
+            width: 16384,
+            height: 8192,
+        },
+    ] {
+        assert!(
+            RecordingFrameRenderer::preflight(&sequence, &settings, Some(projection), &cancel)
+                .is_err()
+        );
+    }
+    let projection = settings.projection.unwrap();
+    let mut renderer = RecordingFrameRenderer::new(sequence.clone(), settings).unwrap();
+    let mut pair = PairedReader::open(&sequence, Duration::ZERO)
+        .unwrap()
+        .next_pair(&cancel)
+        .unwrap()
+        .unwrap();
+    pair.b_pts += 1;
+    assert!(renderer.render(&pair, projection, &cancel).is_err());
+    pair.b_pts -= 1;
+    assert!(renderer.render(&pair, projection, &cancel).is_ok());
+    pair.a.set_pts(Some(pair.a_pts + 1));
+    assert!(renderer.render(&pair, projection, &cancel).is_err());
+    pair.a.set_pts(Some(pair.a_pts));
+    let timestamp = pair.timestamp_micros;
+    pair.timestamp_micros = 10_000_000;
+    assert!(renderer.render(&pair, projection, &cancel).is_err());
+    pair.timestamp_micros = timestamp;
+    assert!(renderer.render(&pair, projection, &cancel).is_ok());
+    pair.chapter_index = 2;
+    assert!(renderer.render(&pair, projection, &cancel).is_err());
+}

@@ -259,9 +259,25 @@ Build output is published only after compilation, header copying and notice
 preparation succeed. The shared `setup-mnn` action and wheel builders use this
 same script; no Insta360 SDK runtime is needed.
 
+Application build wrappers can run
+`python3 scripts/ci/build-mnn.py --configuration` to read the JSON cache
+identity, including the builder digest, source pin, flags and compiler
+environment. `--verify-only --output /path/to/mnn-prefix` validates an existing
+prefix and never downloads or builds. Both commands are read-only. This lets
+hosts share the builder's authoritative configuration instead of copying its
+version pins or CMake flags.
+
+`underwater::mnn_runtime_version()` returns the actual linked library version;
+the adapter also rejects model creation unless that version is `3.6.1`. The
+Python equivalent is `mnn_runtime_version()`. This runtime check supplements the
+prefix manifest and does not replace file-integrity verification.
+
 Run builder regression tests with
 `python3 -m unittest discover -s scripts/ci -p test_mnn_build.py -v`. Model
 tests actually execute both original graphs through the independent CPU
 interpreter. They cover all four styles and temporal processing, and compare
-selected tensors to an independent MNN reference. Default-feature tests also
+complete tensors for two varied input patterns to an independent C++ MNN
+reference. A separate complete RGB sequence fixture is explicitly a regression
+snapshot of this implementation, not an independent restoration oracle. See
+[reference provenance](../tests/reference/README.md). Default-feature tests also
 check that requesting AI without the feature returns `MissingCapability`.

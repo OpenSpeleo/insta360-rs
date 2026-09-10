@@ -11,23 +11,15 @@ pub(in crate::media) fn preflight_video(
     options: &VideoExportOptions,
 ) -> Result<VideoPreflight> {
     let mut report = inspect_video(sequence, config, options)?;
-    let mut previous = None;
-    for chapter in &sequence.chapters {
-        let file = File::open(&chapter.inputs.paths()[0])
-            .map_err(|error| crate::error::io_error(&chapter.inputs.paths()[0], error))?;
-        let mut reader = crate::InsvReader::new(file)?;
-        let current = FileStabilizer::from_reader_continuing(
-            &mut reader,
-            &chapter.inspection,
-            config,
-            previous.as_ref(),
-        )?;
-        if let Some(stabilizer) = &current {
+    let mut preparation = render::PreparedRecording::new(sequence.clone(), config.clone());
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    for index in 0..sequence.chapters.len() {
+        let current = preparation.prepare(index, &cancel)?;
+        if let Some(stabilizer) = &current.stabilizer {
             report
                 .warnings
                 .extend(stabilizer.warnings().iter().cloned());
         }
-        previous = current;
     }
     report.warnings.sort();
     report.warnings.dedup();
@@ -95,6 +87,10 @@ fn inspect_video(
             ));
         }
     }
+    // Validate enabled restoration before creating output or panorama buffers.
+    let mut underwater =
+        underwater_color::UnderwaterProcessor::new(config.underwater_color, Some(frame_rate))?;
+    underwater.prepare(projection.width, projection.height)?;
     let range = VideoRange::new(options.start, options.duration, Some(sequence.duration))?;
     let duration = range
         .effective_duration(Some(sequence.duration))
@@ -215,9 +211,9 @@ fn export_attempt(
         reader.enable_audio();
     }
     let mut writer: Option<HevcWriter> = None;
-    let mut prepared_count = 0;
-    let mut stabilizer = None;
-    let mut calibration = None;
+    let mut preparation = render::PreparedRecording::new(sequence.clone(), config.clone());
+    let mut prepared_index = None;
+    let mut last_optics = None;
     let mut frames_written = 0_u64;
     let mut progress = ProgressGate::new();
     while let Some(pair) = reader.next_pair(&context.cancel)? {
@@ -242,32 +238,20 @@ fn export_attempt(
             }
             VideoRangeDecision::Include(timestamp) => timestamp,
         };
-        while prepared_count <= pair.chapter_index {
-            context.check_cancelled()?;
-            let chapter = &sequence.chapters[prepared_count];
-            let file = File::open(&chapter.inputs.paths()[0])
-                .map_err(|error| crate::error::io_error(&chapter.inputs.paths()[0], error))?;
-            let mut metadata_reader = crate::InsvReader::new(file)?;
-            let current = FileStabilizer::from_reader_continuing(
-                &mut metadata_reader,
-                &chapter.inspection,
-                config,
-                stabilizer.as_ref(),
-            )?;
-            if let Some(current) = &current {
-                context.emit(ExportEvent::StabilizationPrepared(current.diagnostics()));
-                for warning in current.warnings() {
-                    context.emit(ExportEvent::Warning(warning.clone()));
+        let prepared =
+            preparation.prepare_with(pair.chapter_index, &context.cancel, |chapter| {
+                if let Some(current) = &chapter.stabilizer {
+                    context.emit(ExportEvent::StabilizationPrepared(current.diagnostics()));
+                    for warning in current.warnings() {
+                        context.emit(ExportEvent::Warning(warning.clone()));
+                    }
                 }
-            }
-            stabilizer = current;
+            })?;
+        if prepared_index != Some(pair.chapter_index) {
             underwater.reset();
-            calibration = Some(resolve_calibration(&chapter.inspection.metadata, config)?);
-            stitcher.set_color_lut(resolve_color_lut(
-                &chapter.inspection.metadata,
-                config.color_conversion,
-            )?);
-            prepared_count += 1;
+            stitcher.set_color_lut(prepared.color_lut.clone());
+            last_optics = prepared.calibration.optical_resolution.clone();
+            prepared_index = Some(pair.chapter_index);
         }
         let media_time = Duration::from_micros(
             u64::try_from(pair.timestamp_micros)
@@ -284,17 +268,13 @@ fn export_attempt(
             );
         }
         let motion = stitch_motion(
-            stabilizer.as_ref(),
+            prepared.stabilizer.as_ref(),
             FrameTimestamp::Pts(pair.source_timestamp_micros),
         )?;
-        let decoded = native_pair(pair);
+        let decoded = native_pair(&pair);
         let projection = video_projection(config, options, &decoded)?;
-        let panorama = stitcher.stitch_video(
-            decoded,
-            calibration.as_ref().expect("prepared calibration"),
-            projection,
-            &motion,
-        )?;
+        let panorama =
+            stitcher.stitch_video(decoded, &prepared.calibration, projection, &motion)?;
         let panorama = match panorama {
             StitchedVideoFrame::Rgb(frame) => {
                 StitchedVideoFrame::Rgb(underwater.process(frame, media_time.as_micros() as i64)?)
@@ -368,7 +348,7 @@ fn export_attempt(
         frames_written,
         elapsed: started.elapsed(),
         backend: stitcher.report,
-        optics: calibration.and_then(|calibration| calibration.optical_resolution),
+        optics: last_optics,
     })
 }
 

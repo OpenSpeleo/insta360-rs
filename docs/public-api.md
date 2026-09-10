@@ -78,6 +78,69 @@ worker, and reuses random-seek resources. Continuous processing uses
 `paired::PairedReader` instead. See
 [recording sequences](recording-sequences.md).
 
+## Reusable exact-frame processing
+
+Rust media hosts can retain a `FramePair` from either paired reader and borrow
+it with `media::RecordingFrameRenderer::render`. The session accepts a
+`RecordingSequence`, `StitchConfig`, output projection and cancellation flag; it
+returns an owned RGB `PanoramaFrame`, actual `BackendReport`, and
+`FrameRenderInfo`. The report includes resolved optics, warnings, and typed
+calibration provenance (offset version/source, profile name and per-lens
+polynomial normalization). Registry provenance remains available through
+`profile::lens_profile`. These reports describe implemented evidence, not
+physical-camera qualification.
+
+The renderer neither decodes nor writes files. It borrows the original native
+buffers without cloning or mutating them. Hosts retain responsibility for
+pair/source association, scheduling, encoding, output publication and stale
+preview checks. Session scalers remain on their owning processing thread.
+`render` may retry an unpublished Auto frame on CPU after a typed GPU failure;
+explicit GPU is strict. `render_strict` exposes processing failures so batch
+hosts can roll back their owned outputs and restart the entire attempt. Existing
+`Exporter` jobs retain whole-attempt fallback.
+
+`RecordingFrameRenderer::preflight` validates every chapter's layout, decoder,
+optics, motion, selected backend, output dimensions and required color assets
+without creating outputs or requiring an HEVC encoder. An omitted projection
+uses the config projection, then twice the decoded single-lens width by that
+lens width. `inspect_frame_dimensions` performs cheaper layout-only inspection
+and reports one lens's dimensions even for packed input. Explicit panorama
+projections retain the SDK's existing ability to upscale; applications can
+impose a no-upscale policy before calling it.
+
+`media::NativeColorProcessor` supplies the color-only route independently of
+calibration and stabilization. Its `preflight` validates all chapters and
+resources; `requires_processing(chapter_index)` resolves I-Log before deciding
+whether the host can retain its direct native encoding path. Underwater Off
+alone does not bypass an active I-Log LUT. `process` returns two packed RGB
+`LensFrame`s: resize without upscaling, source matrix/range conversion, I-Log
+conversion, then underwater restoration. Requested native widths are rounded
+down to even dimensions; zero-sized results are rejected. Native lens geometry
+is unchanged: housing exclusion masks and motion only affect panorama rendering.
+HDR/PQ/HLG sources cannot enter this SDR color correction path; uncorrected
+native access remains independent of panorama restrictions.
+
+Every selected still, including batch images and both native lenses, starts with
+reset restoration history. Continuous video retains history within each chapter.
+Motion history is separate: file preparation continues preceding chapter
+telemetry, even for a first request in a later chapter. Backward seeks replay
+metadata preparation with only the active chapter retained, rather than
+retaining every chapter's large telemetry arrays. Cancellation is checked
+between preparation, rendering and inference operations; a single inference call
+is not interruptible. Downscaled previews can differ photometrically from
+full-size stills and continuous video because adaptive color depends on image
+resolution and processed-frame history.
+
+The renderer, chapter preparation, native RGB conversion and restoration stages
+are shared with existing still/video exports. Video retains original audio
+handling and GPU YUV output when underwater restoration is disabled.
+
+These borrowed-FFmpeg-frame sessions are Rust host APIs. Python's existing file
+export functions use the same rendering internals; the Python wrapper does not
+expose native `FramePair` ownership or these session types.
+
+## File export and calibration
+
 `Exporter::from_sequence` stitches a validated `RecordingSequence` through one
 renderer and MP4 writer. `preflight_video` validates the implemented options for
 every chapter without writing files. `ExportEvent::EncoderSelected` reports the

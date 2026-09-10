@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -10,7 +11,7 @@ use tempfile::TempPath;
 
 use crate::calibration::OffsetSource;
 use crate::color::CubeLut;
-use crate::container::{InsvInspection, InsvMetadata, RecordedColorMode};
+use crate::container::{InsvMetadata, RecordedColorMode};
 use crate::{
     AudioPolicy, BackendReport, CalibrationResolver, ColorConversion, CpuStitcher,
     EffectiveBackend, EquirectangularProjection, Error, ExportResult, FrameSelection, GpuFailure,
@@ -23,6 +24,13 @@ use super::stabilization::FileStabilizer;
 use super::{temporary_output_path, ExportContext, ExportEvent, ExportPhase, ExportProgress};
 use crate::motion::FrameMotion;
 use crate::stream::{allocate_video_frame, scale_video_frame};
+
+#[path = "render.rs"]
+mod render;
+pub use render::{
+    inspect_frame_dimensions, FrameCalibrationInfo, FrameDimensions, FrameRenderInfo,
+    NativeColorProcessor, RecordingFrameRenderer, RenderedFrame,
+};
 
 const VIDEO_TRACKS: usize = 2;
 const RGB_CHANNELS: usize = 3;
@@ -128,29 +136,37 @@ fn export_frames_attempt(
     validate_frame_export_config(&inputs, &options)?;
     config.underwater_color.validate_capabilities()?;
     ffmpeg::init().map_err(|error| media_error("initializing FFmpeg", error))?;
-    let mut stitcher = StitchSession::select(config.backend, requested, fallback, &context)?;
-    context.emit(ExportEvent::BackendSelected(Box::new(
-        stitcher.report.clone(),
-    )));
-
     let sequence = crate::RecordingSequence::single(inputs.clone())?;
-    crate::paired::DecodedLayout::inspect(&sequence.chapters[0])?;
-    validate_source_color(&sequence.chapters[0])?;
-    let calibration = resolve_calibration(&sequence.chapters[0].inspection.metadata, &config)?;
-    calibration.validate_for_stitching()?;
-    let source = read_source(&inputs, &config)?;
-    let mut underwater =
-        underwater_color::UnderwaterProcessor::new(config.underwater_color, source.inspection.fps)?;
-    stitcher.set_color_lut(resolve_color_lut(
-        &source.inspection.metadata,
-        config.color_conversion,
-    )?);
-    if let Some(stabilizer) = &source.stabilizer {
-        context.emit(ExportEvent::StabilizationPrepared(stabilizer.diagnostics()));
-        for warning in stabilizer.warnings() {
-            context.emit(ExportEvent::Warning(warning.clone()));
+    let dimensions = inspect_frame_dimensions(&sequence)?[0];
+    let width = options.scale_width.unwrap_or(
+        dimensions
+            .width
+            .checked_mul(2)
+            .ok_or_else(|| Error::InvalidMedia("default panorama width overflow".into()))?,
+    );
+    let projection = if options.scale_width.is_some() {
+        EquirectangularProjection {
+            width,
+            height: width / 2,
         }
-    }
+    } else {
+        config.projection.unwrap_or(EquirectangularProjection {
+            width,
+            height: width / 2,
+        })
+    };
+    let mut renderer = RecordingFrameRenderer::for_attempt(
+        sequence.clone(),
+        config,
+        requested,
+        fallback,
+        &context,
+    )?;
+    let prepared = renderer.prepare(0, projection, &context.cancel)?;
+    renderer.emit_preparation(&context);
+    context.emit(ExportEvent::BackendSelected(Box::new(
+        renderer.report().clone(),
+    )));
     let mut selection = SelectionPlan::new(selection)?;
     let total = selection.len() as u64;
 
@@ -171,9 +187,8 @@ fn export_frames_attempt(
     let mut reader = crate::PairedReader::open(&sequence, start)?;
     let mut synchronized_index = 0_u64;
     while let Some(pair) = reader.next_pair(&context.cancel)? {
-        let source_timestamp = pair.source_timestamp_micros;
-        let pair = native_pair(pair);
-        let media_time = duration_from_timestamp(pair.timestamp);
+        let timestamp = FrameTimestamp::Pts(pair.timestamp_micros);
+        let media_time = duration_from_timestamp(timestamp);
         if synchronized_index.saturating_sub(last_progress_frame) >= PROGRESS_FRAME_INTERVAL {
             emit_progress(
                 &context,
@@ -186,7 +201,7 @@ fn export_frames_attempt(
             last_progress_frame = synchronized_index;
         }
 
-        let requested = selection.matches(synchronized_index, pair.timestamp)?;
+        let requested = selection.matches(synchronized_index, timestamp)?;
         synchronized_index = synchronized_index
             .checked_add(1)
             .ok_or_else(|| Error::InvalidMedia("decoded frame index overflow".into()))?;
@@ -194,7 +209,6 @@ fn export_frames_attempt(
             continue;
         }
 
-        let projection = output_projection(&config, &options, &pair)?;
         emit_progress(
             &context,
             ExportPhase::Stitching,
@@ -204,14 +218,9 @@ fn export_frames_attempt(
             started,
         );
         context.check_cancelled()?;
-        let motion = stitch_motion(
-            source.stabilizer.as_ref(),
-            FrameTimestamp::Pts(source_timestamp),
-        )?;
-        let panorama = stitcher.stitch(pair, &calibration, projection, &motion)?;
-        // Selected images are independent observations, even when adjacent.
-        underwater.reset();
-        let panorama = underwater.process(panorama, source_timestamp)?;
+        let panorama = renderer
+            .render_strict(&pair, projection, &context.cancel)?
+            .frame;
         context.check_cancelled()?;
 
         for output_key in requested {
@@ -253,8 +262,8 @@ fn export_frames_attempt(
         frames_written: outputs.len() as u64,
         outputs,
         elapsed: started.elapsed(),
-        backend: stitcher.report.clone(),
-        optics: calibration.optical_resolution.clone(),
+        backend: renderer.report().clone(),
+        optics: prepared.optics,
     };
     created_outputs.commit();
     Ok(result)
@@ -417,23 +426,6 @@ impl VideoRange {
         })?;
         Ok(VideoRangeDecision::Include(FrameTimestamp::Pts(rebased)))
     }
-}
-
-struct SourceData {
-    inspection: InsvInspection,
-    stabilizer: Option<FileStabilizer>,
-}
-
-fn read_source(inputs: &InputSet, config: &StitchConfig) -> Result<SourceData> {
-    let path = &inputs.paths()[0];
-    let file = File::open(path).map_err(|error| crate::error::io_error(path, error))?;
-    let mut reader = crate::InsvReader::new(file)?;
-    let inspection = reader.inspect()?;
-    let stabilizer = FileStabilizer::from_reader(&mut reader, &inspection, config)?;
-    Ok(SourceData {
-        inspection,
-        stabilizer,
-    })
 }
 
 fn stitch_motion(
@@ -681,7 +673,7 @@ impl StitchSession {
 
     fn stitch(
         &mut self,
-        pair: SynchronizedPair,
+        pair: SynchronizedPair<'_>,
         calibration: &ResolvedCalibration,
         projection: EquirectangularProjection,
         motion: &FrameMotion,
@@ -728,7 +720,7 @@ impl StitchSession {
 
     fn stitch_video(
         &mut self,
-        pair: SynchronizedPair,
+        pair: SynchronizedPair<'_>,
         calibration: &ResolvedCalibration,
         projection: EquirectangularProjection,
         motion: &FrameMotion,
@@ -772,7 +764,7 @@ impl StitchSession {
 fn stitch_decoded_gpu(
     stitcher: &crate::gpu::GpuStitcher,
     converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
-    pair: SynchronizedPair,
+    pair: SynchronizedPair<'_>,
     calibration: &ResolvedCalibration,
     projection: EquirectangularProjection,
     motion: &FrameMotion,
@@ -798,7 +790,7 @@ fn stitch_decoded_gpu(
 fn stitch_decoded_gpu_video(
     stitcher: &crate::gpu::GpuStitcher,
     converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
-    pair: SynchronizedPair,
+    pair: SynchronizedPair<'_>,
     calibration: &ResolvedCalibration,
     projection: EquirectangularProjection,
     motion: &FrameMotion,
@@ -852,7 +844,16 @@ struct RgbFrameConverter {
 }
 
 impl RgbFrameConverter {
-    fn convert(&mut self, decoded: &DecodedVideoFrame) -> Result<LensFrame> {
+    fn convert(&mut self, decoded: &DecodedVideoFrame<'_>) -> Result<LensFrame> {
+        self.convert_scaled(decoded, decoded.format.width, decoded.format.height)
+    }
+
+    fn convert_scaled(
+        &mut self,
+        decoded: &DecodedVideoFrame<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<LensFrame> {
         decoded.validate_layout()?;
         let format = &decoded.format;
         let needs_scaler = self.color != Some(format.color)
@@ -861,6 +862,8 @@ impl RgbFrameConverter {
                 input.format != format.pixel_format
                     || input.width != format.width
                     || input.height != format.height
+                    || scaler.output().width != width
+                    || scaler.output().height != height
             });
         if needs_scaler {
             let mut scaler = ffmpeg::software::scaling::Context::get(
@@ -868,8 +871,8 @@ impl RgbFrameConverter {
                 format.width,
                 format.height,
                 ffmpeg::format::Pixel::RGB24,
-                format.width,
-                format.height,
+                width,
+                height,
                 ffmpeg::software::scaling::Flags::BILINEAR,
             )
             .map_err(|error| media_error("creating the RGB conversion context", error))?;
@@ -894,8 +897,7 @@ impl RgbFrameConverter {
             self.color = Some(format.color);
         }
 
-        let mut rgb =
-            allocate_video_frame(ffmpeg::format::Pixel::RGB24, format.width, format.height)?;
+        let mut rgb = allocate_video_frame(ffmpeg::format::Pixel::RGB24, width, height)?;
         scale_video_frame(
             self.scaler.as_mut().expect("scaler initialized above"),
             &decoded.frame,
@@ -965,12 +967,11 @@ enum FrameTimestamp {
     Sequence(u64),
 }
 
-struct SynchronizedPair {
-    timestamp: FrameTimestamp,
-    frames: [DecodedVideoFrame; VIDEO_TRACKS],
+struct SynchronizedPair<'a> {
+    frames: [DecodedVideoFrame<'a>; VIDEO_TRACKS],
 }
 
-impl SynchronizedPair {
+impl SynchronizedPair<'_> {
     fn source_dimensions(&self) -> Result<(u32, u32)> {
         let first = &self.frames[0].format;
         let second = &self.frames[1].format;
@@ -1039,17 +1040,28 @@ struct VideoColorInfo {
     chroma_location: ffmpeg::util::chroma::Location,
 }
 
-struct DecodedVideoFrame {
+struct DecodedVideoFrame<'a> {
     // The AVFrame is ref-counted by FFmpeg. Keeping it here retains both
     // software plane buffers and any future native hardware-surface payload.
-    frame: ffmpeg::frame::Video,
+    frame: Cow<'a, ffmpeg::frame::Video>,
     format: DecodedVideoFormat,
 }
 
-impl DecodedVideoFrame {
+impl<'a> DecodedVideoFrame<'a> {
+    #[cfg(test)]
     fn new(frame: ffmpeg::frame::Video) -> Self {
         let format = DecodedVideoFormat::from_frame(&frame);
-        Self { frame, format }
+        Self {
+            frame: Cow::Owned(frame),
+            format,
+        }
+    }
+
+    fn borrow(frame: &'a ffmpeg::frame::Video) -> Self {
+        Self {
+            frame: Cow::Borrowed(frame),
+            format: DecodedVideoFormat::from_frame(frame),
+        }
     }
 
     fn validate_layout(&self) -> Result<()> {
@@ -1123,12 +1135,11 @@ impl DecodedVideoFrame {
     }
 }
 
-fn native_pair(pair: crate::FramePair) -> SynchronizedPair {
+fn native_pair(pair: &crate::FramePair) -> SynchronizedPair<'_> {
     SynchronizedPair {
-        timestamp: FrameTimestamp::Pts(pair.timestamp_micros),
         frames: [
-            DecodedVideoFrame::new(pair.a),
-            DecodedVideoFrame::new(pair.b),
+            DecodedVideoFrame::borrow(&pair.a),
+            DecodedVideoFrame::borrow(&pair.b),
         ],
     }
 }
@@ -1165,34 +1176,10 @@ fn copy_tightly_packed_rgb(frame: &ffmpeg::frame::Video) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-fn output_projection(
-    config: &StitchConfig,
-    options: &ImageExportOptions,
-    pair: &SynchronizedPair,
-) -> Result<EquirectangularProjection> {
-    let (source_width, _) = pair.source_dimensions()?;
-    let projection = if let Some(width) = options.scale_width {
-        EquirectangularProjection {
-            width,
-            height: width / 2,
-        }
-    } else if let Some(projection) = config.projection {
-        projection
-    } else {
-        EquirectangularProjection {
-            width: source_width
-                .checked_mul(2)
-                .ok_or_else(|| Error::InvalidMedia("default panorama width overflowed".into()))?,
-            height: source_width,
-        }
-    };
-    projection.validate()
-}
-
 fn video_projection(
     config: &StitchConfig,
     options: &VideoExportOptions,
-    pair: &SynchronizedPair,
+    pair: &SynchronizedPair<'_>,
 ) -> Result<EquirectangularProjection> {
     let (source_width, _) = pair.source_dimensions()?;
     let projection = options
@@ -2221,9 +2208,8 @@ mod tests {
         }
     }
 
-    fn color_test_pair() -> SynchronizedPair {
+    fn color_test_pair() -> SynchronizedPair<'static> {
         SynchronizedPair {
-            timestamp: FrameTimestamp::Pts(0),
             frames: std::array::from_fn(|_| {
                 let mut frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGB24, 32, 32);
                 let stride = frame.stride(0);
@@ -2750,12 +2736,11 @@ mod tests {
         };
         let sequence = crate::RecordingSequence::single(InputSet::discover(path).unwrap()).unwrap();
         let mut reader = crate::PairedReader::open(&sequence, Duration::ZERO).unwrap();
-        let pair = native_pair(
-            reader
-                .next_pair(&std::sync::atomic::AtomicBool::new(false))
-                .unwrap()
-                .unwrap(),
-        );
+        let source_pair = reader
+            .next_pair(&std::sync::atomic::AtomicBool::new(false))
+            .unwrap()
+            .unwrap();
+        let pair = native_pair(&source_pair);
         for frame in &pair.frames {
             assert_eq!((frame.format.width, frame.format.height), (2_880, 2_880));
             assert!(!frame.format.planes.is_empty());

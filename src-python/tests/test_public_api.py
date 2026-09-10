@@ -21,6 +21,13 @@ class CustomPath:
 
 
 class InstalledApiTests(unittest.TestCase):
+    def test_linked_mnn_version_matches_runtime_capability(self):
+        if sdk.capabilities().underwater_ai_compiled:
+            self.assertEqual(sdk.mnn_runtime_version(), "3.6.1")
+        else:
+            with self.assertRaises(sdk.MissingCapabilityError):
+                sdk.mnn_runtime_version()
+
     def test_real_extension_and_distribution_version(self):
         self.assertTrue(
             any(

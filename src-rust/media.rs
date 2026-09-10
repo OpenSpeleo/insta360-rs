@@ -20,6 +20,11 @@ mod pipeline;
 mod pipeline_impl;
 mod stabilization;
 
+pub use pipeline_impl::{
+    inspect_frame_dimensions, FrameCalibrationInfo, FrameDimensions, FrameRenderInfo,
+    NativeColorProcessor, RecordingFrameRenderer, RenderedFrame,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ExportPhase {
