@@ -21,6 +21,8 @@ details are intentionally omitted.
 
 ### Performance
 
+- Open housing-corrected panoramas faster and keep repeated previews responsive.
+  7b8abe6
 - Faster synchronized fisheye previews when moving through a recording. 84430e5
 
 ### Fixes
