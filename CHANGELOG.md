@@ -10,7 +10,7 @@ details are intentionally omitted.
 
 - Export compatible split recordings as continuous 360° videos with original
   audio, or extract synchronized fisheye frames and complete source archives.
-  6824cb3
+  77f570b
 
 ### Performance
 
