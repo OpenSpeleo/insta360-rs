@@ -18,6 +18,8 @@ details are intentionally omitted.
 
 ### Fixes
 
+- Improve recording discovery, exact frame selection, and stabilization across
+  split-video boundaries. a5aec20
 - Preserve original audio timing in stitched video exports, including trimmed
   clips. bc10f30
 
