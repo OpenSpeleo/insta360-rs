@@ -1,0 +1,54 @@
+name: Unsupported Insta360 recording
+description: Report a recording or camera mode that cannot be processed.
+title: "[Recording support] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us which operation failed and how the recording was captured.
+        Do not include license keys, camera serial numbers, or private media.
+        If a sample is needed, a maintainer can discuss a suitable way to share it.
+  - type: input
+    id: camera
+    attributes:
+      label: Camera model and firmware
+      placeholder: "Insta360 X5, firmware version"
+    validations:
+      required: true
+  - type: input
+    id: software
+    attributes:
+      label: Application version and operating system
+      placeholder: "FrameForge version, macOS / Windows / Linux"
+    validations:
+      required: true
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operation
+      options:
+        - Video stitching
+        - Lossless stream and metadata extraction
+        - Paired fisheye frame extraction
+        - Automatic chapter discovery or joining
+    validations:
+      required: true
+  - type: textarea
+    id: capture
+    attributes:
+      label: Recording settings and files
+      description: Resolution, FPS, color mode, lens accessories, capture mode, number of files, and whether the camera split a continuous recording.
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error and expected result
+      description: Paste the error and describe the result you expected. Remove private paths and identifying metadata.
+    validations:
+      required: true
+  - type: textarea
+    id: studio
+    attributes:
+      label: Insta360 Studio comparison
+      description: If tested, give the Studio version and whether it imports, joins, or exports the same files successfully.
