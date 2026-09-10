@@ -71,13 +71,17 @@ formats return a capability error with the option to disable original audio. A
 recording without audio succeeds with a warning and a silent video.
 
 Audio uses the same video origin and chapter offsets, preserving its relative
-timing instead of moving its first packet independently to zero. Only complete
-compressed packets inside the selected recording/chapter interval are copied.
-Thus cuts can leave a gap of up to one compressed packet at a boundary. Packet
-timestamps/durations must be present and valid, and output DTS must increase.
-The reader drains the final audio tail without further video decoding when a
-clip ends. Missing timing, corrupt packets and overlapping output timestamps
-fail rather than being guessed.
+timing instead of moving its first packet independently to zero. The MP4 movie
+clock uses microsecond resolution so edit lists retain sub-millisecond audio
+offsets, including after clipping, instead of rounding them to milliseconds.
+Audio packets retain their sample-based time base.
+
+Only complete compressed packets inside the selected recording/chapter interval
+are copied. Thus cuts can leave a gap of up to one compressed packet at a
+boundary. Packet timestamps/durations must be present and valid, and output DTS
+must increase. The reader drains the final audio tail without further video
+decoding when a clip ends. Missing timing, corrupt packets and overlapping
+output timestamps fail rather than being guessed.
 
 ## Publication and verification
 

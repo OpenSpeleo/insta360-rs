@@ -126,6 +126,8 @@ fn source_with_group(
             "yuv420p",
             "-threads",
             "1",
+            "-movie_timescale",
+            "1000000",
             "-t",
             if total == 1 { "1" } else { "0.5" },
             "-f",
@@ -327,6 +329,19 @@ fn audio_packets(path: &Path) -> Vec<(i64, i64, Vec<u8>)> {
     packets
 }
 
+fn assert_audio_matches(actual: &[(i64, Vec<u8>)], expected: &[(i64, Vec<u8>)]) {
+    assert_eq!(actual.len(), expected.len(), "copied audio packet count");
+    for (index, ((actual_pts, actual_payload), (expected_pts, expected_payload))) in
+        actual.iter().zip(expected).enumerate()
+    {
+        assert_eq!(actual_pts, expected_pts, "audio packet {index} timestamp");
+        assert_eq!(
+            actual_payload, expected_payload,
+            "audio packet {index} payload"
+        );
+    }
+}
+
 #[test]
 fn audio_copy_preserves_packet_payload_order_and_video_offset_across_chapters() {
     let directory = tempfile::tempdir().unwrap();
@@ -375,12 +390,17 @@ fn audio_copy_preserves_packet_payload_order_and_video_offset_across_chapters() 
         actual[0].0 > 0,
         "audio retains its positive offset from the video origin"
     );
-    assert_eq!(
-        actual,
-        expected
+    assert_ne!(
+        expected[0].0 % 1000,
+        0,
+        "fixture must exercise a sub-millisecond audio offset"
+    );
+    assert_audio_matches(
+        &actual,
+        &expected
             .iter()
             .map(|(pts, _, payload)| (*pts, payload.clone()))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>(),
     );
     let clipped = directory.path().join("clipped-audio.mp4");
     assert_eq!(
@@ -388,7 +408,7 @@ fn audio_copy_preserves_packet_payload_order_and_video_offset_across_chapters() 
             &exporter,
             &clipped,
             VideoExportOptions {
-                start: Some(Duration::from_millis(300)),
+                start: Some(Duration::from_millis(200)),
                 duration: Some(Duration::from_millis(400)),
                 ..options(AudioPolicy::Copy)
             }
@@ -398,14 +418,19 @@ fn audio_copy_preserves_packet_payload_order_and_video_offset_across_chapters() 
     );
     let expected: Vec<_> = expected
         .into_iter()
-        .filter(|(pts, end, _)| *pts >= 300_000 && *end <= 700_000)
-        .map(|(pts, _, payload)| (pts - 300_000, payload))
+        .filter(|(pts, end, _)| *pts >= 200_000 && *end <= 600_000)
+        .map(|(pts, _, payload)| (pts - 200_000, payload))
         .collect();
     let actual: Vec<_> = audio_packets(&clipped)
         .into_iter()
         .map(|(pts, _, payload)| (pts, payload))
         .collect();
-    assert_eq!(actual, expected);
+    assert_ne!(
+        expected[0].0 % 1000,
+        0,
+        "clipped fixture must exercise a sub-millisecond audio offset"
+    );
+    assert_audio_matches(&actual, &expected);
 }
 
 #[test]

@@ -1573,8 +1573,13 @@ impl HevcWriter {
             .map(|layout| layout.add_output_streams(&mut output))
             .transpose()?
             .unwrap_or_default();
+        // MP4 edit lists express track offsets in the movie time base. Match
+        // the video clock so the default millisecond scale does not round away
+        // the copied audio's sub-millisecond delay after a cut.
+        let mut muxer_options = ffmpeg::Dictionary::new();
+        muxer_options.set("movie_timescale", &time_base.denominator().to_string());
         output
-            .write_header()
+            .write_header_with(muxer_options)
             .map_err(|error| media_error("writing the MP4 header", error))?;
         let scaler = if policy.direct_bt709_yuv {
             None
