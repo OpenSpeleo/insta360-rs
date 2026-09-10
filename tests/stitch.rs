@@ -228,21 +228,6 @@ fn gyro_orientation_rotates_the_panorama_without_changing_geometry() {
 }
 
 #[test]
-fn x5_iteration_six_acceptance_metrics_are_machine_readable() {
-    let metrics: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/x5_iteration6_acceptance.json"))
-            .expect("iteration-six acceptance fixture must remain valid JSON");
-
-    assert_eq!(metrics["schema_version"], 1);
-    assert_eq!(metrics["clip"]["frame_count"], 449);
-    assert_eq!(metrics["clip"]["width"], 1920);
-    assert_eq!(metrics["clip"]["height"], 960);
-    assert!(metrics["midpoint"]["lower_seam"]["luma_gap_dn"]
-        .as_f64()
-        .is_some_and(|gap| gap < 8.0));
-}
-
-#[test]
 fn color_compensation_keeps_bright_lens_hemispheres_visible() {
     let calibration = common::x5_v6_underwater_calibration(128, 128);
     let projection = EquirectangularProjection {

@@ -1,11 +1,9 @@
-use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ffmpeg::util::mathematics::rescale::Rescale;
 use ffmpeg_next as ffmpeg;
 use image::ImageEncoder;
 use tempfile::TempPath;
@@ -29,7 +27,6 @@ use crate::stream::{allocate_video_frame, scale_video_frame};
 const VIDEO_TRACKS: usize = 2;
 const RGB_CHANNELS: usize = 3;
 const MAX_SELECTIONS: usize = 1_000_000;
-const MAX_SYNC_BACKLOG: usize = 64;
 const PROGRESS_FRAME_INTERVAL: u64 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,16 +126,21 @@ fn export_frames_attempt(
 ) -> Result<ExportResult> {
     context.check_cancelled()?;
     validate_frame_export_config(&inputs, &options)?;
+    config.underwater_color.validate_capabilities()?;
     ffmpeg::init().map_err(|error| media_error("initializing FFmpeg", error))?;
     let mut stitcher = StitchSession::select(config.backend, requested, fallback, &context)?;
     context.emit(ExportEvent::BackendSelected(Box::new(
         stitcher.report.clone(),
     )));
 
+    let sequence = crate::RecordingSequence::single(inputs.clone())?;
+    crate::paired::DecodedLayout::inspect(&sequence.chapters[0])?;
+    validate_source_color(&sequence.chapters[0])?;
+    let calibration = resolve_calibration(&sequence.chapters[0].inspection.metadata, &config)?;
+    calibration.validate_for_stitching()?;
     let source = read_source(&inputs, &config)?;
-    validate_x5_source(&source)?;
-
-    let calibration = resolve_calibration(&source.inspection.metadata, &config)?;
+    let mut underwater =
+        underwater_color::UnderwaterProcessor::new(config.underwater_color, source.inspection.fps)?;
     stitcher.set_color_lut(resolve_color_lut(
         &source.inspection.metadata,
         config.color_conversion,
@@ -162,65 +164,74 @@ fn export_frames_attempt(
     let mut outputs = Vec::with_capacity(selection.len());
     let mut created_outputs = CreatedOutputs::default();
     let mut last_progress_frame = 0_u64;
-    decode_synchronized(
-        &inputs.paths()[0],
-        selection.first_seek_timestamp(),
-        source
-            .inspection
-            .metadata
-            .reverse_video_track_order
-            .unwrap_or(false),
-        &context,
-        |synchronized_index, pair| {
-            let media_time = duration_from_timestamp(pair.timestamp);
-            if synchronized_index.saturating_sub(last_progress_frame) >= PROGRESS_FRAME_INTERVAL {
-                emit_progress(
-                    &context,
-                    ExportPhase::Decoding,
-                    outputs.len() as u64,
-                    total,
-                    media_time,
-                    started,
-                );
-                last_progress_frame = synchronized_index;
-            }
-
-            let requested = selection.matches(synchronized_index, pair.timestamp)?;
-            if requested.is_empty() {
-                return Ok(false);
-            }
-
-            let projection = output_projection(&config, &options, &pair)?;
+    let start = selection
+        .first_seek_timestamp()
+        .map(|time| Duration::from_micros(time as u64))
+        .unwrap_or_default();
+    let mut reader = crate::PairedReader::open(&sequence, start)?;
+    let mut synchronized_index = 0_u64;
+    while let Some(pair) = reader.next_pair(&context.cancel)? {
+        let source_timestamp = pair.source_timestamp_micros;
+        let pair = native_pair(pair);
+        let media_time = duration_from_timestamp(pair.timestamp);
+        if synchronized_index.saturating_sub(last_progress_frame) >= PROGRESS_FRAME_INTERVAL {
             emit_progress(
                 &context,
-                ExportPhase::Stitching,
+                ExportPhase::Decoding,
                 outputs.len() as u64,
                 total,
                 media_time,
                 started,
             );
-            context.check_cancelled()?;
-            let motion = stitch_motion(source.stabilizer.as_ref(), pair.timestamp)?;
-            let panorama = stitcher.stitch(pair, &calibration, projection, &motion)?;
-            context.check_cancelled()?;
+            last_progress_frame = synchronized_index;
+        }
 
-            for output_key in requested {
-                emit_progress(
-                    &context,
-                    ExportPhase::Encoding,
-                    outputs.len() as u64,
-                    total,
-                    media_time,
-                    started,
-                );
-                let output = output_dir.join(format!("frame_{output_key}.{extension}"));
-                write_image_atomically(&output, &panorama, &options, &context)?;
-                created_outputs.track(output.clone());
-                outputs.push(output);
-            }
-            Ok(selection.is_complete())
-        },
-    )?;
+        let requested = selection.matches(synchronized_index, pair.timestamp)?;
+        synchronized_index = synchronized_index
+            .checked_add(1)
+            .ok_or_else(|| Error::InvalidMedia("decoded frame index overflow".into()))?;
+        if requested.is_empty() {
+            continue;
+        }
+
+        let projection = output_projection(&config, &options, &pair)?;
+        emit_progress(
+            &context,
+            ExportPhase::Stitching,
+            outputs.len() as u64,
+            total,
+            media_time,
+            started,
+        );
+        context.check_cancelled()?;
+        let motion = stitch_motion(
+            source.stabilizer.as_ref(),
+            FrameTimestamp::Pts(source_timestamp),
+        )?;
+        let panorama = stitcher.stitch(pair, &calibration, projection, &motion)?;
+        // Selected images are independent observations, even when adjacent.
+        underwater.reset();
+        let panorama = underwater.process(panorama, source_timestamp)?;
+        context.check_cancelled()?;
+
+        for output_key in requested {
+            emit_progress(
+                &context,
+                ExportPhase::Encoding,
+                outputs.len() as u64,
+                total,
+                media_time,
+                started,
+            );
+            let output = output_dir.join(format!("frame_{output_key}.{extension}"));
+            write_image_atomically(&output, &panorama, &options, &context)?;
+            created_outputs.track(output.clone());
+            outputs.push(output);
+        }
+        if selection.is_complete() {
+            break;
+        }
+    }
 
     if !selection.is_complete() {
         return Err(Error::InvalidMedia(format!(
@@ -243,6 +254,7 @@ fn export_frames_attempt(
         outputs,
         elapsed: started.elapsed(),
         backend: stitcher.report.clone(),
+        optics: calibration.optical_resolution.clone(),
     };
     created_outputs.commit();
     Ok(result)
@@ -252,6 +264,8 @@ fn export_frames_attempt(
 mod audio;
 #[path = "sequence_export.rs"]
 mod sequence_export;
+#[path = "underwater_color.rs"]
+mod underwater_color;
 pub(super) use sequence_export::preflight_video;
 
 pub(super) fn export_video(
@@ -265,12 +279,7 @@ pub(super) fn export_video(
     sequence_export::export_video(inputs, config, output, options, context, started)
 }
 
-fn validate_frame_export_config(inputs: &InputSet, options: &ImageExportOptions) -> Result<()> {
-    if inputs.paths().len() != 1 {
-        return Err(Error::MissingCapability(
-            "media export currently supports X5 single-file dual-track recordings only".into(),
-        ));
-    }
+fn validate_frame_export_config(_inputs: &InputSet, options: &ImageExportOptions) -> Result<()> {
     if matches!(options.format, ImageFormat::Jpeg) && !(1..=100).contains(&options.quality) {
         return Err(Error::InvalidMedia(
             "JPEG quality must be between 1 and 100".into(),
@@ -288,15 +297,10 @@ fn validate_frame_export_config(inputs: &InputSet, options: &ImageExportOptions)
 }
 
 fn validate_video_export_config(
-    inputs: &InputSet,
+    _inputs: &InputSet,
     output: &Path,
     options: &VideoExportOptions,
 ) -> Result<()> {
-    if inputs.paths().len() != 1 {
-        return Err(Error::MissingCapability(
-            "media export currently supports X5 single-file dual-track recordings only".into(),
-        ));
-    }
     if !(1..=100).contains(&options.quality) {
         return Err(Error::InvalidMedia(
             "HEVC quality must be between 1 and 100".into(),
@@ -315,32 +319,6 @@ fn validate_video_export_config(
                 "HEVC YUV420 output dimensions must be even".into(),
             ));
         }
-    }
-    Ok(())
-}
-
-fn validate_x5_source(source: &SourceData) -> Result<()> {
-    if !source
-        .inspection
-        .metadata
-        .camera_name
-        .as_deref()
-        .is_some_and(|name| name.eq_ignore_ascii_case("Insta360 X5"))
-    {
-        return Err(Error::UnsupportedCamera(
-            source
-                .inspection
-                .metadata
-                .camera_name
-                .clone()
-                .unwrap_or_else(|| "unspecified".into()),
-        ));
-    }
-    if source.inspection.video_tracks.len() != VIDEO_TRACKS {
-        return Err(Error::InvalidMedia(format!(
-            "X5 single-file export requires exactly two video tracks, found {}",
-            source.inspection.video_tracks.len()
-        )));
     }
     Ok(())
 }
@@ -481,9 +459,41 @@ fn resolve_calibration(
 ) -> Result<ResolvedCalibration> {
     CalibrationResolver::new(config.calibration_policy).resolve_metadata(
         metadata,
-        &config.optical_setup,
+        &config.optical_selection(),
         OffsetSource::Current,
     )
+}
+
+fn unsupported_hdr() -> Error {
+    Error::MissingCapability("stitched export produces 8-bit SDR output; Dolby, PQ and HLG input require a verified HDR tone mapper; original encoded extraction remains available".into())
+}
+
+fn validate_source_color(chapter: &crate::RecordingChapter) -> Result<()> {
+    if chapter.inspection.metadata.recorded_color_mode == Some(RecordedColorMode::Dolby) {
+        return Err(unsupported_hdr());
+    }
+    for path in chapter.inputs.paths() {
+        let input = crate::stream::open_input(path)?;
+        for stream in input
+            .streams()
+            .filter(|stream| stream.parameters().medium() == ffmpeg::media::Type::Video)
+        {
+            let parameters = stream.parameters();
+            // SAFETY: the stream owns these parameters throughout this borrow.
+            let transfer = unsafe { (*parameters.as_ptr()).color_trc };
+            validate_transfer(transfer.into())?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_transfer(transfer: ffmpeg::util::color::TransferCharacteristic) -> Result<()> {
+    use ffmpeg::util::color::TransferCharacteristic::{ARIB_STD_B67, SMPTE2084};
+    if matches!(transfer, SMPTE2084 | ARIB_STD_B67) {
+        Err(unsupported_hdr())
+    } else {
+        Ok(())
+    }
 }
 
 fn resolve_color_lut(
@@ -550,6 +560,7 @@ struct StitchSession {
     report: BackendReport,
     converters: [RgbFrameConverter; VIDEO_TRACKS],
     color_lut: Option<Arc<CubeLut>>,
+    force_rgb: bool,
 }
 
 enum SessionRenderer {
@@ -635,6 +646,7 @@ impl StitchSession {
                     report,
                     converters: std::array::from_fn(|_| RgbFrameConverter::default()),
                     color_lut: None,
+                    force_rgb: false,
                 })
             }
             BackendAttempt::Gpu => Self::open_gpu(requested),
@@ -650,6 +662,7 @@ impl StitchSession {
             report,
             converters: std::array::from_fn(|_| RgbFrameConverter::default()),
             color_lut: None,
+            force_rgb: false,
         })
     }
 
@@ -673,6 +686,9 @@ impl StitchSession {
         projection: EquirectangularProjection,
         motion: &FrameMotion,
     ) -> Result<PanoramaFrame> {
+        for frame in &pair.frames {
+            validate_transfer(frame.format.color.transfer)?;
+        }
         debug_assert_eq!(
             self.report.selected,
             match &self.renderer {
@@ -717,6 +733,14 @@ impl StitchSession {
         projection: EquirectangularProjection,
         motion: &FrameMotion,
     ) -> Result<StitchedVideoFrame> {
+        for frame in &pair.frames {
+            validate_transfer(frame.format.color.transfer)?;
+        }
+        if self.force_rgb {
+            return self
+                .stitch(pair, calibration, projection, motion)
+                .map(StitchedVideoFrame::Rgb);
+        }
         match &self.renderer {
             SessionRenderer::Cpu(_) => self
                 .stitch(pair, calibration, projection, motion)
@@ -933,234 +957,12 @@ fn rgb_to_yuv_scaler(
     Ok(scaler)
 }
 
-#[derive(Clone)]
-struct VideoStreamSpec {
-    index: usize,
-    parameters: ffmpeg::codec::Parameters,
-    time_base: ffmpeg::Rational,
-}
-
-fn video_stream_specs(input: &ffmpeg::format::context::Input) -> Result<[VideoStreamSpec; 2]> {
-    let specs = input
-        .streams()
-        .filter(|stream| stream.parameters().medium() == ffmpeg::media::Type::Video)
-        .map(|stream| VideoStreamSpec {
-            index: stream.index(),
-            parameters: stream.parameters(),
-            time_base: stream.time_base(),
-        })
-        .collect::<Vec<_>>();
-    specs.try_into().map_err(|specs: Vec<VideoStreamSpec>| {
-        Error::InvalidMedia(format!(
-            "single-file X5 export requires exactly two FFmpeg video streams, found {}",
-            specs.len()
-        ))
-    })
-}
-
-fn decode_synchronized(
-    input_path: &Path,
-    seek_timestamp: Option<i64>,
-    reverse_video_track_order: bool,
-    context: &ExportContext,
-    process: impl FnMut(u64, SynchronizedPair) -> Result<bool>,
-) -> Result<u64> {
-    let input = crate::stream::open_input(input_path)?;
-    decode_synchronized_input(
-        input,
-        seek_timestamp,
-        reverse_video_track_order,
-        context,
-        process,
-    )
-}
-
-fn decode_synchronized_input(
-    mut input: ffmpeg::format::context::Input,
-    seek_timestamp: Option<i64>,
-    reverse_video_track_order: bool,
-    context: &ExportContext,
-    mut process: impl FnMut(u64, SynchronizedPair) -> Result<bool>,
-) -> Result<u64> {
-    let mut stream_specs = video_stream_specs(&input)?;
-    apply_track_order(&mut stream_specs, reverse_video_track_order);
-    let mut decoders = [
-        TrackDecoder::new(&stream_specs[0], seek_timestamp)?,
-        TrackDecoder::new(&stream_specs[1], seek_timestamp)?,
-    ];
-    if let Some(timestamp) = seek_timestamp {
-        let targets = stream_specs.map(|stream| {
-            (
-                stream.index,
-                timestamp.rescale(
-                    ffmpeg::util::mathematics::rescale::TIME_BASE,
-                    stream.time_base,
-                ),
-            )
-        });
-        crate::stream::seek_before_presentation(&mut input, &targets)?;
-    }
-
-    let mut queues: [VecDeque<DecodedLensFrame>; VIDEO_TRACKS] =
-        std::array::from_fn(|_| VecDeque::new());
-    let mut synchronized_index = 0_u64;
-    loop {
-        context.check_cancelled()?;
-        let Some(packet) = crate::stream::read_checked_packet(&mut input)? else {
-            break;
-        };
-        let Some(decoder_index) = decoders
-            .iter()
-            .position(|decoder| decoder.stream_index == packet.stream())
-        else {
-            continue;
-        };
-        if packet.is_corrupt() {
-            return Err(Error::InvalidMedia("video packet is marked corrupt".into()));
-        }
-        decoders[decoder_index]
-            .decoder
-            .send_packet(&packet)
-            .map_err(|error| media_error("sending a compressed video packet", error))?;
-        decoders[decoder_index].receive_frames(&mut queues[decoder_index])?;
-        if queues[decoder_index].len() > MAX_SYNC_BACKLOG {
-            return Err(Error::InvalidMedia(format!(
-                "video track {} exceeded the {MAX_SYNC_BACKLOG}-frame synchronization backlog",
-                decoders[decoder_index].stream_index
-            )));
-        }
-        while let Some(pair) = take_synchronized_pair(&mut queues)? {
-            let stop = process(synchronized_index, pair)?;
-            synchronized_index = synchronized_index
-                .checked_add(1)
-                .ok_or_else(|| Error::InvalidMedia("decoded frame index overflowed".into()))?;
-            if stop {
-                return Ok(synchronized_index);
-            }
-        }
-    }
-
-    for decoder in &mut decoders {
-        decoder
-            .decoder
-            .send_eof()
-            .map_err(|error| media_error("flushing a video decoder", error))?;
-    }
-    for (decoder, queue) in decoders.iter_mut().zip(queues.iter_mut()) {
-        decoder.receive_frames(queue)?;
-    }
-    while let Some(pair) = take_synchronized_pair(&mut queues)? {
-        context.check_cancelled()?;
-        let stop = process(synchronized_index, pair)?;
-        synchronized_index = synchronized_index
-            .checked_add(1)
-            .ok_or_else(|| Error::InvalidMedia("decoded frame index overflowed".into()))?;
-        if stop {
-            return Ok(synchronized_index);
-        }
-    }
-    if queues.iter().any(|queue| !queue.is_empty()) {
-        return Err(Error::InvalidMedia(
-            "video tracks ended with unmatched decoded frames".into(),
-        ));
-    }
-    Ok(synchronized_index)
-}
-
-fn apply_track_order<T>(tracks: &mut [T; VIDEO_TRACKS], reverse: bool) {
-    if reverse {
-        tracks.swap(0, 1);
-    }
-}
-
-struct TrackDecoder {
-    stream_index: usize,
-    time_base: ffmpeg::Rational,
-    decoder: ffmpeg::codec::decoder::Video,
-    next_sequence: u64,
-    discard_before: Option<i64>,
-}
-
-impl TrackDecoder {
-    fn new(spec: &VideoStreamSpec, discard_before: Option<i64>) -> Result<Self> {
-        let mut context = ffmpeg::codec::context::Context::from_parameters(spec.parameters.clone())
-            .map_err(|error| media_error("creating a video decoder context", error))?;
-        context.set_threading(ffmpeg::codec::threading::Config::kind(
-            ffmpeg::codec::threading::Type::Frame,
-        ));
-        // SAFETY: the unopened context is exclusively owned. FFmpeg checks this
-        // bound before allocating buffers, including in-stream size changes.
-        unsafe {
-            (*context.as_mut_ptr()).max_pixels = crate::stream::MAX_FRAME_PIXELS as i64;
-        }
-        let decoder = context
-            .decoder()
-            .video()
-            .map_err(|error| media_error("opening an X5 video decoder", error))?;
-        Ok(Self {
-            stream_index: spec.index,
-            time_base: spec.time_base,
-            decoder,
-            next_sequence: 0,
-            discard_before,
-        })
-    }
-
-    fn receive_frames(&mut self, output: &mut VecDeque<DecodedLensFrame>) -> Result<()> {
-        loop {
-            let mut decoded = ffmpeg::frame::Video::empty();
-            match self.decoder.receive_frame(&mut decoded) {
-                Ok(()) => {}
-                Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::ffi::EAGAIN => break,
-                Err(ffmpeg::Error::Eof) => break,
-                Err(error) => return Err(media_error("receiving a decoded video frame", error)),
-            }
-            if decoded.is_corrupt() || decoded.has_decode_errors() {
-                return Err(Error::InvalidMedia("decoded video frame is corrupt".into()));
-            }
-
-            let timestamp = decoded.timestamp().or_else(|| decoded.pts()).map(|value| {
-                value.rescale(
-                    self.time_base,
-                    ffmpeg::util::mathematics::rescale::TIME_BASE,
-                )
-            });
-            // Indexed seeks can land the tracks on different earlier GOPs.
-            // Decode that preroll for reference frames, but do not synchronize
-            // it as though it belonged to the requested export interval.
-            if timestamp
-                .zip(self.discard_before)
-                .is_some_and(|(timestamp, target)| timestamp < target)
-            {
-                continue;
-            }
-            let timestamp = match timestamp {
-                Some(value) => FrameTimestamp::Pts(value),
-                None => FrameTimestamp::Sequence(self.next_sequence),
-            };
-            self.next_sequence = self
-                .next_sequence
-                .checked_add(1)
-                .ok_or_else(|| Error::InvalidMedia("decoded frame sequence overflowed".into()))?;
-
-            output.push_back(DecodedLensFrame {
-                timestamp,
-                frame: DecodedVideoFrame::new(decoded),
-            });
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrameTimestamp {
     Pts(i64),
+    // Only writer/selection unit tests construct a missing-timestamp value.
+    #[allow(dead_code)]
     Sequence(u64),
-}
-
-struct DecodedLensFrame {
-    timestamp: FrameTimestamp,
-    frame: DecodedVideoFrame,
 }
 
 struct SynchronizedPair {
@@ -1321,47 +1123,13 @@ impl DecodedVideoFrame {
     }
 }
 
-fn take_synchronized_pair(
-    queues: &mut [VecDeque<DecodedLensFrame>; VIDEO_TRACKS],
-) -> Result<Option<SynchronizedPair>> {
-    loop {
-        let Some(first) = queues[0].front() else {
-            return Ok(None);
-        };
-        let Some(second) = queues[1].front() else {
-            return Ok(None);
-        };
-        match (first.timestamp, second.timestamp) {
-            (FrameTimestamp::Pts(first), FrameTimestamp::Pts(second)) if first == second => {}
-            (FrameTimestamp::Sequence(first), FrameTimestamp::Sequence(second))
-                if first == second => {}
-            (FrameTimestamp::Pts(first), FrameTimestamp::Pts(second)) => {
-                let (track, timestamp) = if first < second {
-                    (0, first)
-                } else {
-                    (1, second)
-                };
-                if first.abs_diff(second) > 1_000_000 {
-                    return Err(Error::InvalidMedia(format!(
-                        "video tracks diverged by more than one second near timestamp {timestamp} us"
-                    )));
-                }
-                queues[track].pop_front();
-                continue;
-            }
-            _ => {
-                return Err(Error::InvalidMedia(
-                    "one video track has timestamps while the other does not".into(),
-                ));
-            }
-        }
-
-        let first = queues[0].pop_front().expect("front checked above");
-        let second = queues[1].pop_front().expect("front checked above");
-        return Ok(Some(SynchronizedPair {
-            timestamp: first.timestamp,
-            frames: [first.frame, second.frame],
-        }));
+fn native_pair(pair: crate::FramePair) -> SynchronizedPair {
+    SynchronizedPair {
+        timestamp: FrameTimestamp::Pts(pair.timestamp_micros),
+        frames: [
+            DecodedVideoFrame::new(pair.a),
+            DecodedVideoFrame::new(pair.b),
+        ],
     }
 }
 
@@ -2338,7 +2106,7 @@ fn media_error(action: &str, error: ffmpeg::Error) -> Error {
 mod tests {
     use super::*;
     use crate::Stabilization;
-    use crate::{OpticalSetup, PanoramaFrame};
+    use crate::{Environment, Housing, PanoramaFrame};
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
@@ -2903,15 +2671,6 @@ mod tests {
     }
 
     #[test]
-    fn metadata_track_order_controls_lens_assignment() {
-        let mut tracks = ["stream-00", "stream-10"];
-        apply_track_order(&mut tracks, false);
-        assert_eq!(tracks, ["stream-00", "stream-10"]);
-        apply_track_order(&mut tracks, true);
-        assert_eq!(tracks, ["stream-10", "stream-00"]);
-    }
-
-    #[test]
     fn bitrate_quality_preserves_photogrammetry_detail_at_high_settings() {
         let low = quality_target_bitrate(1920, 960, 30_000.0 / 1_001.0, 50);
         let photogrammetry = quality_target_bitrate(1920, 960, 30_000.0 / 1_001.0, 85);
@@ -2984,173 +2743,23 @@ mod tests {
         assert_eq!(video.parameters().id(), ffmpeg::codec::Id::HEVC);
     }
 
-    fn sync_test_frame(timestamp: i64) -> DecodedLensFrame {
-        DecodedLensFrame {
-            timestamp: FrameTimestamp::Pts(timestamp),
-            frame: DecodedVideoFrame::new(ffmpeg::frame::Video::new(
-                ffmpeg::format::Pixel::RGB24,
-                2,
-                2,
-            )),
-        }
-    }
-
-    #[test]
-    fn synchronization_rejects_large_gaps_with_one_frame_per_track() {
-        for timestamps in [[0, 1_000_001], [1_000_001, 0]] {
-            let mut queues =
-                timestamps.map(|timestamp| VecDeque::from([sync_test_frame(timestamp)]));
-            let error = take_synchronized_pair(&mut queues)
-                .err()
-                .expect("more than one second of divergence must fail");
-            assert!(error
-                .to_string()
-                .contains("diverged by more than one second"));
-            assert!(queues.iter().all(|queue| queue.len() == 1));
-        }
-    }
-
-    #[test]
-    fn synchronization_recovers_small_gaps_as_frames_arrive() {
-        for earlier_track in 0..VIDEO_TRACKS {
-            let mut queues = std::array::from_fn(|_| VecDeque::new());
-            queues[earlier_track].push_back(sync_test_frame(0));
-            queues[1 - earlier_track].push_back(sync_test_frame(33_333));
-            assert!(take_synchronized_pair(&mut queues).unwrap().is_none());
-            queues[earlier_track].push_back(sync_test_frame(33_333));
-            let pair = take_synchronized_pair(&mut queues)
-                .expect("small gap can be resynchronized")
-                .expect("matching pair");
-            assert_eq!(pair.timestamp, FrameTimestamp::Pts(33_333));
-            assert!(queues.iter().all(VecDeque::is_empty));
-        }
-    }
-
-    #[test]
-    fn synchronized_decode_can_stop_on_any_delayed_frame() {
-        let directory = tempfile::tempdir().expect("temp directory");
-        let path = directory.path().join("delayed-dual-track.mp4");
-        let generated = std::process::Command::new("ffmpeg")
-            .args([
-                "-v",
-                "error",
-                "-nostdin",
-                "-f",
-                "lavfi",
-                "-i",
-                "testsrc2=size=48x32:rate=8",
-                "-map",
-                "0:v",
-                "-map",
-                "0:v",
-                "-t",
-                "3",
-                "-c:v",
-                "mpeg4",
-                "-bf",
-                "2",
-                "-g",
-                "8",
-                "-f",
-                "mp4",
-            ])
-            .arg(&path)
-            .output();
-        let generated = match generated {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!("skipping generated-media test: ffmpeg executable unavailable");
-                return;
-            }
-            result => result.expect("run fixture generator"),
-        };
-        assert!(
-            generated.status.success(),
-            "{}",
-            String::from_utf8_lossy(&generated.stderr)
-        );
-        ffmpeg::init().expect("FFmpeg initialization");
-        let context = test_context();
-        let mut complete_timestamps = Vec::new();
-        let count = decode_synchronized(&path, None, false, &context, |_, pair| {
-            complete_timestamps.push(pair.timestamp);
-            Ok(false)
-        })
-        .expect("drain complete recording");
-        assert_eq!(count, 24);
-
-        for stop_index in 0..count {
-            let mut selected_timestamps = Vec::new();
-            let selected = decode_synchronized(&path, None, false, &context, |index, pair| {
-                selected_timestamps.push(pair.timestamp);
-                Ok(index == stop_index)
-            })
-            .unwrap_or_else(|error| panic!("stopping at frame {stop_index} failed: {error}"));
-            assert_eq!(selected, stop_index + 1);
-            assert_eq!(
-                selected_timestamps,
-                complete_timestamps[..=stop_index as usize]
-            );
-        }
-
-        let mut input = crate::stream::open_input(&path).expect("original input");
-        // SAFETY: the input owns this live AVIOContext throughout decoding. The
-        // callback executes synchronously, between FFmpeg reads, and injects
-        // the same sticky state as a mid-stream disk read failure.
-        let io = unsafe { (*input.as_mut_ptr()).pb };
-        assert!(!io.is_null());
-        let mut processed = 0;
-        let result = decode_synchronized_input(input, None, false, &context, |index, _| {
-            processed += 1;
-            if index == 1 {
-                unsafe {
-                    (*io).error = -ffmpeg::ffi::EIO;
-                }
-            }
-            Ok(false)
-        });
-        assert!(processed >= 2);
-        assert!(matches!(result, Err(Error::Media(_))), "{result:?}");
-    }
-
     #[test]
     fn decodes_first_synchronized_pair_from_configured_sample() {
         let Ok(path) = std::env::var("INSTA360_RS_X5_SAMPLE") else {
             return;
         };
-        ffmpeg::init().expect("FFmpeg initialization");
-        let mut input = ffmpeg::format::input(&path).expect("sample input");
-        let specs = video_stream_specs(&input).expect("two video streams");
-        let mut decoders = [
-            TrackDecoder::new(&specs[0], None).expect("first decoder"),
-            TrackDecoder::new(&specs[1], None).expect("second decoder"),
-        ];
-        let mut queues: [VecDeque<DecodedLensFrame>; 2] = std::array::from_fn(|_| VecDeque::new());
-
-        for (stream, packet) in input.packets() {
-            let Some(index) = decoders
-                .iter()
-                .position(|decoder| decoder.stream_index == stream.index())
-            else {
-                continue;
-            };
-            decoders[index]
-                .decoder
-                .send_packet(&packet)
-                .expect("send packet");
-            decoders[index]
-                .receive_frames(&mut queues[index])
-                .expect("receive frame");
-            if let Some(pair) = take_synchronized_pair(&mut queues).expect("synchronize") {
-                assert_eq!(pair.frames[0].format.width, 2_880);
-                assert_eq!(pair.frames[0].format.height, 2_880);
-                assert_eq!(pair.frames[1].format.width, 2_880);
-                assert_eq!(pair.frames[1].format.height, 2_880);
-                assert!(!pair.frames[0].format.planes.is_empty());
-                assert!(!pair.frames[1].format.planes.is_empty());
-                return;
-            }
+        let sequence = crate::RecordingSequence::single(InputSet::discover(path).unwrap()).unwrap();
+        let mut reader = crate::PairedReader::open(&sequence, Duration::ZERO).unwrap();
+        let pair = native_pair(
+            reader
+                .next_pair(&std::sync::atomic::AtomicBool::new(false))
+                .unwrap()
+                .unwrap(),
+        );
+        for frame in &pair.frames {
+            assert_eq!((frame.format.width, frame.format.height), (2_880, 2_880));
+            assert!(!frame.format.planes.is_empty());
         }
-        panic!("sample ended without a synchronized decoded frame pair");
     }
 
     #[test]
@@ -3160,7 +2769,8 @@ mod tests {
         };
         let directory = tempfile::tempdir().expect("temp directory");
         let config = StitchConfig {
-            optical_setup: OpticalSetup::BareAir,
+            housing: Housing::None,
+            environment: Environment::Air,
             stabilization: Stabilization::DirectionLock,
             projection: Some(EquirectangularProjection {
                 width: 640,
@@ -3226,10 +2836,11 @@ mod tests {
             Err(_) => ProcessingBackend::Auto,
         };
         let config = StitchConfig {
-            optical_setup: if std::env::var_os("INSTA360_RS_X5_VIDEO_SMOKE_UNDERWATER").is_some() {
-                OpticalSetup::InvisibleDiveCaseUnderwater
+            housing: Housing::Auto,
+            environment: if std::env::var_os("INSTA360_RS_X5_VIDEO_SMOKE_UNDERWATER").is_some() {
+                Environment::Underwater
             } else {
-                OpticalSetup::StrictAuto
+                Environment::Auto
             },
             stabilization: Stabilization::DirectionLock,
             projection: Some(EquirectangularProjection {

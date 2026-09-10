@@ -5,6 +5,7 @@ runs use this entry point so missing codecs/tools fail visibly.
 """
 
 import importlib.machinery
+import os
 import shutil
 import sys
 import unittest
@@ -30,7 +31,18 @@ def main():
         for suffix in importlib.machinery.EXTENSION_SUFFIXES
     ):
         raise RuntimeError("Python tests require the compiled native extension")
-    if not {"libx265", "libkvazaar"} & set(insta360_rs.capabilities().hevc_encoders):
+    capabilities = insta360_rs.capabilities()
+    if (
+        os.environ.get("INSTA360_RS_REQUIRE_GPU") == "1"
+        and not capabilities.gpu_available
+    ):
+        raise RuntimeError("Python suite requires a usable GPU adapter")
+    if (
+        os.environ.get("INSTA360_RS_REQUIRE_UNDERWATER_AI") == "1"
+        and not capabilities.underwater_ai_compiled
+    ):
+        raise RuntimeError("Python suite requires the compiled underwater AI engine")
+    if not {"libx265", "libkvazaar"} & set(capabilities.hevc_encoders):
         raise RuntimeError(
             "Python video tests require software HEVC in the linked FFmpeg libraries "
             "(libx265 or libkvazaar)"

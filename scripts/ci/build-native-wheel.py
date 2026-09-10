@@ -42,7 +42,10 @@ def verify_archive(wheel, target):
                 for name in names
             ):
                 raise RuntimeError("Wheel is missing the bundled zlib DLL")
-        for filename in ("FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt"):
+        for filename in (
+            "FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt",
+            "MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt",
+        ):
             if not any(
                 ".dist-info/licenses/" in name and name.endswith(filename)
                 for name in names
@@ -62,6 +65,15 @@ def verify_archive(wheel, target):
             if f"insta360_rs/{filename}" not in names:
                 raise RuntimeError(f"Wheel is missing {filename}")
     print(f"Verified repaired wheel contents: {wheel.name}")
+
+
+def prepare_mnn(cache, env):
+    """Build MNN with the same target and compiler environment as the wheel."""
+    builder = ROOT / "scripts/ci/build-mnn.py"
+    prefix = cache / "mnn" / hashlib.sha256(builder.read_bytes()).hexdigest()
+    run(sys.executable, builder, "--output", prefix, env=env)
+    env["MNN_ROOT"] = str(prefix)
+    return prefix
 
 
 def main():
@@ -133,6 +145,8 @@ def main():
 
     destination = args.out.resolve()
     destination.mkdir(parents=True, exist_ok=True)
+    mnn_prefix = prepare_mnn(cache, env)
+
     with tempfile.TemporaryDirectory(prefix="insta360-wheel-") as directory:
         temporary = Path(directory)
         source = temporary / "source"
@@ -146,6 +160,9 @@ def main():
         package = source / "src-python"
         notices = package / "python" / "insta360_rs" / "_licenses"
         sources = notices / "sources"
+        notices.mkdir(parents=True, exist_ok=True)
+        for notice in ("MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt"):
+            shutil.copy2(mnn_prefix / notice, notices)
         sources.mkdir(parents=True)
         for path in (prefix / "share" / "insta360-rs").glob("*.txt"):
             shutil.copy2(path, notices)

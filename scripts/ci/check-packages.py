@@ -1,4 +1,4 @@
-"""Verify all three published archives, including before their first release.
+"""Verify all published archives, including before their first release.
 
 The data archives are packaged normally. Local crates.io patches allow Cargo to
 resolve the main archive's unpublished data dependencies while packaging. Its
@@ -22,7 +22,7 @@ import tomllib
 
 
 MAX_CRATE_BYTES = 10_000_000
-PACKAGE_PATHS = ("data/core", "data/enhancement", ".")
+PACKAGE_PATHS = ("data/core", "data/enhancement", "data/underwater-model-a", "data/underwater-model-b", "data/underwater-resources", ".")
 
 
 def check_size(archive: Path) -> int:
@@ -122,7 +122,7 @@ def verify(root: Path, output: Path, allow_dirty: bool, all_features: bool) -> N
             if not is_main:
                 data_packages[name] = packaged
                 source_packages[name] = manifest.parent
-    print(f"All three archives passed size, extracted-source, and locked-build checks: {output}")
+    print(f"All archives passed size, extracted-source, and locked-build checks: {output}")
 
 
 def main() -> None:

@@ -9,7 +9,7 @@ Unit and property tests use generated ISO-BMFF boxes, trailer records,
 calibration strings, gyro sequences, and dual-fisheye calibration charts. They
 use generated recordings and the embedded resources. Bundled-asset tests verify
 the licensed payloads checked in under `data/*/assets/`, including consistent
-manifests and unique paths across both data crates.
+manifests and unique paths across five data crates.
 
 ## Licensed integration corpus
 
@@ -89,8 +89,9 @@ outputs. Release qualification must extend that coverage to real initialization
 and mid-export failures on Metal, D3D12, and Vulkan and must run the real X5
 midpoint geometry, radiometry, direction-lock, and seam corpus.
 
-Hardware decode, asynchronous two/three-slot execution, and native zero-copy
-surfaces are not implemented and therefore are not qualified. Encoder testing
+Stitched rendering uses software decoding; native random-access previews support
+hardware decoding with software fallback. Asynchronous two/three-slot execution
+and native zero-copy stitching surfaces are not implemented. Encoder testing
 must treat each `MediaAcceleration` policy and codec independently: `Hardware`
 and `Software` are strict, while `Auto` retries eligible candidates on
 configuration/opening failure. Mid-stream encoder restart coverage remains open.
@@ -98,11 +99,13 @@ Performance qualification requires matched release-build warm-run medians;
 current functional tests make no speed claim.
 
 Bundled-asset tests load every embedded payload through the verified provider,
-check source/stored digest equality and the complete eight-member CoreML group,
-and parse every bundled SVM. Provider tests cover invalid paths and missing
-resources. These checks use embedded resources and do not execute vendor code.
-Model possession is not an inference qualification: accessory preprocessing, AI
-seam tensors, and restoration stages require their own labeled/golden corpus.
+check whole-file digests, contiguous original model parts and their reassembled
+source digest, and the complete eight-member CoreML and nine-member underwater
+groups, and parse every bundled SVM. Provider tests cover invalid paths and
+missing resources. These checks use embedded resources and do not execute vendor
+code. Model possession is not an inference qualification: accessory
+preprocessing, AI seam tensors, and restoration stages require their own
+labeled/golden corpus.
 
 Atomic-output tests treat `.insta360-rs-part` as an internal incomplete file,
 not a playable preview. Video success requires encoder flush, MP4 trailer write,
@@ -124,3 +127,72 @@ paths apply the selected asset. GPU tests compare the converted panorama with
 CPU LUT evaluation within one code value; a primary-color test checks the CPU
 BT.709 encoder matrix/range. See [asset usage](asset-usage.md) for the generated
 INSV/FFmpeg comparison results.
+
+## Housing, layout and underwater contracts
+
+Synthetic fixtures exercise camera-scoped V1/V2/V3/V6 profiles, dual-track,
+legacy two-file and explicitly marked packed panoramas, rational timestamp
+pairing, chapter boundaries, audio packet identity and bounded queue stress.
+Calibration tests cover metadata state versus encoded ID, independent overrides,
+strict conflicts, Pro 119/120 versus standard 117/118, per-unit parameter
+preservation and sensor-crop normalization without double application. CPU/GPU
+tests use identical prepared masks, invalid-tap exclusion and independent
+angular ownership expectations.
+
+Scalar Legacy tests cover channel gains, sampled histograms, reflected guided
+filter windows, native morphology, fixed-point resize, ILUT tetrahedral
+interpolation and temporal resets. AI tests execute both original models through
+the independently built pinned MNN engine, all four styles, repeated analysis
+updates and reset reproducibility. These establish specific formulas, resource
+integrity and executable graph contracts; they do not establish Studio pixel
+identity, underwater scene quality, or camera/platform release qualification.
+
+`INSTA360_RS_REQUIRE_GPU=1` makes a missing GPU fail in Rust and Python.
+`INSTA360_RS_REQUIRE_UNDERWATER_AI=1` makes the strict Python runner fail if its
+installed extension lacks the AI engine. CI executes the full installed-wheel
+suite on Python 3.10–3.14, including actual restoration exports.
+
+The historical `x5_iteration6_acceptance.json` records the earlier mistaken
+Pro-to-117 mapping. It is explicitly superseded and is not asserted as current
+quality evidence. Corrected real-output qualification must use lens 119 and the
+current source-coordinate/mask pipeline.
+
+A local X5 Pro midpoint smoke check exports the supplied recording at 1920×960
+with stabilization Off and housing/environment Auto on CPU and Metal. Both
+reports select source 113 → target 119 and apply sensor-crop normalization. This
+check verifies an actual recording passes the pipeline; its visual inspection
+and CPU/GPU pixel comparison do not establish vendor quality parity. The
+generated-camera tests and recorded optical reports remain the reproducible
+regression contracts.
+
+## Housing implementation verification
+
+Local verification on macOS ARM64 with Metal, Rust 1.97.1, FFmpeg 8.1.2 and the
+pinned MNN CPU build covered the following configurations. Counts represent test
+targets in the housing implementation snapshot, not a proof that every possible
+recording or device is supported.
+
+| Rust configuration | Passing tests across all targets | Passing doctests | Release library, binaries and examples |
+| ------------------ | -------------------------------: | ---------------: | -------------------------------------- |
+| Default            |                              226 |                1 | Passed                                 |
+| Media              |                              350 |                2 | Passed                                 |
+| GPU                |                              249 |                1 | Passed                                 |
+| CLI                |                              358 |                2 | Passed                                 |
+| Underwater AI      |                              235 |                1 | Passed                                 |
+| All features       |                              393 |                2 | Passed                                 |
+
+The Python binding's five Rust tests and all 54 build-script tests passed. Each
+of Python 3.10–3.14 ran the complete 141-test installed-native suite against
+both the initial wheel and the wheel rebuilt from its source archive, with GPU
+and underwater AI required. All six crate archives passed their size limits,
+extracted-source tests, doctests and release builds. Original asset bytes,
+reassembled model identities and packaged MNN notices were checked.
+
+The supplied `VID_20181001_225939_00_002.insv` also passed bounded probe, paired
+decoding, stabilization preparation, PNG export, a one-second HEVC export and
+copied-audio checks. Native preview seeks also matched the software reader at
+five timestamps, including backward seeks. Separate 1920×960 midpoint CPU/Metal
+exports selected Pro lens 119 and applied the sensor window. These local checks
+do not establish Studio pixel equivalence or qualification on other cameras,
+operating systems or GPUs. CI's Linux software-Vulkan and cross-platform
+inference jobs remain necessary platform checks.

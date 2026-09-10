@@ -1,6 +1,13 @@
 //! Asset-free, geometry-stable CPU stitching primitives.
 
 use std::f64::consts::PI;
+use std::sync::Arc;
+
+mod mask;
+use mask::FisheyeMask;
+pub(crate) use mask::MaskCache;
+#[cfg(feature = "gpu")]
+pub(crate) use mask::PreparedMasks;
 
 use rayon::prelude::*;
 
@@ -24,15 +31,6 @@ const COLOR_ADJUSTMENT_THRESHOLD_MARGIN: f64 = 30.0;
 const COLOR_ADJUSTMENT_RATE: f64 = 0.5;
 
 #[derive(Clone, Copy, Debug)]
-struct FisheyeMask {
-    center_x: f64,
-    center_y: f64,
-    outer_radius_squared: f64,
-    lower_boundary: [(f64, f64); 4],
-    feather_weight_per_pixel: f64,
-}
-
-#[derive(Clone, Copy, Debug)]
 struct ProjectedSample {
     color: [f64; RGB_CHANNELS],
     source_x: f64,
@@ -47,17 +45,6 @@ struct ColorAdjustment {
     height: usize,
     dead_zone: f64,
     body_to_color: Orientation,
-}
-
-#[cfg(feature = "gpu")]
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct GpuFisheyeMask {
-    pub center_x: f32,
-    pub center_y: f32,
-    pub outer_radius_squared: f32,
-    pub valid: bool,
-    pub feather_weight_per_pixel: f32,
-    pub lower_boundary: [[f32; 2]; 4],
 }
 
 impl ColorAdjustment {
@@ -116,41 +103,6 @@ impl ColorAdjustment {
 struct ColorColumnStats {
     sums: [[f64; RGB_CHANNELS]; 2],
     count: u64,
-}
-
-impl FisheyeMask {
-    fn weight(self, source_x: f64, source_y: f64) -> f64 {
-        let dx = source_x - self.center_x;
-        let dy = source_y - self.center_y;
-        let radius_squared = dx * dx + dy * dy;
-        let boundary_squared = if source_y < self.center_y {
-            self.outer_radius_squared
-        } else {
-            // The native mask is eroded after a CCW rotation, then rotated
-            // back. Its zero-angle cutout faces source-down, not source-right.
-            let azimuth = dx.abs().atan2(dy.abs()).to_degrees();
-            interpolate_mask_radius_squared(
-                azimuth,
-                &self.lower_boundary,
-                self.outer_radius_squared,
-            )
-        };
-        let distance = boundary_squared.sqrt() - radius_squared.sqrt();
-        (distance * self.feather_weight_per_pixel).clamp(0.0, 1.0)
-    }
-
-    fn bilinear_weight(self, x: f64, y: f64, maximum_x: f64, maximum_y: f64) -> f64 {
-        let x0 = x.floor();
-        let y0 = y.floor();
-        let x1 = x.ceil().min(maximum_x);
-        let y1 = y.ceil().min(maximum_y);
-        // Reject a tap whose interpolation footprint includes masked pixels.
-        // The minimum feather weight also fades accepted taps at the boundary.
-        self.weight(x0, y0)
-            .min(self.weight(x1, y0))
-            .min(self.weight(x0, y1))
-            .min(self.weight(x1, y1))
-    }
 }
 
 /// An owned, tightly packed RGB8 fisheye frame.
@@ -250,15 +202,20 @@ pub trait StitchEngine {
 }
 
 /// Deterministic, row-parallel fixed-geometry stitcher.
-#[derive(Clone, Copy, Debug)]
+///
+/// Prepared source masks are reused for the current calibration and dimensions.
+/// Clones share a bounded mask cache; the stitcher no longer implements `Copy`.
+#[derive(Clone, Debug)]
 pub struct CpuStitcher {
     feather_fraction: f64,
+    masks: Arc<MaskCache>,
 }
 
 impl Default for CpuStitcher {
     fn default() -> Self {
         Self {
             feather_fraction: DEFAULT_FEATHER_FRACTION,
+            masks: Arc::new(MaskCache::default()),
         }
     }
 }
@@ -276,7 +233,10 @@ impl CpuStitcher {
                 "feather fraction must be finite and between 0 and 0.5".into(),
             ));
         }
-        Ok(Self { feather_fraction })
+        Ok(Self {
+            feather_fraction,
+            masks: Arc::new(MaskCache::default()),
+        })
     }
 
     /// Stitches while applying a gyro-derived rotation to camera-space rays.
@@ -325,22 +285,13 @@ impl CpuStitcher {
         rgb.resize(output_len, 0);
         let output_to_camera = motion.correction().inverse();
         let lens_geometry = resolved_render_geometry(calibration)?;
-        let fisheye_masks = [
-            build_fisheye_mask(
-                &lenses[0],
-                &calibration.lenses[0],
-                0,
-                mask_recipe(calibration, 0),
-                lens_geometry[0],
-            )?,
-            build_fisheye_mask(
-                &lenses[1],
-                &calibration.lenses[1],
-                1,
-                mask_recipe(calibration, 1),
-                lens_geometry[1],
-            )?,
-        ];
+        let prepared_masks = self.masks.prepare(
+            lenses
+                .each_ref()
+                .map(|frame| (frame.width(), frame.height())),
+            calibration,
+        )?;
+        let fisheye_masks = prepared_masks.each_ref().map(Option::as_ref);
         let color_adjustment = estimate_color_adjustment(
             lenses,
             calibration,
@@ -390,53 +341,6 @@ impl CpuStitcher {
 
         PanoramaFrame::new(projection.width, projection.height, rgb)
     }
-}
-
-#[cfg(feature = "gpu")]
-pub(crate) fn prepare_gpu_fisheye_masks_for_dimensions(
-    dimensions: [(u32, u32); 2],
-    calibration: &ResolvedCalibration,
-) -> Result<[GpuFisheyeMask; 2]> {
-    calibration.validate_for_stitching()?;
-    let lens_geometry = resolved_render_geometry(calibration)?;
-    let fisheye_masks = [
-        build_fisheye_mask_for_dimensions(
-            dimensions[0],
-            &calibration.lenses[0],
-            0,
-            mask_recipe(calibration, 0),
-            lens_geometry[0],
-        )?,
-        build_fisheye_mask_for_dimensions(
-            dimensions[1],
-            &calibration.lenses[1],
-            1,
-            mask_recipe(calibration, 1),
-            lens_geometry[1],
-        )?,
-    ];
-    Ok(std::array::from_fn(|lens_index| {
-        match fisheye_masks[lens_index] {
-            Some(mask) => GpuFisheyeMask {
-                center_x: mask.center_x as f32,
-                center_y: mask.center_y as f32,
-                outer_radius_squared: mask.outer_radius_squared as f32,
-                valid: true,
-                feather_weight_per_pixel: mask.feather_weight_per_pixel as f32,
-                lower_boundary: mask
-                    .lower_boundary
-                    .map(|(angle, radius)| [angle as f32, radius as f32]),
-            },
-            None => GpuFisheyeMask {
-                center_x: 0.0,
-                center_y: 0.0,
-                outer_radius_squared: 0.0,
-                valid: false,
-                feather_weight_per_pixel: 0.0,
-                lower_boundary: [[0.0; 2]; 4],
-            },
-        }
-    }))
 }
 
 impl StitchEngine for CpuStitcher {
@@ -507,7 +411,7 @@ fn project_and_sample(
     lens_index: usize,
     world_direction: [f64; 3],
     feather_fraction: f64,
-    fisheye_mask: Option<FisheyeMask>,
+    fisheye_mask: Option<&FisheyeMask>,
     geometry: Option<ResolvedLensGeometry>,
     readout: Option<&ReadoutPoseTable>,
 ) -> Option<ProjectedSample> {
@@ -570,7 +474,7 @@ fn project_and_sample(
         return None;
     }
 
-    let sample = bilinear_rgb(frame, source_x, source_y);
+    let sample = masked_bilinear_rgb(frame, source_x, source_y, fisheye_mask);
     let edge_distance = source_x
         .min(source_y)
         .min(f64::from(frame.width - 1) - source_x)
@@ -611,7 +515,7 @@ fn estimate_color_adjustment(
     width: usize,
     height: usize,
     feather_fraction: f64,
-    fisheye_masks: [Option<FisheyeMask>; 2],
+    fisheye_masks: [Option<&FisheyeMask>; 2],
     lens_geometry: [Option<ResolvedLensGeometry>; 2],
     readout: &[Option<ReadoutPoseTable>; 2],
 ) -> ColorAdjustment {
@@ -714,7 +618,7 @@ fn project_pair_at(
     column: usize,
     row: usize,
     feather_fraction: f64,
-    fisheye_masks: [Option<FisheyeMask>; 2],
+    fisheye_masks: [Option<&FisheyeMask>; 2],
     lens_geometry: [Option<ResolvedLensGeometry>; 2],
     readout: &[Option<ReadoutPoseTable>; 2],
 ) -> [Option<ProjectedSample>; 2] {
@@ -813,7 +717,7 @@ fn blend_projected_samples(
     samples: [Option<ProjectedSample>; 2],
     frames: &[LensFrame; 2],
     gains: [[f64; RGB_CHANNELS]; 2],
-    fisheye_masks: [Option<FisheyeMask>; 2],
+    fisheye_masks: [Option<&FisheyeMask>; 2],
 ) -> Option<[f64; RGB_CHANNELS]> {
     match samples {
         [None, None] => None,
@@ -874,7 +778,7 @@ fn low_frequency_rgb(
     frame: &LensFrame,
     source_x: f64,
     source_y: f64,
-    fisheye_mask: Option<FisheyeMask>,
+    fisheye_mask: Option<&FisheyeMask>,
 ) -> [f64; RGB_CHANNELS] {
     let maximum_x = f64::from(frame.width - 1);
     let maximum_y = f64::from(frame.height - 1);
@@ -888,13 +792,12 @@ fn low_frequency_rgb(
         {
             let x = (source_x + horizontal_offset).clamp(0.0, maximum_x);
             let y = (source_y + vertical_offset).clamp(0.0, maximum_y);
-            let validity =
-                fisheye_mask.map_or(1.0, |mask| mask.bilinear_weight(x, y, maximum_x, maximum_y));
+            let validity = fisheye_mask.map_or(1.0, |mask| mask.weight(x, y));
             let weight = vertical_weight * horizontal_weight * validity;
             if weight <= 0.0 {
                 continue;
             }
-            let sample = bilinear_rgb(frame, x, y);
+            let sample = masked_bilinear_rgb(frame, x, y, fisheye_mask);
             for channel in 0..RGB_CHANNELS {
                 result[channel] += sample[channel] * weight;
             }
@@ -902,7 +805,7 @@ fn low_frequency_rgb(
         }
     }
     if total_weight <= 0.0 {
-        return bilinear_rgb(frame, source_x, source_y);
+        return masked_bilinear_rgb(frame, source_x, source_y, fisheye_mask);
     }
     for channel in &mut result {
         *channel /= total_weight;
@@ -914,10 +817,12 @@ fn low_frequency_rgb(
 fn test_geometry(lens_type: u32) -> Option<ResolvedLensGeometry> {
     crate::profile::lens_profiles_for_id(lens_type)
         .next()
-        .map(|(_, profile)| ResolvedLensGeometry {
-            full_fov_degrees: profile.fallback.full_fov_degrees,
-            blend_angle_degrees: profile.fallback.blend_angle_degrees,
-            blend_angle_recorded: false,
+        .and_then(|(_, profile)| {
+            Some(ResolvedLensGeometry {
+                full_fov_degrees: profile.fallback.full_fov_degrees,
+                blend_angle_degrees: profile.fallback.blend_angle_degrees?,
+                blend_angle_recorded: false,
+            })
         })
 }
 
@@ -957,86 +862,6 @@ fn overlap_alpha(angle: f64, belt: f64) -> f64 {
         };
     }
     (distance_from_seam / belt + 0.5).clamp(0.0, 1.0)
-}
-
-fn build_fisheye_mask(
-    frame: &LensFrame,
-    lens: &ParsedLens,
-    lens_index: usize,
-    recipe: Option<RadialMaskRecipe>,
-    geometry: Option<ResolvedLensGeometry>,
-) -> Result<Option<FisheyeMask>> {
-    build_fisheye_mask_for_dimensions(
-        (frame.width(), frame.height()),
-        lens,
-        lens_index,
-        recipe,
-        geometry,
-    )
-}
-
-fn build_fisheye_mask_for_dimensions(
-    frame_dimensions: (u32, u32),
-    lens: &ParsedLens,
-    lens_index: usize,
-    recipe: Option<RadialMaskRecipe>,
-    geometry: Option<ResolvedLensGeometry>,
-) -> Result<Option<FisheyeMask>> {
-    let Some(recipe) = recipe else {
-        return Ok(None);
-    };
-    let geometry = geometry.ok_or_else(|| {
-        Error::MissingCalibration(format!(
-            "lens {lens_index} has a mask recipe but no resolved projection geometry"
-        ))
-    })?;
-    let boundary: &[crate::profile::MaskBoundaryPoint; 4] =
-        recipe.lower_hemisphere_boundary.try_into().map_err(|_| {
-            Error::MissingCalibration("fisheye mask recipe must have four points".into())
-        })?;
-
-    let (center_x, center_y) =
-        calibration_to_source_dimensions(frame_dimensions, lens, lens_index, lens.cx, lens.cy);
-    let mut lower_boundary = [(0.0, 0.0); 4];
-    for (destination, point) in lower_boundary.iter_mut().zip(boundary) {
-        let azimuth_degrees = point.azimuth_degrees;
-        let half_fov_degrees = point.half_fov_degrees;
-        let theta = half_fov_degrees.to_radians();
-        let azimuth = azimuth_degrees.to_radians();
-        // project_camera_ray accepts camera-local rays. The native routine's
-        // separate LUT matrix is already normalized away at this boundary.
-        let camera_ray = [
-            theta.sin() * azimuth.sin(),
-            theta.sin() * azimuth.cos(),
-            theta.cos(),
-        ];
-        let (calibration_x, calibration_y) =
-            project_camera_ray(lens, camera_ray, Some(geometry)).ok_or_else(|| {
-                Error::MissingCalibration(format!(
-                    "lens {} cannot project its {half_fov_degrees}°/{azimuth_degrees}° fisheye-mask boundary",
-                    lens_index
-                ))
-            })?;
-        let (source_x, source_y) = calibration_to_source_dimensions(
-            frame_dimensions,
-            lens,
-            lens_index,
-            calibration_x,
-            calibration_y,
-        );
-        let dx = source_x - center_x;
-        let dy = source_y - center_y;
-        *destination = (azimuth_degrees, dx * dx + dy * dy);
-    }
-
-    let outer_radius_squared = lower_boundary[lower_boundary.len() - 1].1;
-    Ok(Some(FisheyeMask {
-        center_x,
-        center_y,
-        outer_radius_squared,
-        lower_boundary,
-        feather_weight_per_pixel: recipe.feather_weight_per_pixel,
-    }))
 }
 
 fn calibration_to_source(
@@ -1096,6 +921,7 @@ fn studio_sharpen_alpha(alpha: f64) -> f64 {
     }
 }
 
+#[cfg(test)]
 fn project_camera_ray(
     lens: &ParsedLens,
     ray: [f64; 3],
@@ -1123,10 +949,9 @@ fn camera_ray_within_fov(
         LensProjectionModel::OmniRadtan | LensProjectionModel::OmniRadtanPro => {
             ray[2] / norm >= geometry.half_fov_radians().cos() - 0.01
         }
-        LensProjectionModel::PinholePolynomialV2 => {
+        LensProjectionModel::PinholePolynomialV1 | LensProjectionModel::PinholePolynomialV2 => {
             ray[0].hypot(ray[1]).atan2(ray[2]) < geometry.half_fov_radians()
         }
-        LensProjectionModel::PinholePolynomialV1 => false,
     }
 }
 
@@ -1152,10 +977,9 @@ fn project_camera_ray_with_clipping(
     match lens.model {
         LensProjectionModel::OmniRadtan => project_omni(lens, ray, false),
         LensProjectionModel::OmniRadtanPro => project_omni(lens, ray, true),
-        LensProjectionModel::PinholePolynomialV2 => project_polynomial(lens, ray),
-        // V1 does not carry the polynomial needed to derive the renderer's
-        // normalized focal/coefficients. Refuse to silently invent geometry.
-        LensProjectionModel::PinholePolynomialV1 => None,
+        LensProjectionModel::PinholePolynomialV1 | LensProjectionModel::PinholePolynomialV2 => {
+            project_polynomial(lens, ray)
+        }
     }
 }
 
@@ -1230,13 +1054,14 @@ fn project_polynomial(lens: &ParsedLens, ray: [f64; 3]) -> Option<(f64, f64)> {
     if radial_length <= f64::EPSILON {
         return Some((lens.cx, lens.cy));
     }
-    let &[c0, c1, c2, c3] = lens.distortion_coefficients.as_slice() else {
-        return None;
-    };
+    let normalization = lens.polynomial_projection?;
+    let [c0, c1, c2, c3] = normalization.coefficients;
     let theta2 = theta * theta;
     let distorted_theta = theta * (c0 + c1 * theta + c2 * theta2 + c3 * theta2 * theta);
-    let x = lens.cx + lens.fx * distorted_theta * ray[0] / radial_length;
-    let y = lens.cy + lens.fy * distorted_theta * ray[1] / radial_length;
+    let x =
+        lens.cx + lens.fx * normalization.focal_scale * distorted_theta * ray[0] / radial_length;
+    let y =
+        lens.cy + lens.fy * normalization.focal_scale * distorted_theta * ray[1] / radial_length;
     (x.is_finite() && y.is_finite()).then_some((x, y))
 }
 
@@ -1256,6 +1081,40 @@ fn project_equidistant_compatibility(lens: &ParsedLens, ray: [f64; 3]) -> Option
         lens.cx + lens.fx * distorted_theta * ray[0] / radial_length,
         lens.cy - lens.fy * distorted_theta * ray[1] / radial_length,
     ))
+}
+
+fn masked_bilinear_rgb(
+    frame: &LensFrame,
+    x: f64,
+    y: f64,
+    mask: Option<&FisheyeMask>,
+) -> [f64; RGB_CHANNELS] {
+    let Some(mask) = mask else {
+        return bilinear_rgb(frame, x, y);
+    };
+    let low = [x.floor() as usize, y.floor() as usize];
+    let high = [x.ceil() as usize, y.ceil() as usize];
+    let fractions = [x - low[0] as f64, y - low[1] as f64];
+    let mut sum = [0.0; RGB_CHANNELS];
+    let mut support = 0.0;
+    for (row, vertical) in [(low[1], 1.0 - fractions[1]), (high[1], fractions[1])] {
+        for (column, horizontal) in [(low[0], 1.0 - fractions[0]), (high[0], fractions[0])] {
+            let weight = vertical * horizontal;
+            if weight <= 0.0 || mask.pixel_weight(column, row) <= 0.0 {
+                continue;
+            }
+            let offset = (row * frame.width as usize + column) * RGB_CHANNELS;
+            for (channel, value) in sum.iter_mut().enumerate() {
+                *value += f64::from(frame.rgb[offset + channel]) * weight;
+            }
+            support += weight;
+        }
+    }
+    if support > 0.0 {
+        sum.map(|value| value / support)
+    } else {
+        [0.0; RGB_CHANNELS]
+    }
 }
 
 fn bilinear_rgb(frame: &LensFrame, x: f64, y: f64) -> [f64; RGB_CHANNELS] {
@@ -1290,63 +1149,63 @@ mod tests {
     use crate::calibration::synthetic_dual_fisheye_calibration;
 
     #[test]
-    fn asymmetric_dive_mask_measures_azimuth_from_source_down() {
-        let mask = FisheyeMask {
-            center_x: 32.0,
-            center_y: 32.0,
-            outer_radius_squared: 400.0,
-            lower_boundary: [(0.0, 100.0), (10.0, 100.0), (20.0, 200.0), (60.0, 400.0)],
-            feather_weight_per_pixel: 1.0,
-        };
-        // The vendor implementation erodes a CCW-rotated image's right half then rotates it back.
-        // The restrictive zero-angle cutout must therefore face source-down.
-        assert_eq!(mask.weight(32.0, 47.0), 0.0);
-        assert_eq!(mask.weight(47.0, 32.0), 1.0);
-        assert_eq!(mask.weight(17.0, 32.0), 1.0);
-        assert_eq!(mask.weight(32.0, 17.0), 1.0);
-    }
-
-    #[test]
-    fn low_frequency_blur_rejects_bilinear_neighbors_outside_the_mask() {
-        let radius_squared = 32.5_f64.powi(2);
-        let mask = FisheyeMask {
-            center_x: 64.0,
-            center_y: 64.0,
-            outer_radius_squared: radius_squared,
-            lower_boundary: [0.0, 10.0, 20.0, 60.0].map(|angle| (angle, radius_squared)),
-            feather_weight_per_pixel: 0.25,
-        };
-        let mut rgb = vec![100; 128 * 128 * RGB_CHANNELS];
-        for row in 0..128_usize {
-            for column in 0..128_usize {
-                if (column as f64 - 64.0).hypot(row as f64 - 64.0) > 32.5 {
-                    rgb[(row * 128 + column) * RGB_CHANNELS..][..RGB_CHANNELS].fill(255);
+    fn native_polynomial_projection_matches_independent_degree_radius_coordinates() {
+        // Independent high-precision degree-polynomial references. In V1 the
+        // nonzero b0 is intentionally excluded; V2 uses the recorded b1..b4.
+        for (model, id, native, radius45, radius90) in [
+            (
+                LensProjectionModel::PinholePolynomialV1,
+                17,
+                vec![],
+                479.3342801514986,
+                910.5209103966005,
+            ),
+            (
+                LensProjectionModel::PinholePolynomialV2,
+                19,
+                vec![0.02, 0.00003, -0.0000001, -0.000000001],
+                451.2080357142857,
+                906.9,
+            ),
+        ] {
+            let mut lens = synthetic_dual_fisheye_calibration(2400, 2200)
+                .unwrap()
+                .lenses[0]
+                .clone();
+            lens.model = model;
+            lens.lens_type = id;
+            lens.radius = Some(1000.0);
+            lens.fx = 1000.0;
+            lens.fy = 1000.0;
+            lens.cx = 1200.0;
+            lens.cy = 1100.0;
+            lens.distortion_coefficients = native;
+            lens.refresh_polynomial_projection().unwrap();
+            let geometry = Some(ResolvedLensGeometry {
+                full_fov_degrees: 210.0,
+                blend_angle_degrees: 200.0,
+                blend_angle_recorded: false,
+            });
+            for (angle, radius) in [(0.0_f64, 0.0), (45.0, radius45), (90.0, radius90)] {
+                for azimuth in [0.0_f64, 37.0, 90.0, 180.0, 270.0] {
+                    let (sin, cos) = angle.to_radians().sin_cos();
+                    let (azimuth_sin, azimuth_cos) = azimuth.to_radians().sin_cos();
+                    let ray = [sin * azimuth_cos, sin * azimuth_sin, cos];
+                    let projected = project_camera_ray(&lens, ray, geometry).unwrap();
+                    assert!((projected.0 - (1200.0 + radius * azimuth_cos)).abs() < 1.0e-9);
+                    assert!((projected.1 - (1100.0 + radius * azimuth_sin)).abs() < 1.0e-9);
                 }
             }
+            assert!(project_camera_ray(&lens, [0.0, 0.0, -1.0], geometry).is_none());
+            // Anisotropic decoded scaling applies to the shared normalized
+            // focal lengths without changing the retained native radius.
+            lens.fx *= 0.5;
+            lens.fy *= 0.25;
+            let projected = project_camera_ray(&lens, [0.0, 1.0, 0.0], geometry).unwrap();
+            assert_eq!(projected.0, 1200.0);
+            assert!((projected.1 - (1100.0 + radius90 * 0.25)).abs() < 1.0e-9);
+            assert_eq!(lens.radius, Some(1000.0));
         }
-        let frame = LensFrame::new(128, 128, rgb).expect("masked frame");
-        // The +32 tap center is valid, but its right interpolation neighbor
-        // is outside the circle and must not influence the low-frequency band.
-        assert!(mask.weight(96.25, 64.25) > 0.0);
-        let color = low_frequency_rgb(&frame, 64.25, 64.25, Some(mask));
-        assert!(color
-            .iter()
-            .all(|channel| (*channel - 100.0).abs() < 1.0e-12));
-    }
-
-    #[test]
-    fn low_frequency_blur_preserves_center_when_no_footprint_has_support() {
-        let mask = FisheyeMask {
-            center_x: 8.0,
-            center_y: 8.0,
-            outer_radius_squared: 0.25_f64.powi(2),
-            lower_boundary: [0.0, 10.0, 20.0, 60.0].map(|angle| (angle, 0.25_f64.powi(2))),
-            feather_weight_per_pixel: 0.25,
-        };
-        let frame =
-            LensFrame::new(16, 16, vec![77; 16 * 16 * RGB_CHANNELS]).expect("constant frame");
-        assert!(mask.weight(8.1, 8.1) > 0.0);
-        assert_eq!(low_frequency_rgb(&frame, 8.1, 8.1, Some(mask)), [77.0; 3]);
     }
 
     #[test]

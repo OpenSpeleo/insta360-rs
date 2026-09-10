@@ -2,7 +2,7 @@
 
 use super::{validate_relative_path, AssetError, AssetProvider, AssetResult, ModelBundle};
 
-/// Manifest for the original resources embedded through the two data dependencies.
+/// Manifest for the original resources embedded through the data dependencies.
 pub const BUNDLED_MANIFEST: &str = include_str!("model-bundle.json");
 
 /// Loads licensed resources embedded at compile time, without filesystem access.
@@ -45,6 +45,9 @@ fn payloads() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
     insta360_rs_data_core::PAYLOADS
         .iter()
         .chain(insta360_rs_data_enhancement::PAYLOADS)
+        .chain(insta360_rs_data_underwater_model_a::PAYLOADS)
+        .chain(insta360_rs_data_underwater_model_b::PAYLOADS)
+        .chain(insta360_rs_data_underwater_resources::PAYLOADS)
 }
 
 #[cfg(test)]
@@ -67,12 +70,23 @@ mod tests {
                 .load_verified(&BundledAssetProvider, &descriptor.id, AssetPolicy::Required)
                 .unwrap()
                 .unwrap();
-            assert_eq!(
-                descriptor.provenance.source_sha256.as_deref(),
-                Some(descriptor.sha256.as_str()),
-                "{} must preserve the original source bytes",
-                descriptor.path,
-            );
+            if descriptor.provenance.normalization.as_deref() == Some("identity") {
+                assert_eq!(
+                    descriptor.provenance.source_sha256.as_deref(),
+                    Some(descriptor.sha256.as_str()),
+                    "{} must preserve the original source bytes",
+                    descriptor.path
+                );
+            } else {
+                assert!(matches!(
+                    descriptor.id.as_str(),
+                    "underwater-model197-part0" | "underwater-model197-part1"
+                ));
+                assert_eq!(
+                    descriptor.provenance.source_sha256.as_deref(),
+                    Some("53a24a86a41673adfbb56709cda53ec16584801d8918ad5ee0306f5027a92d5e")
+                );
+            }
             assert_eq!(
                 descriptor.compatibility.qualification,
                 AssetQualification::Unqualified,
@@ -106,6 +120,18 @@ mod tests {
                 insta360_rs_data_enhancement::MANIFEST,
                 insta360_rs_data_enhancement::PAYLOADS,
             ),
+            (
+                insta360_rs_data_underwater_model_a::MANIFEST,
+                insta360_rs_data_underwater_model_a::PAYLOADS,
+            ),
+            (
+                insta360_rs_data_underwater_model_b::MANIFEST,
+                insta360_rs_data_underwater_model_b::PAYLOADS,
+            ),
+            (
+                insta360_rs_data_underwater_resources::MANIFEST,
+                insta360_rs_data_underwater_resources::PAYLOADS,
+            ),
         ] {
             let data: ModelBundle = serde_json::from_str(manifest).unwrap();
             data.validate().unwrap();
@@ -121,7 +147,27 @@ mod tests {
         let mut expected = bundle.assets;
         expected.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(assets, expected);
-        assert_eq!(groups, bundle.groups);
+        let mut expected_groups = bundle.groups;
+        let underwater = expected_groups.pop().unwrap();
+        assert_eq!(underwater.id, "underwater-ai-studio-5-9-10");
+        assert_eq!(underwater.members.len(), 9);
+        assert_eq!(groups, expected_groups);
+    }
+
+    #[test]
+    fn underwater_chunks_reconstruct_original_before_model_decoding() {
+        let mut bytes = Vec::new();
+        for payload in [
+            insta360_rs_data_underwater_model_a::PAYLOADS[0].1,
+            insta360_rs_data_underwater_model_b::PAYLOADS[0].1,
+        ] {
+            bytes.extend_from_slice(payload);
+        }
+        assert_eq!(bytes.len(), 15_009_214);
+        assert_eq!(
+            super::super::sha256(&bytes).to_hex(),
+            "53a24a86a41673adfbb56709cda53ec16584801d8918ad5ee0306f5027a92d5e"
+        );
     }
 
     #[test]

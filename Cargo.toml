@@ -1,7 +1,7 @@
 [workspace]
-members = [".", "data/core", "data/enhancement", "src-python"]
+members = [".", "data/core", "data/enhancement", "data/underwater-model-a", "data/underwater-model-b", "data/underwater-resources", "src-python"]
 # Keep ordinary library commands independent of Python and its native dependencies.
-default-members = [".", "data/core", "data/enhancement"]
+default-members = [".", "data/core", "data/enhancement", "data/underwater-model-a", "data/underwater-model-b", "data/underwater-resources"]
 resolver = "2"
 
 [workspace.package]
@@ -16,6 +16,9 @@ license = "Apache-2.0"
 insta360-rs = { version = "=0.1.0", path = "." }
 insta360-rs-data-core = { version = "=0.1.0", path = "data/core" }
 insta360-rs-data-enhancement = { version = "=0.1.0", path = "data/enhancement" }
+insta360-rs-data-underwater-model-a = { version = "=0.1.0", path = "data/underwater-model-a" }
+insta360-rs-data-underwater-model-b = { version = "=0.1.0", path = "data/underwater-model-b" }
+insta360-rs-data-underwater-resources = { version = "=0.1.0", path = "data/underwater-resources" }
 
 [package]
 name = "insta360-rs"
@@ -36,6 +39,8 @@ include = [
     "examples/**",
     "docs/**",
     "/Cargo.toml",
+    "/build.rs",
+    "scripts/ci/build-mnn.py",
     "/README.md",
     "/CHANGELOG.md",
     "/LICENSE.md",
@@ -61,8 +66,11 @@ default = []
 media = ["dep:crossbeam-channel", "dep:ffmpeg-next", "dep:image", "dep:tempfile"]
 gpu = ["dep:bytemuck", "dep:pollster", "dep:wgpu"]
 cli = ["media", "dep:clap"]
+underwater-ai = ["dep:aes", "dep:base64", "dep:cc"]
 
 [dependencies]
+aes = { version = "0.8", optional = true }
+base64 = { version = "0.22", optional = true }
 clap = { version = "4.6", features = ["derive"], optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 crossbeam-channel = { version = "0.5", default-features = false, features = ["std"], optional = true }
@@ -70,6 +78,9 @@ ffmpeg-next = { version = "9.0", default-features = false, features = ["codec", 
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
 insta360-rs-data-core.workspace = true
 insta360-rs-data-enhancement.workspace = true
+insta360-rs-data-underwater-model-a.workspace = true
+insta360-rs-data-underwater-model-b.workspace = true
+insta360-rs-data-underwater-resources.workspace = true
 pollster = { version = "1.0", optional = true }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
@@ -77,6 +88,9 @@ serde_json = "1"
 thiserror = "2"
 tempfile = { version = "3", optional = true }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"], optional = true }
+
+[build-dependencies]
+cc = { version = "1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "metal"], optional = true }

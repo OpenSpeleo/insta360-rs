@@ -8,8 +8,9 @@ frameworks. It exposes:
 - `container`: bounded INSV/ISO-BMFF inspection, input grouping, indexed record
   access, stitch-dispatch metadata, factory offsets, profiles, and telemetry
   descriptors. Unknown protobuf fields are retained within explicit limits.
-- `profile`: ONE X through X6 camera aliases and evidence-backed lens/setup,
-  FOV, blend-angle, projection-generation, and mask-recipe records.
+- `profile`: ONE, ONE R/RS, ONE X through X6 and X4 Air camera aliases and
+  evidence-backed lens/setup, FOV, blend-angle, projection-generation, and
+  mask-recipe records.
 - `calibration`: current/original offset selection, native projection parsing,
   setup validation, and camera-neutral resolved render geometry.
 - `color`: verified CUBE loading, trilinear RGB sampling, and parallel RGB8
@@ -98,7 +99,17 @@ the chosen offset. Recorded blend metadata takes precedence over a registry
 fallback. Camera recognition covers X1-X6; this does not claim every
 camera/codec/accessory combination is release-qualified.
 
-`BundledAssetProvider::manifest()` returns the validated manifest for the 41
+`ParsedLens::polynomial_projection` holds shared V1/V2 radian coefficients,
+dimensionless focal scale and `PolynomialCoefficientSource` provenance while
+retaining raw native fields. Parsing prepares valid polynomials; after changing
+native coefficients, model or lens ID, call `refresh_polynomial_projection()`.
+`NormalizedPolynomialProjection::validate()` checks its numeric domain;
+`ParsedLens::validate()` also verifies consistency with the native fields. Older
+serialized lenses without the optional prepared field remain inspectable and
+need a refresh before rendering. CPU and GPU reject invalid or stale
+normalization before producing output. See [calibration](calibration.md).
+
+`BundledAssetProvider::manifest()` returns the validated manifest for the 51
 embedded Insta360/Studio payloads. `BUNDLED_MANIFEST` exposes its original JSON,
 and `BundledAssetProvider` loads payloads without filesystem access.
 Applications can continue to supply directory or in-memory providers.
@@ -195,3 +206,31 @@ selects the bundled X5 LUT for explicit I-Log metadata. `Preserve` disables the
 transform; `ILogToRec709` selects it for unmarked X5 I-Log inputs. GPU callers
 can also set a table directly through `GpuStitcher::set_color_lut`. See
 [runtime asset usage](asset-usage.md) for metadata precedence and scope.
+
+## Housing and underwater APIs
+
+`OpticalSelection` separates `Housing`, `Environment`, `LensAccessory` and
+`MountingAccessory`. The same four fields appear on `StitchConfig` and default
+to Auto. Explicit components override detected components; incompatible
+combinations fail with `ConflictingOptics`. The removed `OpticalSetup` enum has
+no compatibility alias. Serialized unknown configuration fields are rejected.
+`CalibrationResolver::inspect_metadata_optics` reports detected choices and
+ambiguity without requiring a supported render model. `MediaInfo.optics` exposes
+that bounded inspection; resolved calibration and exports retain
+`OpticalResolution` including requested/effective values and source/target IDs.
+
+`profile::physical_curve` and `profile::physical_curves` exposes exact recovered
+physical coefficients; `profile::housing_references()` preserves additional
+official references and explicit limitations. The executable registry generates
+the [housing catalog](housing-catalog.md) through the `housing_catalog` example.
+Its test checks the documentation equals the code-generated table.
+
+`UnderwaterColorOptions` validates mode-specific parameters.
+`underwater::UnderwaterColorSession::prepare` accepts options, dimensions,
+rational frame rate and an `AssetProvider`. `process_rgb8` operates in place on
+packed RGB8 and a finite timestamp; `reset` clears temporal history while
+retaining prepared resources. Legacy works without native dependencies; AI
+requires `underwater-ai` and `MNN_ROOT` during build. Off is the default and
+does not load assets. Invalid frame lengths/timestamps fail before mutating
+pixels or state. See [housings](housings.md) for limits, defaults and source
+evidence.

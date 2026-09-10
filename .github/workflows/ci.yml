@@ -128,6 +128,8 @@ jobs:
             args: --no-default-features --features gpu
           - name: cli
             args: --no-default-features --features cli
+          - name: underwater-ai
+            args: --no-default-features --features underwater-ai
           - name: all
             args: --all-features
     env:
@@ -158,7 +160,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked --no-deps --all-features
-      - name: Verify all three crates.io archives and their size limits
+      - name: Verify all crates.io archives and their size limits
         if: matrix.features.name == 'all'
         run: python scripts/ci/check-packages.py --all-features
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -186,7 +188,8 @@ jobs:
           path: |
             .cache/wheel/cargo
             .cache/wheel/rustup
-          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+            .cache/wheel/mnn-*
+          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'scripts/ci/build-mnn.py') }}
           restore-keys: wheel-tools-linux-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -230,7 +233,10 @@ jobs:
     name: Python ${{ matrix.python }} installed wheel
     needs: python-build
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
+    env:
+      INSTA360_RS_REQUIRE_GPU: '1'
+      INSTA360_RS_REQUIRE_UNDERWATER_AI: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -247,14 +253,35 @@ jobs:
       - name: Install fixture generator and the built wheel
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
+          sudo apt-get install --no-install-recommends -y ffmpeg mesa-vulkan-drivers libvulkan1 vulkan-tools
+          mkdir -p "$RUNNER_TEMP/xdg-runtime"
+          chmod 700 "$RUNNER_TEMP/xdg-runtime"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg-runtime" >> "$GITHUB_ENV"
+          echo 'VK_LOADER_DRIVERS_SELECT=lvp_icd*' >> "$GITHUB_ENV"
           python -m pip install --no-deps dist/*.whl
       - name: Full Python tests against the installed extension
         run: python -I -X faulthandler src-python/scripts/run-tests.py
 
+  underwater-platform:
+    name: Underwater inference (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2025]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-mnn
+      - name: Full core and underwater inference tests
+        run: cargo test --locked --all-targets --no-default-features --features underwater-ai
+      - name: Underwater documentation tests
+        run: cargo test --locked --doc --no-default-features --features underwater-ai
+
   trigger-release:
     name: Trigger matching release
-    needs: [prek, rust, python-build, python-test]
+    needs: [prek, rust, python-build, python-test, underwater-platform]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

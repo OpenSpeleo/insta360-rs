@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from email.parser import BytesParser
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parents[1]
+MNN_NOTICES = ("MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt")
 
 
 def run(*command, cwd=None, env=None, timeout=None):
@@ -33,6 +35,11 @@ def require(condition, message):
 
 
 def stage_source(workspace, destination):
+    mnn_root = os.environ.get("MNN_ROOT")
+    require(mnn_root, "MNN_ROOT must identify the pinned MNN CPU prefix")
+    mnn_root = Path(mnn_root)
+    for filename in MNN_NOTICES:
+        require((mnn_root / filename).is_file(), f"MNN_ROOT lacks {filename}")
     development = shutil.ignore_patterns(
         ".git", "target", ".cache", "dist", ".venv", "__pycache__", ".DS_Store"
     )
@@ -50,12 +57,17 @@ def stage_source(workspace, destination):
         ignore=ignore,
     )
     package = destination / "src-python"
+    notices = package / "python" / "insta360_rs" / "_licenses"
+    notices.mkdir(parents=True, exist_ok=True)
+    for filename in MNN_NOTICES:
+        shutil.copy2(mnn_root / filename, notices / filename)
     # Use the same notice paths as release builders. Root Cargo and Python
     # LICENSE.md files otherwise collide in Maturin's workspace source archive.
     run(
         sys.executable,
         Path(__file__).with_name("stage-project-licenses.py"),
         package,
+        "--runtime",
     )
     return package
 
@@ -77,6 +89,14 @@ def check_wheel(path):
             require(
                 any(name.endswith("/" + filename) for name in names),
                 f"Wheel lacks {filename}",
+            )
+        for filename in MNN_NOTICES:
+            require(
+                any(
+                    ".dist-info/licenses/" in name and name.endswith("/" + filename)
+                    for name in names
+                ),
+                f"Wheel lacks runtime license {filename}",
             )
         metadata_name = next(
             name for name in names if name.endswith(".dist-info/METADATA")
@@ -124,6 +144,7 @@ def check_sdist(path, destination):
             "scripts/test.py",
             "scripts/run-tests.py",
             "scripts/stage-project-licenses.py",
+            *(f"python/insta360_rs/_licenses/{name}" for name in MNN_NOTICES),
         ]:
             require(
                 any(name.endswith("/" + filename) for name in names),
@@ -159,7 +180,7 @@ def check_sdist(path, destination):
     manifests = list(root.rglob("src-rust/assets/model-bundle.json"))
     require(len(manifests) == 1, "Source distribution must have one asset manifest")
     manifest = manifests[0]
-    # Payloads live in two transitive data crates. Verify the complete bundle
+    # Payloads live in five transitive data crates. Verify the complete bundle
     # without depending on Maturin's directory layout for path dependencies.
     data_manifests = [
         (path, json.loads(path.read_text()))
@@ -167,7 +188,13 @@ def check_sdist(path, destination):
         if path != manifest
     ]
     payload_roots = []
-    for name in ("insta360-rs-data-core", "insta360-rs-data-enhancement"):
+    for name in (
+        "insta360-rs-data-core",
+        "insta360-rs-data-enhancement",
+        "insta360-rs-data-underwater-model-a",
+        "insta360-rs-data-underwater-model-b",
+        "insta360-rs-data-underwater-resources",
+    ):
         matches = [
             path for path, bundle in data_manifests if bundle["bundle_id"] == name
         ]
@@ -179,6 +206,7 @@ def check_sdist(path, destination):
                 f"Source distribution lacks {name}/{filename}",
             )
         payload_roots.append(dependency / "assets")
+    original_parts = {}
     for descriptor in json.loads(manifest.read_text())["assets"]:
         payloads = [
             directory / descriptor["path"]
@@ -195,11 +223,30 @@ def check_sdist(path, destination):
             f"Source distribution changed the size of {descriptor['path']}",
         )
         require(
-            hashlib.sha256(payload).hexdigest()
-            == descriptor["sha256"]
-            == descriptor["provenance"]["source_sha256"],
+            hashlib.sha256(payload).hexdigest() == descriptor["sha256"],
             f"Source distribution changed {descriptor['path']}",
         )
+        provenance = descriptor["provenance"]
+        normalization = provenance["normalization"]
+        if normalization == "identity":
+            require(
+                descriptor["sha256"] == provenance["source_sha256"],
+                "Original asset source hash changed",
+            )
+        else:
+            match = re.fullmatch(
+                r"byte-preserving slice \[(\d+), (\d+)\); concatenate part0 then part1 to reconstruct original",
+                normalization,
+            )
+            require(match is not None, "Unrecognized asset normalization")
+            start, end = map(int, match.groups())
+            require(
+                end - start == len(payload),
+                "Asset chunk size disagrees with its declared range",
+            )
+            key = (provenance["source_path"], provenance["source_sha256"])
+            original_parts.setdefault(key, []).append((start, end, payload))
+    verify_original_parts(original_parts)
     # Also compare asset descriptors and implementation with this checkout.
     # Building the archive proves all transitive include_bytes! paths resolve.
     asset_root = manifest.parent
@@ -215,6 +262,23 @@ def check_sdist(path, destination):
                     f"Source distribution changed {source.name}",
                 )
     return root
+
+
+def verify_original_parts(groups):
+    """Reconstruct original vendor identities from strictly contiguous byte slices."""
+    for (_, expected_hash), parts in groups.items():
+        digest = hashlib.sha256()
+        end = 0
+        for start, next_end, payload in sorted(parts):
+            require(
+                start == end and next_end - start == len(payload),
+                "Asset chunks overlap, have a gap, or have an invalid length",
+            )
+            digest.update(payload)
+            end = next_end
+        require(
+            digest.hexdigest() == expected_hash, "Reassembled vendor asset hash changed"
+        )
 
 
 def test_installation(wheel, directory, tests, interpreters):

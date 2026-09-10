@@ -17,12 +17,24 @@
     "required_no_duplicated_geometry": true,
     "required_no_dome_rim_leakage": true,
     "lower_seam": {
-      "left_region": [1045, 600, 1060, 720],
-      "right_region": [1076, 600, 1091, 720],
+      "left_region": [
+        1045,
+        600,
+        1060,
+        720
+      ],
+      "right_region": [
+        1076,
+        600,
+        1091,
+        720
+      ],
       "luma_gap_dn": 7.7372,
       "u_gap_dn": 1.388,
       "v_gap_dn": 1.535,
       "maximum_luma_regression_dn": 0.5
     }
-  }
+  },
+  "status": "historical_superseded",
+  "limitation": "These measurements used lens 117 for recorded Pro state 10 and predate sensor-crop normalization and native radial masks. They do not qualify the corrected Pro lens 119 implementation."
 }

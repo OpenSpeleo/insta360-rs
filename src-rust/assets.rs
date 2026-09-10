@@ -2,7 +2,7 @@
 //!
 //! The core stitch path must not depend on these assets. In particular, per-recording
 //! lens calibration remains authoritative. [`BundledAssetProvider`] supplies the licensed
-//! Insta360 and Studio resources embedded through two data crates; applications can also supply
+//! Insta360 and Studio resources embedded through five data crates; applications can also supply
 //! their own bundles. Asset availability does not imply a qualified inference pipeline.
 
 mod bundled;
@@ -58,7 +58,8 @@ pub enum AssetKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetQualification {
-    /// The payload may be inspected or converted, but not selected as a runtime capability.
+    /// The payload cannot satisfy automatic camera/platform qualification.
+    /// Explicit processors may verify and use it without claiming that qualification.
     #[default]
     Unqualified,
     /// The application has qualified the complete algorithm for the declared dimensions.

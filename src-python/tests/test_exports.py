@@ -18,7 +18,7 @@ from export_fixtures import (
     rgb_pixels,
     trailer,
 )
-from media_fixtures import ffprobe, run_tool
+from media_fixtures import assert_readonly, ffprobe, run_tool
 
 
 class ExportValidationTests(unittest.TestCase):
@@ -165,6 +165,96 @@ class FrameExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
             result.backend.selected = api.EffectiveBackend.GPU
         result.outputs.clear()
         self.assertEqual(len(result.outputs), 3, "output getters must return snapshots")
+
+    def test_resolved_optics_preserve_requested_detected_and_effective_settings(self):
+        result = api.export_frames(
+            self.source, self.root / "optics", indices=[0], config=cpu_config()
+        )
+        report = result.optics
+        self.assertIsInstance(report, api.OpticalResolution)
+        self.assertEqual(report.requested.housing, api.Housing.AUTO)
+        self.assertEqual(report.detected.housing, api.Housing.NONE)
+        self.assertEqual(report.effective.environment, api.Environment.AIR)
+        self.assertEqual(report.source_lens_id, 113)
+        self.assertEqual(report.target_lens_id, 113)
+        self.assertEqual(report.evidence, "encoded_lens")
+        self.assertFalse(report.sensor_crop_applied)
+        assert_readonly(self, result, ["optics"])
+        assert_readonly(
+            self,
+            report,
+            [
+                "requested",
+                "detected",
+                "effective",
+                "evidence",
+                "source_lens_id",
+                "target_lens_id",
+                "sensor_crop_applied",
+            ],
+        )
+
+    def test_underwater_modes_execute_and_independent_images_reset_temporal_state(self):
+        modes = [(api.UnderwaterColorMode.LEGACY, None)]
+        if api.capabilities().underwater_ai_compiled:
+            modes += [(api.UnderwaterColorMode.AI, style) for style in range(4)]
+        off = api.export_frames(
+            self.source, self.root / "off", indices=[0, 3], config=cpu_config()
+        )
+        for index, (mode, style) in enumerate(modes):
+            with self.subTest(mode=mode, style=style):
+                options = api.UnderwaterColorOptions(mode=mode, style=style)
+                config = cpu_config(underwater_color=options)
+                result = api.export_frames(
+                    self.source,
+                    self.root / f"restored-{index}",
+                    indices=[0, 3],
+                    config=config,
+                )
+                self.assertEqual(result.frames_written, 2)
+                self.assertNotEqual(
+                    result.outputs[0].read_bytes(), off.outputs[0].read_bytes()
+                )
+                single = api.export_frames(
+                    self.source,
+                    self.root / f"single-{index}",
+                    indices=[3],
+                    config=config,
+                )
+                self.assertEqual(
+                    result.outputs[1].read_bytes(), single.outputs[0].read_bytes()
+                )
+                config.underwater_color = api.UnderwaterColorOptions(
+                    mode=mode, strength=0, style=style
+                )
+                zero = api.export_frames(
+                    self.source, self.root / f"zero-{index}", indices=[0], config=config
+                )
+                self.assertEqual(
+                    zero.outputs[0].read_bytes(), off.outputs[0].read_bytes()
+                )
+
+    def test_export_snapshots_underwater_options_before_configuration_replacement(self):
+        config = cpu_config(
+            underwater_color=api.UnderwaterColorOptions(
+                mode=api.UnderwaterColorMode.LEGACY
+            )
+        )
+        expected = api.export_frames(
+            self.source, self.root / "expected", indices=[0], config=config
+        )
+        job = api.start_export_frames(
+            self.source, self.root / "snapshot", indices=[0], config=config
+        )
+        config.underwater_color = api.UnderwaterColorOptions()
+        actual = job.wait()
+        off = api.export_frames(
+            self.source, self.root / "off", indices=[0], config=config
+        )
+        self.assertEqual(
+            actual.outputs[0].read_bytes(), expected.outputs[0].read_bytes()
+        )
+        self.assertNotEqual(actual.outputs[0].read_bytes(), off.outputs[0].read_bytes())
 
     def test_timestamps_choose_first_frame_at_or_after_request(self):
         indexed = api.export_frames(
@@ -413,7 +503,7 @@ class FrameExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
             api.export_frames(self.source, output, indices=[0], config=cpu_config())
         self.assertEqual(output.read_bytes(), b"preserved")
 
-    def test_legacy_paired_export_reports_missing_capability(self):
+    def test_paired_files_with_two_video_tracks_each_reject_ambiguous_layout(self):
         primary = self.root / "VID_20260101_120000_00_001.insv"
         secondary = self.root / "VID_20260101_120000_10_001.insv"
         primary.write_bytes(self.source.read_bytes())
@@ -458,7 +548,7 @@ class FrameExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
         for name, metadata, gyro, config, error in (
             (
                 "unsupported",
-                calibrated_metadata(camera="Insta360 X4"),
+                calibrated_metadata(camera="Unknown Future Camera"),
                 True,
                 cpu_config(),
                 api.UnsupportedCameraError,

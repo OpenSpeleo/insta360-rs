@@ -1,5 +1,6 @@
 use insta360_rs::container::EmbeddedOffset;
-use insta360_rs::{CalibrationResolver, LensFrame, OpticalSetup, ResolvedCalibration};
+use insta360_rs::{CalibrationResolver, LensFrame, OpticalSelection, ResolvedCalibration};
+use insta360_rs::{Environment, Housing};
 
 const X5_DIVING_WATER_LENS_TYPE: u32 = 117;
 const OFFSET_FLAGS: u32 = 0x400;
@@ -43,7 +44,10 @@ pub fn x5_v6_underwater_calibration(width: u32, height: u32) -> ResolvedCalibrat
         value: fields.join("_"),
     };
     CalibrationResolver::default()
-        .resolve_embedded_offset(&offset, &OpticalSetup::InvisibleDiveCaseUnderwater)
+        .resolve_embedded_offset(
+            &offset,
+            &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
+        )
         .expect("synthetic X5 V6 underwater calibration")
 }
 

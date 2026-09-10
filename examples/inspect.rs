@@ -21,6 +21,15 @@ fn main() -> insta360_rs::Result<()> {
     println!("firmware: {:?}", inspection.metadata.firmware);
     println!("trailer: {:?}", inspection.trailer);
     println!("video tracks: {:?}", inspection.video_tracks);
+    println!(
+        "recorded optical state: {:?}",
+        inspection.metadata.offset_state
+    );
+    println!("sensor crop: {:?}", inspection.metadata.crop_window);
+    println!(
+        "recorded blend angle: {:?}",
+        inspection.metadata.blend_angle
+    );
     println!("offsets:");
     for offset in &inspection.metadata.offsets {
         println!(

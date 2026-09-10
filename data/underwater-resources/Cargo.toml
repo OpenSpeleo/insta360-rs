@@ -1,0 +1,21 @@
+[package]
+name = "insta360-rs-data-underwater-resources"
+version.workspace = true
+authors.workspace = true
+description = "Bundled Insta360 underwater restoration resources for insta360-rs"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "LICENSE.md"
+repository.workspace = true
+readme = "README.md"
+keywords = ["insta360", "360-video", "assets"]
+categories = ["multimedia::video"]
+include = [
+    "src/**",
+    "assets/**",
+    "/model-bundle.json",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE.md",
+    "/NOTICE.md"
+]

@@ -124,9 +124,10 @@ cp "$notices/sources/"* /dist/sources/
 
 # These files exist only in the release staging directory. Register their
 # licenses in wheel metadata without imposing generated files on local builds.
-python /build/source/src-python/scripts/stage-project-licenses.py \
-    /build/source/src-python --runtime
-
+export MNN_ROOT="/wheel-cache/mnn-$(sha256sum /build/source/scripts/ci/build-mnn.py | cut -d ' ' -f 1)"
+python /build/source/scripts/ci/build-mnn.py --output "$MNN_ROOT" --jobs "${INSTA360_WHEEL_JOBS:-2}"
+cp "$MNN_ROOT/MNN-LICENSE.txt" "$MNN_ROOT/MNN-THIRD-PARTY-NOTICES.txt" "$notices/"
+python /build/source/src-python/scripts/stage-project-licenses.py /build/source/src-python --runtime
 cd /build/source/src-python
 # --sdist builds the wheel from the generated source archive, verifying that
 # the path dependency and bundled data survived source distribution packaging.
@@ -149,7 +150,8 @@ with zipfile.ZipFile(wheels[0]) as archive:
     names = archive.namelist()
     for library in ("libavcodec", "libavformat", "libavutil", "libswscale", "libx265"):
         assert any(".libs/" in name and library in name for name in names), library
-    for filename in ("FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt"):
+    for filename in ("FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt",
+                     "MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt"):
         assert any(".dist-info/licenses/" in name and name.endswith(filename)
                    for name in names), filename
     for filename in (*sys.argv[1:], "ffmpeg-runtime-config.sh"):

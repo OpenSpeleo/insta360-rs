@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum CameraModel {
+    /// Original Insta360 ONE.
+    One,
+    /// ONE R modular camera; the encoded lens ID identifies its module.
+    OneR,
+    /// ONE RS modular camera, including its one-inch 360 module.
+    OneRS,
+    /// X4 Air (native B2), distinct from X4.
+    X4Air,
     /// Insta360 ONE X (internally called One2).
     X1,
     /// Insta360 ONE X2.
@@ -23,69 +31,118 @@ pub enum CameraModel {
     Unknown(String),
 }
 
-/// Optical accessory or environment encoded by a lens calibration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Physical camera housing. `Auto` uses recorded state before encoded lens IDs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
-pub enum OpticalSetup {
-    /// Require recorded metadata to select an unambiguous setup.
-    StrictAuto,
-    /// Bare lenses used in air.
-    BareAir,
-    /// Bare lenses used underwater.
-    BareUnderwater,
-    /// Legacy waterproof housing.
-    WaterproofCase,
-    /// Legacy dive housing used in air.
-    DiveCaseAir,
-    /// Legacy dive housing used underwater.
-    DiveCaseUnderwater,
-    /// Full-invisible dive housing used in air.
-    InvisibleDiveCaseAir,
-    /// Full-invisible dive housing used underwater.
-    InvisibleDiveCaseUnderwater,
-    /// Clip-on curved lens guard.
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+pub enum Housing {
+    #[default]
+    Auto,
+    None,
+    VentureCase,
+    DiveCase,
+    SphericalDiveCase,
+    InvisibleDiveCase,
+    DiveCasePro,
+}
+
+/// Medium surrounding the camera or housing; independent of the housing model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+pub enum Environment {
+    #[default]
+    Auto,
+    Air,
+    Underwater,
+}
+
+/// Lens-mounted accessory, distinct from a housing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+pub enum LensAccessory {
+    #[default]
+    Auto,
+    None,
     ClipOnLensGuard,
-    /// Adhesive spherical lens guard.
     AdhesiveSphereLensGuard,
-    /// Standard/plastic A-grade lens protector.
     ProtectorA,
-    /// Premium/glass S-grade lens protector.
     ProtectorS,
-    /// Average curve used for automatic A/S protector selection.
     ProtectorAS,
-    /// ND16 neutral-density filter.
     Nd16,
-    /// ND32 neutral-density filter.
     Nd32,
-    /// ND64 neutral-density filter.
     Nd64,
-    /// ND128 neutral-density filter.
     Nd128,
 }
 
-impl OpticalSetup {
-    /// Returns the embedded optical profile name used by recorded metadata.
-    pub fn profile_name(&self) -> Option<&'static str> {
-        match self {
-            Self::StrictAuto => None,
-            Self::BareAir => Some("bare"),
-            Self::BareUnderwater => Some("BareUnderwater"),
-            Self::WaterproofCase => Some("Waterproof"),
-            Self::DiveCaseAir => Some("DivingAir"),
-            Self::DiveCaseUnderwater => Some("DivingWater"),
-            Self::InvisibleDiveCaseAir => Some("InvisibleDiveAir"),
-            Self::InvisibleDiveCaseUnderwater => Some("InvisibleDiveWater"),
-            Self::ClipOnLensGuard => Some("Protect"),
-            Self::AdhesiveSphereLensGuard => Some("SphereProtect"),
-            Self::ProtectorA => Some("ProtectorA"),
-            Self::ProtectorS => Some("ProtectorS"),
-            Self::ProtectorAS => Some("ProtectorAS"),
-            Self::Nd16 => Some("ND16"),
-            Self::Nd32 => Some("ND32"),
-            Self::Nd64 => Some("ND64"),
-            Self::Nd128 => Some("ND128"),
+/// Camera mounting accessory. No unverified optical curve is inferred from a mount.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+pub enum MountingAccessory {
+    #[default]
+    Auto,
+    None,
+    DiveBuddy,
+}
+
+/// Independent optical requests. Each `Auto` component is resolved from metadata.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpticalSelection {
+    #[serde(default)]
+    pub housing: Housing,
+    #[serde(default)]
+    pub environment: Environment,
+    #[serde(default)]
+    pub lens_accessory: LensAccessory,
+    #[serde(default)]
+    pub mounting_accessory: MountingAccessory,
+}
+
+impl OpticalSelection {
+    /// Selects a housing and medium without a lens or mounting accessory.
+    pub const fn new(housing: Housing, environment: Environment) -> Self {
+        Self {
+            housing,
+            environment,
+            lens_accessory: LensAccessory::None,
+            mounting_accessory: MountingAccessory::None,
         }
     }
+
+    /// Selects a bare camera's lens accessory in air.
+    pub const fn with_lens_accessory(lens_accessory: LensAccessory) -> Self {
+        Self {
+            housing: Housing::None,
+            environment: Environment::Air,
+            lens_accessory,
+            mounting_accessory: MountingAccessory::None,
+        }
+    }
+}
+
+/// Optional underwater color restoration; never enabled by housing detection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+pub enum UnderwaterColorMode {
+    #[default]
+    Off,
+    Legacy,
+    Ai,
+}
+
+/// Controls underwater restoration. Omitted values use the selected mode's defaults.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnderwaterColorOptions {
+    #[serde(default)]
+    pub mode: UnderwaterColorMode,
+    pub strength: Option<f32>,
+    pub balance: Option<f32>,
+    pub style: Option<u32>,
 }
 
 /// Version of the native projection encoded by an Insta360 lens offset.
@@ -364,8 +421,18 @@ pub enum ColorConversion {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StitchConfig {
-    pub optical_setup: OpticalSetup,
+    #[serde(default)]
+    pub housing: Housing,
+    #[serde(default)]
+    pub environment: Environment,
+    #[serde(default)]
+    pub lens_accessory: LensAccessory,
+    #[serde(default)]
+    pub mounting_accessory: MountingAccessory,
+    #[serde(default)]
+    pub underwater_color: UnderwaterColorOptions,
     pub calibration_policy: CalibrationPolicy,
     pub stabilization: Stabilization,
     #[serde(default)]
@@ -381,7 +448,11 @@ pub struct StitchConfig {
 impl Default for StitchConfig {
     fn default() -> Self {
         Self {
-            optical_setup: OpticalSetup::StrictAuto,
+            housing: Housing::Auto,
+            environment: Environment::Auto,
+            lens_accessory: LensAccessory::Auto,
+            mounting_accessory: MountingAccessory::Auto,
+            underwater_color: UnderwaterColorOptions::default(),
             calibration_policy: CalibrationPolicy::PreferNewest,
             stabilization: Stabilization::DirectionLock,
             rolling_shutter: RollingShutterCorrection::Auto,
@@ -394,20 +465,21 @@ impl Default for StitchConfig {
 }
 
 impl StitchConfig {
-    pub fn underwater_photogrammetry(optical_setup: OpticalSetup) -> crate::Result<Self> {
-        if !matches!(
-            optical_setup,
-            OpticalSetup::BareUnderwater
-                | OpticalSetup::WaterproofCase
-                | OpticalSetup::DiveCaseUnderwater
-                | OpticalSetup::InvisibleDiveCaseUnderwater
-        ) {
-            return Err(crate::Error::InvalidMedia(
-                "underwater photogrammetry requires an underwater optical setup".into(),
-            ));
+    /// Returns the shared optical request used by every renderer.
+    pub const fn optical_selection(&self) -> OpticalSelection {
+        OpticalSelection {
+            housing: self.housing,
+            environment: self.environment,
+            lens_accessory: self.lens_accessory,
+            mounting_accessory: self.mounting_accessory,
         }
+    }
+
+    /// Uses underwater geometry while keeping restoration opt-in and housing detection available.
+    pub fn underwater_photogrammetry(housing: Housing) -> crate::Result<Self> {
         Ok(Self {
-            optical_setup,
+            housing,
+            environment: Environment::Underwater,
             ..Self::default()
         })
     }
@@ -433,6 +505,7 @@ pub struct MediaInfo {
     pub video_tracks: Vec<VideoTrackInfo>,
     pub offset_versions: Vec<u8>,
     pub optical_profiles: Vec<String>,
+    pub optics: crate::optics::OpticalInspection,
     pub gyro_sample_count: u64,
     pub exposure_sample_count: u64,
     pub trailer: TrailerInfo,
@@ -530,6 +603,9 @@ impl Default for VideoExportOptions {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExportResult {
+    /// Effective optical choices and corrections used by the stitched export.
+    #[serde(default)]
+    pub optics: Option<crate::optics::OpticalResolution>,
     pub outputs: Vec<PathBuf>,
     pub frames_written: u64,
     pub elapsed: Duration,

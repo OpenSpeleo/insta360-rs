@@ -18,25 +18,62 @@ class GpuUnavailableError(MissingCapabilityError): ...
 class CancelledError(Insta360Error): ...
 class MediaProcessingError(Insta360Error): ...
 class GpuProcessingError(MediaProcessingError): ...
+class ConflictingOpticsError(Insta360Error): ...
 
-class OpticalSetup:
-    STRICT_AUTO: ClassVar[OpticalSetup]
-    BARE_AIR: ClassVar[OpticalSetup]
-    BARE_UNDERWATER: ClassVar[OpticalSetup]
-    WATERPROOF_CASE: ClassVar[OpticalSetup]
-    DIVE_CASE_AIR: ClassVar[OpticalSetup]
-    DIVE_CASE_UNDERWATER: ClassVar[OpticalSetup]
-    INVISIBLE_DIVE_CASE_AIR: ClassVar[OpticalSetup]
-    INVISIBLE_DIVE_CASE_UNDERWATER: ClassVar[OpticalSetup]
-    CLIP_ON_LENS_GUARD: ClassVar[OpticalSetup]
-    ADHESIVE_SPHERE_LENS_GUARD: ClassVar[OpticalSetup]
-    PROTECTOR_A: ClassVar[OpticalSetup]
-    PROTECTOR_S: ClassVar[OpticalSetup]
-    PROTECTOR_AS: ClassVar[OpticalSetup]
-    ND16: ClassVar[OpticalSetup]
-    ND32: ClassVar[OpticalSetup]
-    ND64: ClassVar[OpticalSetup]
-    ND128: ClassVar[OpticalSetup]
+class Housing:
+    AUTO: ClassVar[Housing]
+    NONE: ClassVar[Housing]
+    VENTURE_CASE: ClassVar[Housing]
+    DIVE_CASE: ClassVar[Housing]
+    SPHERICAL_DIVE_CASE: ClassVar[Housing]
+    INVISIBLE_DIVE_CASE: ClassVar[Housing]
+    DIVE_CASE_PRO: ClassVar[Housing]
+
+class Environment:
+    AUTO: ClassVar[Environment]
+    AIR: ClassVar[Environment]
+    UNDERWATER: ClassVar[Environment]
+
+class LensAccessory:
+    AUTO: ClassVar[LensAccessory]
+    NONE: ClassVar[LensAccessory]
+    CLIP_ON_LENS_GUARD: ClassVar[LensAccessory]
+    ADHESIVE_SPHERE_LENS_GUARD: ClassVar[LensAccessory]
+    PROTECTOR_A: ClassVar[LensAccessory]
+    PROTECTOR_S: ClassVar[LensAccessory]
+    PROTECTOR_AS: ClassVar[LensAccessory]
+    ND16: ClassVar[LensAccessory]
+    ND32: ClassVar[LensAccessory]
+    ND64: ClassVar[LensAccessory]
+    ND128: ClassVar[LensAccessory]
+
+class MountingAccessory:
+    AUTO: ClassVar[MountingAccessory]
+    NONE: ClassVar[MountingAccessory]
+    DIVE_BUDDY: ClassVar[MountingAccessory]
+
+class UnderwaterColorMode:
+    OFF: ClassVar[UnderwaterColorMode]
+    LEGACY: ClassVar[UnderwaterColorMode]
+    AI: ClassVar[UnderwaterColorMode]
+
+class UnderwaterColorOptions:
+    @property
+    def mode(self) -> UnderwaterColorMode: ...
+    @property
+    def strength(self) -> float | None: ...
+    @property
+    def balance(self) -> float | None: ...
+    @property
+    def style(self) -> int | None: ...
+    def __init__(
+        self,
+        *,
+        mode: UnderwaterColorMode | None = ...,
+        strength: float | None = ...,
+        balance: float | None = ...,
+        style: int | None = ...,
+    ) -> None: ...
 
 class Stabilization:
     OFF: ClassVar[Stabilization]
@@ -85,7 +122,11 @@ class ExportPhase:
     UNKNOWN: ClassVar[ExportPhase]
 
 class StitchConfig:
-    optical_setup: OpticalSetup
+    housing: Housing
+    environment: Environment
+    lens_accessory: LensAccessory
+    mounting_accessory: MountingAccessory
+    underwater_color: UnderwaterColorOptions
     stabilization: Stabilization
     rolling_shutter: RollingShutterCorrection
     backend: ProcessingBackend
@@ -96,7 +137,11 @@ class StitchConfig:
     def __init__(
         self,
         *,
-        optical_setup: OpticalSetup | None = ...,
+        housing: Housing | None = ...,
+        environment: Environment | None = ...,
+        lens_accessory: LensAccessory | None = ...,
+        mounting_accessory: MountingAccessory | None = ...,
+        underwater_color: UnderwaterColorOptions | None = ...,
         stabilization: Stabilization | None = ...,
         rolling_shutter: RollingShutterCorrection | None = ...,
         backend: ProcessingBackend | None = ...,
@@ -107,13 +152,51 @@ class StitchConfig:
     @staticmethod
     def underwater_photogrammetry(
         *,
-        optical_setup: OpticalSetup | None = ...,
+        housing: Housing | None = ...,
+        mounting_accessory: MountingAccessory | None = ...,
+        underwater_color: UnderwaterColorOptions | None = ...,
         rolling_shutter: RollingShutterCorrection | None = ...,
         backend: ProcessingBackend | None = ...,
         color_conversion: ColorConversion | None = ...,
         width: int | None = ...,
         height: int | None = ...,
     ) -> StitchConfig: ...
+
+class OpticalSelection:
+    @property
+    def housing(self) -> Housing: ...
+    @property
+    def environment(self) -> Environment: ...
+    @property
+    def lens_accessory(self) -> LensAccessory: ...
+    @property
+    def mounting_accessory(self) -> MountingAccessory: ...
+
+class OpticalInspection:
+    @property
+    def detected(self) -> OpticalSelection | None: ...
+    @property
+    def evidence(self) -> str | None: ...
+    @property
+    def encoded_lens_id(self) -> int | None: ...
+    @property
+    def ambiguity(self) -> str | None: ...
+
+class OpticalResolution:
+    @property
+    def requested(self) -> OpticalSelection: ...
+    @property
+    def detected(self) -> OpticalSelection: ...
+    @property
+    def effective(self) -> OpticalSelection: ...
+    @property
+    def evidence(self) -> str: ...
+    @property
+    def source_lens_id(self) -> int: ...
+    @property
+    def target_lens_id(self) -> int: ...
+    @property
+    def sensor_crop_applied(self) -> bool: ...
 
 class VideoTrackInfo:
     @property
@@ -136,6 +219,8 @@ class TrailerInfo:
     def record_count(self) -> int: ...
 
 class MediaInfo:
+    @property
+    def optics(self) -> OpticalInspection: ...
     @property
     def inputs(self) -> list[Path]: ...
     @property
@@ -200,6 +285,8 @@ class BackendReport:
     def fallback(self) -> GpuFailure | None: ...
 
 class ExportResult:
+    @property
+    def optics(self) -> OpticalResolution | None: ...
     @property
     def outputs(self) -> list[Path]: ...
     @property
@@ -337,6 +424,8 @@ class VideoFrameReader:
     def frame_at(self, seconds: float) -> DecodedVideoFrame | None: ...
 
 class Capabilities:
+    @property
+    def underwater_ai_compiled(self) -> bool: ...
     @property
     def image_export(self) -> bool: ...
     @property

@@ -8,7 +8,8 @@ from pathlib import Path
 from unittest.mock import patch, sentinel
 
 import insta360_rs
-from media_fixtures import assert_readonly, synthetic_recording
+from export_fixtures import calibrated_metadata
+from media_fixtures import assert_readonly, synthetic_recording, varint
 
 
 class ProbeTests(unittest.TestCase):
@@ -80,6 +81,7 @@ class ProbeTests(unittest.TestCase):
                 "video_tracks",
                 "offset_versions",
                 "optical_profiles",
+                "optics",
                 "gyro_sample_count",
                 "exposure_sample_count",
                 "trailer",
@@ -106,6 +108,10 @@ class ProbeTests(unittest.TestCase):
 
     def test_known_camera_names_and_aliases_have_stable_identifiers(self):
         for name, expected in [
+            ("Insta360 ONE", "ONE"),
+            ("Insta360 ONE R", "ONE R"),
+            ("Insta360 ONE RS", "ONE RS"),
+            ("Insta360 X4 Air", "X4 Air"),
             ("Insta360 ONE X", "X1"),
             ("One2", "X1"),
             ("Insta360 ONE X2", "X2"),
@@ -135,6 +141,51 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(info.gyro_sample_count, 0)
         self.assertEqual(info.exposure_sample_count, 0)
         self.assertEqual(info.trailer.record_count, 1)
+
+    def test_optical_inspection_is_bounded_typed_and_read_only(self):
+        for state, housing, environment in [
+            (None, insta360_rs.Housing.NONE, insta360_rs.Environment.AIR),
+            (10, insta360_rs.Housing.DIVE_CASE_PRO, insta360_rs.Environment.UNDERWATER),
+            (11, insta360_rs.Housing.DIVE_CASE_PRO, insta360_rs.Environment.AIR),
+        ]:
+            with self.subTest(state=state):
+                metadata = calibrated_metadata()
+                if state is not None:
+                    metadata += varint(68 << 3) + varint(state)
+                self.path.write_bytes(synthetic_recording(metadata=metadata))
+                report = insta360_rs.probe(self.path).optics
+                self.assertIsInstance(report, insta360_rs.OpticalInspection)
+                self.assertEqual(report.encoded_lens_id, 113)
+                self.assertEqual(
+                    report.evidence,
+                    "encoded_lens" if state is None else "recorded_state",
+                )
+                self.assertIsNone(report.ambiguity)
+                selection = report.detected
+                self.assertIsInstance(selection, insta360_rs.OpticalSelection)
+                self.assertEqual(selection.housing, housing)
+                self.assertEqual(selection.environment, environment)
+                self.assertEqual(
+                    selection.lens_accessory, insta360_rs.LensAccessory.NONE
+                )
+                self.assertEqual(
+                    selection.mounting_accessory, insta360_rs.MountingAccessory.NONE
+                )
+                assert_readonly(
+                    self,
+                    report,
+                    ["detected", "evidence", "encoded_lens_id", "ambiguity"],
+                )
+                assert_readonly(
+                    self,
+                    selection,
+                    ["housing", "environment", "lens_accessory", "mounting_accessory"],
+                )
+        self.path.write_bytes(synthetic_recording(camera=None, populated=False))
+        report = insta360_rs.probe(self.path).optics
+        self.assertIsNone(report.detected)
+        self.assertIsNone(report.encoded_lens_id)
+        self.assertIsInstance(report.ambiguity, str)
 
     def test_reads_legacy_record_footers_without_an_index(self):
         self.path.write_bytes(synthetic_recording(indexed=False))

@@ -141,7 +141,13 @@ def v2_tail(metadata):
 
 
 def synthetic_recording(
-    *, camera="Insta360 X5", sample_count=300, tracks=2, populated=True, indexed=True
+    *,
+    camera="Insta360 X5",
+    sample_count=300,
+    tracks=2,
+    populated=True,
+    indexed=True,
+    metadata=None,
 ):
     """Parser-only BMFF fixture; has track declarations but no encoded media."""
     mdhd = bytes(12) + struct.pack(">II", 30_000, sample_count * 1001) + bytes(4)
@@ -155,7 +161,15 @@ def synthetic_recording(
     mdia = bmff_box(b"mdhd", mdhd) + bmff_box(b"hdlr", hdlr)
     mdia += bmff_box(b"minf", bmff_box(b"stbl", stbl))
     movie = bmff_box(b"moov", bmff_box(b"trak", bmff_box(b"mdia", mdia)) * tracks)
-    records = [(1, 1, metadata_record(camera, populated=populated))]
+    records = [
+        (
+            1,
+            1,
+            metadata
+            if metadata is not None
+            else metadata_record(camera, populated=populated),
+        )
+    ]
     if populated:
         records += [(3, 0, bytes(40)), (4, 0, bytes(32))]
     return (

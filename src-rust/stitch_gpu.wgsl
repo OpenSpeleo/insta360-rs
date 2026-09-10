@@ -22,10 +22,9 @@ struct LensParams {
     readout: vec4<f32>,
 };
 
-struct MaskParams {
-    center_outer_valid: vec4<f32>,
-    boundary01: vec4<f32>,
-    boundary23: vec4<f32>,
+struct PreparedMasks {
+    offsets: vec4<u32>,
+    weights: array<f32>,
 };
 
 struct ProjectedSample {
@@ -38,7 +37,7 @@ struct ProjectedSample {
 
 @group(0) @binding(0) var<uniform> frame: FrameParams;
 @group(0) @binding(1) var<storage, read> lenses: array<LensParams>;
-@group(0) @binding(2) var<storage, read> masks: array<MaskParams>;
+@group(0) @binding(2) var<storage, read> masks: PreparedMasks;
 @group(0) @binding(3) var<storage, read_write> slopes: array<vec4<f32>>;
 @group(0) @binding(4) var first_texture: texture_2d<f32>;
 @group(0) @binding(5) var second_texture: texture_2d<f32>;
@@ -285,7 +284,7 @@ fn sample_yuv420(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
     return yuv_to_rgb(yuv, metadata);
 }
 
-fn sample_source(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
+fn sample_source_unmasked(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
     let lens = lenses[lens_index];
     let dimensions = lens.source.xy;
     if lens.source.z >= 0.5 {
@@ -298,42 +297,41 @@ fn sample_source(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(second_texture, source_sampler, coordinate, 0.0).rgb;
 }
 
-fn interpolate_mask(mask: MaskParams, azimuth: f32) -> f32 {
-    let a0 = mask.boundary01.x;
-    let r0 = mask.boundary01.y;
-    let a1 = mask.boundary01.z;
-    let r1 = mask.boundary01.w;
-    let a2 = mask.boundary23.x;
-    let r2 = mask.boundary23.y;
-    let a3 = mask.boundary23.z;
-    let r3 = mask.boundary23.w;
-    if azimuth < a1 {
-        return mix(r0, r1, clamp((azimuth - a0) / (a1 - a0), 0.0, 1.0));
+// Retain partially supported bilinear footprints without admitting masked RGB
+// taps. Feather alpha remains a separate interpolated distance-field weight.
+fn sample_source(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
+    if masks.offsets[lens_index] == 0xffffffffu { return sample_source_unmasked(lens_index, source); }
+    let low = floor(source);
+    let high = ceil(source);
+    let fraction = source - low;
+    let positions = array<vec2<f32>, 4>(low, vec2<f32>(high.x, low.y), vec2<f32>(low.x, high.y), high);
+    let weights = array<f32, 4>((1.0-fraction.x)*(1.0-fraction.y), fraction.x*(1.0-fraction.y),
+        (1.0-fraction.x)*fraction.y, fraction.x*fraction.y);
+    var color = vec3<f32>(0.0);
+    var support = 0.0;
+    for (var tap = 0u; tap < 4u; tap += 1u) {
+        if weights[tap] > 0.0 && mask_pixel_weight(lens_index, vec2<u32>(positions[tap])) > 0.0 {
+            color += sample_source_unmasked(lens_index, positions[tap]) * weights[tap];
+            support += weights[tap];
+        }
     }
-    if azimuth < a2 {
-        return mix(r1, r2, clamp((azimuth - a1) / (a2 - a1), 0.0, 1.0));
-    }
-    if azimuth < a3 {
-        return mix(r2, r3, clamp((azimuth - a2) / (a3 - a2), 0.0, 1.0));
-    }
-    return mask.center_outer_valid.z;
+    if support > 0.0 { return color / support; }
+    return vec3<f32>(0.0);
+}
+
+fn mask_pixel_weight(lens_index: u32, source: vec2<u32>) -> f32 {
+    return masks.weights[masks.offsets[lens_index] + source.y * u32(lenses[lens_index].source.x) + source.x];
 }
 
 fn mask_weight(lens_index: u32, source: vec2<f32>) -> f32 {
-    let mask = masks[lens_index];
-    if mask.center_outer_valid.w <= 0.0 {
-        return 1.0;
-    }
-    let delta = source - mask.center_outer_valid.xy;
-    var boundary_squared = mask.center_outer_valid.z;
-    if source.y >= mask.center_outer_valid.y {
-        // Match the native mask after undoing its temporary CCW rotation:
-        // zero azimuth points down in the decoded source image.
-        let azimuth = atan2(abs(delta.x), abs(delta.y)) * 180.0 / PI;
-        boundary_squared = interpolate_mask(mask, azimuth);
-    }
-    let distance = sqrt(max(boundary_squared, 0.0)) - length(delta);
-    return clamp(distance * mask.center_outer_valid.w, 0.0, 1.0);
+    if masks.offsets[lens_index] == 0xffffffffu { return 1.0; }
+    let maximum = lenses[lens_index].source.xy - vec2<f32>(1.0);
+    if !finite2(source) || any(source < vec2<f32>(0.0)) || any(source > maximum) { return 0.0; }
+    let low = vec2<u32>(floor(source));
+    let high = vec2<u32>(ceil(source));
+    let fraction = source - floor(source);
+    return mix(mix(mask_pixel_weight(lens_index, low), mask_pixel_weight(lens_index, vec2<u32>(high.x, low.y)), fraction.x),
+        mix(mask_pixel_weight(lens_index, vec2<u32>(low.x, high.y)), mask_pixel_weight(lens_index, high), fraction.x), fraction.y);
 }
 
 // Same bounded, shortest-arc interpolation as ReadoutPoseTable. Tables resolve
@@ -652,16 +650,7 @@ fn camera_position(direction: vec3<f32>) -> vec2<f32> {
 }
 
 fn bilinear_mask_weight(lens_index: u32, source: vec2<f32>, maximum: vec2<f32>) -> f32 {
-    if masks[lens_index].center_outer_valid.w <= 0.0 {
-        return 1.0;
-    }
-    let low = floor(source);
-    let high = min(ceil(source), maximum);
-    // The entire interpolation footprint must remain inside the source mask.
-    return min(
-        min(mask_weight(lens_index, low), mask_weight(lens_index, vec2<f32>(high.x, low.y))),
-        min(mask_weight(lens_index, vec2<f32>(low.x, high.y)), mask_weight(lens_index, high)),
-    );
+    return mask_weight(lens_index, min(source, maximum));
 }
 
 fn low_frequency(lens_index: u32, source: vec2<f32>) -> vec3<f32> {

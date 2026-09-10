@@ -13,6 +13,7 @@ pub mod extraction;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod motion;
+pub mod optics;
 #[cfg(feature = "media")]
 pub mod paired;
 pub mod profile;
@@ -23,11 +24,15 @@ pub mod stream;
 pub mod telemetry;
 pub mod timing;
 pub mod types;
+pub mod underwater;
 
 #[cfg(feature = "media")]
 pub mod media;
 
-pub use calibration::{CalibrationResolver, ParsedLens, ResolvedCalibration, ResolvedLensGeometry};
+pub use calibration::{
+    CalibrationResolver, NormalizedPolynomialProjection, ParsedLens, PolynomialCoefficientSource,
+    ResolvedCalibration, ResolvedLensGeometry,
+};
 pub use container::{probe, InputSet, InsvReader};
 pub use error::{Error, Result};
 #[cfg(feature = "media")]

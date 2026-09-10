@@ -30,7 +30,7 @@ test = ["build>=1.2,<2", "ruff>=0.12"]
 bindings = "pyo3"
 module-name = "insta360_rs._native"
 python-source = "python"
-features = ["extension-module"]
+features = ["extension-module", "underwater-ai"]
 exclude = [
     "**/__pycache__/**",
     "**/*.py[cod]",

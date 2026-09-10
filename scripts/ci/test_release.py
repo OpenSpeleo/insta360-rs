@@ -25,8 +25,14 @@ class ReleaseVersionTests(unittest.TestCase):
         (self.root / "src-python").mkdir()
         (self.root / "data/core").mkdir(parents=True)
         (self.root / "data/enhancement").mkdir()
+        (self.root / "data/underwater-model-a").mkdir()
+        (self.root / "data/underwater-model-b").mkdir()
+        (self.root / "data/underwater-resources").mkdir()
         self.manifests = [
             "Cargo.toml", "data/core/Cargo.toml", "data/enhancement/Cargo.toml",
+            "data/underwater-model-a/Cargo.toml",
+            "data/underwater-model-b/Cargo.toml",
+            "data/underwater-resources/Cargo.toml",
             "src-python/Cargo.toml",
         ]
         for relative in self.manifests:

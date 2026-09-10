@@ -57,14 +57,14 @@ rejected.
 
 ### Video options
 
-| Keyword        | Default                  | Meaning                                                                                           |
-| -------------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
-| `config`       | `None`                   | Equivalent to default `StitchConfig`.                                                             |
-| `quality`      | `90`                     | Integer 1–100; mapped to the selected encoder's quality control.                                  |
-| `audio`        | `AudioPolicy.COPY`       | Copy compatible original AAC/ALAC packets with complete-packet cuts; `DROP` omits audio.          |
-| `start`        | `None`                   | Start in finite nonnegative seconds; omitted means the beginning.                                 |
-| `duration`     | `None`                   | Finite positive seconds; omitted means the remaining recording. The interval is half-open.        |
-| `acceleration` | `MediaAcceleration.AUTO` | Encoder candidate policy, independent of the stitch backend. Decoding currently remains software. |
+| Keyword        | Default                  | Meaning                                                                                        |
+| -------------- | ------------------------ | ---------------------------------------------------------------------------------------------- |
+| `config`       | `None`                   | Equivalent to default `StitchConfig`.                                                          |
+| `quality`      | `90`                     | Integer 1–100; mapped to the selected encoder's quality control.                               |
+| `audio`        | `AudioPolicy.COPY`       | Copy compatible original AAC/ALAC packets with complete-packet cuts; `DROP` omits audio.       |
+| `start`        | `None`                   | Start in finite nonnegative seconds; omitted means the beginning.                              |
+| `duration`     | `None`                   | Finite positive seconds; omitted means the remaining recording. The interval is half-open.     |
+| `acceleration` | `MediaAcceleration.AUTO` | Encoder candidate policy, independent of the stitch backend. Export decoding remains software. |
 
 Output MP4 is published only after successful finalization. Temporary
 `<output>.insta360-rs-part` files are incomplete. Failed/cancelled attempts
@@ -75,47 +75,68 @@ fail the export and remove its incomplete outputs.
 
 ## Configuration and enums
 
-`StitchConfig(*, optical_setup=None, stabilization=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None)`
+`StitchConfig(*, housing=None, environment=None, lens_accessory=None, mounting_accessory=None, underwater_color=None, stabilization=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None)`
 accepts only keyword arguments. Omitted values and explicit `None` select
 defaults:
 
-| Property           | Default                                   |
-| ------------------ | ----------------------------------------- |
-| `optical_setup`    | `OpticalSetup.STRICT_AUTO`                |
-| `stabilization`    | `Stabilization.DIRECTION_LOCK`            |
-| `rolling_shutter`  | `RollingShutterCorrection.AUTO`           |
-| `backend`          | `ProcessingBackend.AUTO`                  |
-| `color_conversion` | `ColorConversion.AUTO`                    |
-| `width`, `height`  | `None`, `None` (native projection choice) |
+| Property             | Default                                   |
+| -------------------- | ----------------------------------------- |
+| `housing`            | `Housing.AUTO`                            |
+| `environment`        | `Environment.AUTO`                        |
+| `lens_accessory`     | `LensAccessory.AUTO`                      |
+| `mounting_accessory` | `MountingAccessory.AUTO`                  |
+| `underwater_color`   | `UnderwaterColorOptions()` (Off)          |
+| `stabilization`      | `Stabilization.DIRECTION_LOCK`            |
+| `rolling_shutter`    | `RollingShutterCorrection.AUTO`           |
+| `backend`            | `ProcessingBackend.AUTO`                  |
+| `color_conversion`   | `ColorConversion.AUTO`                    |
+| `width`, `height`    | `None`, `None` (native projection choice) |
 
 Dimensions must be specified together and form a nonzero 2:1 panorama.
 Construction validates dimensions; after assigning mutable properties, the
 configuration is validated again when passed to an export. Each export takes a
 configuration snapshot, so later assignments do not change an active job.
 
-`StitchConfig.underwater_photogrammetry(*, optical_setup=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None)`
-uses direction-lock and defaults to `INVISIBLE_DIVE_CASE_UNDERWATER`. It also
-accepts `BARE_UNDERWATER`, `WATERPROOF_CASE`, and `DIVE_CASE_UNDERWATER`; other
-optical setups are rejected. The preset still requires corresponding recorded
-calibration and motion data.
+`StitchConfig.underwater_photogrammetry(*, housing=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None)`
+uses direction lock, `Environment.UNDERWATER`, automatic housing detection and
+underwater color Off. An explicit housing overrides detection. The preset still
+requires corresponding recorded calibration and supported motion data.
+
+`UnderwaterColorOptions(*, mode=None, strength=None, balance=None, style=None)`
+is an immutable value validated at construction and in the export snapshot.
+Replace `config.underwater_color` with a new options object to change settings;
+assigning to a nested options property raises `AttributeError`. Mode defaults to
+`OFF`; controls are unset. `LEGACY` defaults to strength 0.8/balance 0.5 and
+accepts no style. `AI` defaults to strength 1/style 0 and accepts no balance.
+Strength and balance must be finite in 0–1; style must be 0–3. Supplying
+controls with Off is an error. AI requires a build with the optional engine;
+packaged wheels enable it. Restoration runs after stitching and does not change
+geometry.
+
+The old `OpticalSetup`, `optical_setup` and corresponding CLI flag are removed.
+See the [migration and provenance guide](../../docs/housings.md).
 
 `RollingShutterCorrection.AUTO` uses a supported recorded readout profile when
 available and reports omissions as job warnings. `OFF` keeps only global
 stabilization; `REQUIRED` fails if readout correction cannot be established and
 cannot be combined with `Stabilization.OFF`.
 
-| Enum                       | Values                                                                                                                                                                                                                                                                                                   |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OpticalSetup`             | `STRICT_AUTO`, `BARE_AIR`, `BARE_UNDERWATER`, `WATERPROOF_CASE`, `DIVE_CASE_AIR`, `DIVE_CASE_UNDERWATER`, `INVISIBLE_DIVE_CASE_AIR`, `INVISIBLE_DIVE_CASE_UNDERWATER`, `CLIP_ON_LENS_GUARD`, `ADHESIVE_SPHERE_LENS_GUARD`, `PROTECTOR_A`, `PROTECTOR_S`, `PROTECTOR_AS`, `ND16`, `ND32`, `ND64`, `ND128` |
-| `Stabilization`            | `OFF`, `FLOW_STATE`, `DIRECTION_LOCK`                                                                                                                                                                                                                                                                    |
-| `RollingShutterCorrection` | `AUTO`, `OFF`, `REQUIRED`                                                                                                                                                                                                                                                                                |
-| `ProcessingBackend`        | `AUTO`, `CPU`, `GPU`                                                                                                                                                                                                                                                                                     |
-| `ColorConversion`          | `AUTO`, `PRESERVE`, `I_LOG_TO_REC709`                                                                                                                                                                                                                                                                    |
-| `EffectiveBackend`         | `CPU`, `GPU`, `UNKNOWN`                                                                                                                                                                                                                                                                                  |
-| `ImageFormat`              | `PNG`, `JPEG`                                                                                                                                                                                                                                                                                            |
-| `AudioPolicy`              | `COPY`, `DROP`                                                                                                                                                                                                                                                                                           |
-| `MediaAcceleration`        | `AUTO`, `SOFTWARE`, `HARDWARE`                                                                                                                                                                                                                                                                           |
-| `ExportPhase`              | `PROBING`, `DECODING`, `STITCHING`, `ENCODING`, `FINALIZING`, `UNKNOWN`                                                                                                                                                                                                                                  |
+| Enum                       | Values                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Housing`                  | `AUTO`, `NONE`, `VENTURE_CASE`, `DIVE_CASE`, `SPHERICAL_DIVE_CASE`, `INVISIBLE_DIVE_CASE`, `DIVE_CASE_PRO`                                        |
+| `Environment`              | `AUTO`, `AIR`, `UNDERWATER`                                                                                                                       |
+| `LensAccessory`            | `AUTO`, `NONE`, `CLIP_ON_LENS_GUARD`, `ADHESIVE_SPHERE_LENS_GUARD`, `PROTECTOR_A`, `PROTECTOR_S`, `PROTECTOR_AS`, `ND16`, `ND32`, `ND64`, `ND128` |
+| `MountingAccessory`        | `AUTO`, `NONE`, `DIVE_BUDDY`                                                                                                                      |
+| `UnderwaterColorMode`      | `OFF`, `LEGACY`, `AI`                                                                                                                             |
+| `Stabilization`            | `OFF`, `FLOW_STATE`, `DIRECTION_LOCK`                                                                                                             |
+| `RollingShutterCorrection` | `AUTO`, `OFF`, `REQUIRED`                                                                                                                         |
+| `ProcessingBackend`        | `AUTO`, `CPU`, `GPU`                                                                                                                              |
+| `ColorConversion`          | `AUTO`, `PRESERVE`, `I_LOG_TO_REC709`                                                                                                             |
+| `EffectiveBackend`         | `CPU`, `GPU`, `UNKNOWN`                                                                                                                           |
+| `ImageFormat`              | `PNG`, `JPEG`                                                                                                                                     |
+| `AudioPolicy`              | `COPY`, `DROP`                                                                                                                                    |
+| `MediaAcceleration`        | `AUTO`, `SOFTWARE`, `HARDWARE`                                                                                                                    |
+| `ExportPhase`              | `PROBING`, `DECODING`, `STITCHING`, `ENCODING`, `FINALIZING`, `UNKNOWN`                                                                           |
 
 Use enum members as arguments, rather than strings or integers. These are PyO3
 enum classes, not subclasses of Python's `enum.Enum`. `ProcessingBackend.AUTO`
@@ -129,7 +150,7 @@ that transform.
 
 | Object              | Read-only properties                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MediaInfo`         | `inputs: list[Path]`, `camera: str`, `camera_name`, `serial`, `firmware` (optional strings), `duration_seconds`, `fps` (optional floats), `video_tracks: list[VideoTrackInfo]`, `offset_versions: list[int]`, `optical_profiles: list[str]`, `gyro_sample_count`, `exposure_sample_count` (integers), `trailer: TrailerInfo`.                                                             |
+| `MediaInfo`         | `inputs: list[Path]`, `camera: str`, `camera_name`, `serial`, `firmware` (optional strings), `duration_seconds`, `fps` (optional floats), `video_tracks: list[VideoTrackInfo]`, `offset_versions: list[int]`, `optical_profiles: list[str]`, `optics: OpticalInspection`, `gyro_sample_count`, `exposure_sample_count` (integers), `trailer: TrailerInfo`.                                |
 | `VideoTrackInfo`    | `index`, `width`, `height` (integers), `codec: str`.                                                                                                                                                                                                                                                                                                                                      |
 | `TrailerInfo`       | `offset`, `size` (integer byte counts), `version`, `record_count` (integers).                                                                                                                                                                                                                                                                                                             |
 | `MediaSource`       | `streams`, `video_streams`: lists of `MediaStream` in original input/stream order.                                                                                                                                                                                                                                                                                                        |
@@ -163,11 +184,11 @@ independent readers can advance concurrently.
 | Object             | Read-only properties                                                                                                                                                                                                                                              |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ExtractionReport` | `output_dir`, `manifest_path: Path`; `input_count`, `stream_count`, `record_count: int`; `files: list[Path]`; `warnings: list[str]`.                                                                                                                              |
-| `ExportResult`     | `outputs: list[Path]`, `frames_written: int`, `elapsed_seconds: float`, `backend: BackendReport`.                                                                                                                                                                 |
+| `ExportResult`     | `outputs: list[Path]`, `frames_written: int`, `elapsed_seconds: float`, `backend: BackendReport`, `optics: OpticalResolution                                                                                                                                      | None`. |
 | `BackendReport`    | `requested: ProcessingBackend`, `selected: EffectiveBackend`, `adapter: GpuAdapterInfo                                                    \| None`, `fallback: GpuFailure       \| None`.                                                                         |
 | `GpuAdapterInfo`   | `name`, `backend`, `device_type`, `driver`, `driver_info: str`; `vendor`, `device: int`.                                                                                                                                                                          |
 | `GpuFailure`       | `code`, `stage`, `message: str`; `adapter: GpuAdapterInfo                                                                                 \| None`.                                                                                                               |
-| `Capabilities`     | `image_export`, `video_export`, `gpu_compiled`, `gpu_available: bool`; `gpu_adapters: list[GpuAdapterInfo]`; `gpu_unavailable_reason: str \| None`; `hevc_encoders: list[str]`.                                                                                   |
+| `Capabilities`     | `image_export`, `video_export`, `gpu_compiled`, `gpu_available`, `underwater_ai_compiled: bool`; `gpu_adapters: list[GpuAdapterInfo]`; `gpu_unavailable_reason: str \| None`; `hevc_encoders: list[str]`.                                                         |
 | `ExportProgress`   | `phase: ExportPhase`, `completed: int`, `total: int                                                                                       \| None`, `media_time_seconds: float  \| None`, `elapsed_seconds: float`, `estimated_remaining_seconds: float \| None`. |
 
 `ExportJob` has no public constructor; use a `start_export_*` function.
@@ -200,18 +221,19 @@ for warning in job.take_warnings():
 
 All native operational exceptions inherit from `Insta360Error(Exception)`.
 
-| Exception                    | Meaning                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| `Insta360IOError`            | Filesystem access failure; it is not an `OSError` subclass.      |
-| `InvalidMediaError`          | Invalid input, framing, selection, dimensions, or interval.      |
-| `UnsupportedCameraError`     | Camera unsupported by the requested operation.                   |
-| `MissingCalibrationError`    | Required recorded calibration is unavailable.                    |
-| `AmbiguousOpticalSetupError` | Automatic selection cannot choose one optical profile.           |
-| `MissingCapabilityError`     | The operation requires unimplemented or unavailable support.     |
-| `GpuUnavailableError`        | GPU initialization unavailable; also a `MissingCapabilityError`. |
-| `MediaProcessingError`       | Native decode/encode/media processing failure.                   |
-| `GpuProcessingError`         | GPU processing failure; also a `MediaProcessingError`.           |
-| `CancelledError`             | Worker honored cancellation.                                     |
+| Exception                    | Meaning                                                               |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `Insta360IOError`            | Filesystem access failure; it is not an `OSError` subclass.           |
+| `InvalidMediaError`          | Invalid input, framing, selection, dimensions, or interval.           |
+| `UnsupportedCameraError`     | Camera unsupported by the requested operation.                        |
+| `MissingCalibrationError`    | Required recorded calibration is unavailable.                         |
+| `AmbiguousOpticalSetupError` | Automatic selection cannot choose one optical profile.                |
+| `ConflictingOpticsError`     | Requested housing, environment, lens or mounting components conflict. |
+| `MissingCapabilityError`     | The operation requires unimplemented or unavailable support.          |
+| `GpuUnavailableError`        | GPU initialization unavailable; also a `MissingCapabilityError`.      |
+| `MediaProcessingError`       | Native decode/encode/media processing failure.                        |
+| `GpuProcessingError`         | GPU processing failure; also a `MediaProcessingError`.                |
+| `CancelledError`             | Worker honored cancellation.                                          |
 
 Invalid Python argument types raise `TypeError`; integers outside native
 unsigned ranges raise `OverflowError` at conversion. In-range invalid values,
@@ -225,3 +247,19 @@ includes omitted automatic readout correction and retained factory calibration
 whose bias semantics are unverified.
 [Stabilization conventions](../../docs/stabilization.md) describe the X5
 profile, six-axis limits, and low-level pose-table interface.
+
+## Optical reports
+
+These values have read-only properties and no public constructor:
+
+| Object              | Properties                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OpticalSelection`  | `housing: Housing`, `environment: Environment`, `lens_accessory: LensAccessory`, `mounting_accessory: MountingAccessory`                      |
+| `OpticalInspection` | `detected: OpticalSelection \| None`, `evidence: str \| None`, `encoded_lens_id: int \| None`, `ambiguity: str \| None`                       |
+| `OpticalResolution` | `requested`, `detected`, `effective: OpticalSelection`; `evidence: str`; `source_lens_id`, `target_lens_id: int`; `sensor_crop_applied: bool` |
+
+Evidence is `recorded_state` or `encoded_lens`. Probe inspection can report an
+ambiguity even when rendering that camera or offset is unavailable. A successful
+export retains the resolved requested/detected/effective components. Explicit
+choices describe the requested physical setting; they do not verify hardware
+visually.

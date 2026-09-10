@@ -804,6 +804,206 @@
         "source_sha256": "5a85d398fb985447cd8c2fc44219328a9ff9f17fa784a6f2bfb1d8616cab1f81",
         "normalization": "identity"
       }
+    },
+    {
+      "id": "underwater-model197-part0",
+      "kind": "other",
+      "path": "underwater/model197.ins.part0",
+      "sha256": "0684b0368fcbb76ebb6512f8e443465e883f44547d8969ef6fc447c11b3173a2",
+      "byte_length": 8000000,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/adM_RnbzoRM2MizsqIWbMdMiz3mz2iwz3M4zXW3Wd9znU4rUm4m.ins",
+        "source_sha256": "53a24a86a41673adfbb56709cda53ec16584801d8918ad5ee0306f5027a92d5e",
+        "normalization": "byte-preserving slice [0, 8000000); concatenate part0 then part1 to reconstruct original"
+      }
+    },
+    {
+      "id": "underwater-model197-part1",
+      "kind": "other",
+      "path": "underwater/model197.ins.part1",
+      "sha256": "2e9182461746f50e6fb21b18f9d8928c764518cfbfbbbf04e7d8f15a48c47eca",
+      "byte_length": 7009214,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/adM_RnbzoRM2MizsqIWbMdMiz3mz2iwz3M4zXW3Wd9znU4rUm4m.ins",
+        "source_sha256": "53a24a86a41673adfbb56709cda53ec16584801d8918ad5ee0306f5027a92d5e",
+        "normalization": "byte-preserving slice [8000000, 15009214); concatenate part0 then part1 to reconstruct original"
+      }
+    },
+    {
+      "id": "underwater-model198",
+      "kind": "other",
+      "path": "underwater/model198.ins",
+      "sha256": "0d9998552303ed52e7da489e126d6ac0884e7990fda05c14ae0e7ebb62afaf52",
+      "byte_length": 7574990,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/aXMMoeMnizsqIWbMdMiz3Uz2snbbzYONzn_9zOVnZNQUn.ins",
+        "source_sha256": "0d9998552303ed52e7da489e126d6ac0884e7990fda05c14ae0e7ebb62afaf52",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-legacy-ilut",
+      "kind": "other",
+      "path": "underwater/underwater.ilut",
+      "sha256": "fd203f878cccf93c844f90db2d49c1508ba380458582cee7a0af12383269acde",
+      "byte_length": 824019,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/b56efdaa/underwater.ilut",
+        "source_sha256": "fd203f878cccf93c844f90db2d49c1508ba380458582cee7a0af12383269acde",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-style-database",
+      "kind": "other",
+      "path": "underwater/style-database.bin",
+      "sha256": "385c4c64c88d9ba3596b59ddce28cbc057a0d61e99268227f76d2719f9d5014c",
+      "byte_length": 454234,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/diving_mobilenet_v3_small_transfered_mobilenetv2_vec_database_576_20250708_aug.bin",
+        "source_sha256": "385c4c64c88d9ba3596b59ddce28cbc057a0d61e99268227f76d2719f9d5014c",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-style-manifest",
+      "kind": "other",
+      "path": "underwater/styles/result.json",
+      "sha256": "a72b63ce58f399dff0c2ec67183306ebe67a436561f3d5fee5578692a60ee481",
+      "byte_length": 6259,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/undercolor_style/result.json",
+        "source_sha256": "a72b63ce58f399dff0c2ec67183306ebe67a436561f3d5fee5578692a60ee481",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-style0",
+      "kind": "other",
+      "path": "underwater/styles/style0.png",
+      "sha256": "d07146d8367e20db45b682a780299ab4ff4354dd86964578cae220baa76330bf",
+      "byte_length": 112997,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/undercolor_style/style0.png",
+        "source_sha256": "d07146d8367e20db45b682a780299ab4ff4354dd86964578cae220baa76330bf",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-style1",
+      "kind": "other",
+      "path": "underwater/styles/style1.png",
+      "sha256": "cf0ec8992e0e024fb889f869049ceb33e5b99235a27ad49565d21dce3dd05eaf",
+      "byte_length": 112248,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/undercolor_style/style1.png",
+        "source_sha256": "cf0ec8992e0e024fb889f869049ceb33e5b99235a27ad49565d21dce3dd05eaf",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-style2",
+      "kind": "other",
+      "path": "underwater/styles/style2.png",
+      "sha256": "a07968d73d28efa80f9c19e3c62f945e3b80c2f08c2bf3155444cd21f0fdbb62",
+      "byte_length": 111342,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/undercolor_style/style2.png",
+        "source_sha256": "a07968d73d28efa80f9c19e3c62f945e3b80c2f08c2bf3155444cd21f0fdbb62",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "underwater-style3",
+      "kind": "other",
+      "path": "underwater/styles/style3.png",
+      "sha256": "cebca0b3d04108c7285a94c3ee1460b9e5dde8c0d9044937e3313ada0047ed29",
+      "byte_length": 112589,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/undercolor_style/style3.png",
+        "source_sha256": "cebca0b3d04108c7285a94c3ee1460b9e5dde8c0d9044937e3313ada0047ed29",
+        "normalization": "identity"
+      }
     }
   ],
   "groups": [
@@ -825,6 +1025,28 @@
         "source_sdk": {
           "minimum": "iOS-SDK-1.10.4",
           "maximum": "iOS-SDK-1.10.4"
+        }
+      }
+    },
+    {
+      "id": "underwater-ai-studio-5-9-10",
+      "kind": "other",
+      "members": [
+        "underwater-model197-part0",
+        "underwater-model197-part1",
+        "underwater-model198",
+        "underwater-style-database",
+        "underwater-style-manifest",
+        "underwater-style0",
+        "underwater-style1",
+        "underwater-style2",
+        "underwater-style3"
+      ],
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
         }
       }
     }

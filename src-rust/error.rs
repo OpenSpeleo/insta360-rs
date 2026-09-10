@@ -18,6 +18,11 @@ pub enum Error {
     MissingCalibration(String),
     #[error("optical setup is ambiguous; choose one of: {candidates:?}")]
     AmbiguousOpticalSetup { candidates: Vec<String> },
+    #[error("conflicting optical selection {selection:?}: {reason}")]
+    ConflictingOptics {
+        selection: crate::OpticalSelection,
+        reason: String,
+    },
     #[error("requested capability is unavailable: {0}")]
     MissingCapability(String),
     #[error("GPU capability is unavailable: {0}")]

@@ -15,12 +15,15 @@ photogrammetry is the primary use case.
 
 **Stack**: Rust, FFmpeg through `ffmpeg-next`, Rayon, optional `wgpu` compute,
 PyO3, and Maturin. The independent Cargo workspace contains the main library,
-two bundled-data crates, and the Python extension, with one root `Cargo.lock`.
+five bundled-data crates, and the Python extension, with one root `Cargo.lock`.
 
-Metadata recognition covers ONE X through X6. Encoded stream extraction accepts
-one- and two-file inputs independently of camera calibration. High-level decoded
-stitching, image export, and stitched video export currently require X5
-single-file, dual-track recordings. Keep these support boundaries explicit.
+Metadata recognition covers ONE, ONE R/RS panorama modules, ONE X through X6,
+and X4 Air. Encoded stream extraction accepts one- and two-file inputs
+independently of camera calibration. High-level decoded export accepts
+registered V1/V2/V3/V6 calibrations and validated dual-track, two-file or
+metadata-proven packed panoramas. V1 sensor-crop conversion remains unavailable;
+real-recording qualification is narrower than synthetic camera/layout coverage.
+Keep these support boundaries explicit.
 
 ## Core Principles
 
@@ -151,6 +154,9 @@ single-file, dual-track recordings. Keep these support boundaries explicit.
   exact first frame.
 - Stream extraction preserves original encoded packets and metadata; it must not
   acquire the camera/calibration restrictions of the stitched exporter.
+- Keep housing, environment, lens accessories and mounting separate. State 10/11
+  is X5 Pro 119/120, not standard 117/118. Source housing masks are radial;
+  recorded sensor crops normalize calibration coordinates separately.
 - Keep Python wrappers focused on conversion and delegation. Update native
   bindings, wrapper exports, `__init__.pyi`, and API tests together.
 - Production code must not load or execute vendor runtime libraries. Bundled
@@ -164,7 +170,10 @@ See [architecture](docs/architecture.md), [public API](docs/public-api.md),
 
 ## Testing Requirements
 
-Use the compiler in `rust-toolchain.toml`. Run Cargo checks with `--locked`
+Use the compiler in `rust-toolchain.toml`. All-feature builds require the pinned
+independent MNN CPU prefix in `MNN_ROOT`; see `scripts/ci/build-mnn.py` and
+`docs/CI.md`. The optional `underwater-ai` feature enables that engine; Legacy
+and Off have no native engine dependency. Run Cargo checks with `--locked`
 except when intentionally updating versions or dependency resolution.
 
 For core changes, start with the affected tests and the default-feature
@@ -235,7 +244,7 @@ complete matrix.
 - Use `prek autoupdate` for hooks and `cargo outdated` to inspect Rust updates.
   Review Python constraints in `src-python/pyproject.toml` and
   `scripts/ci/requirements-wheel.txt`.
-- Keep the four Rust packages on the shared lockfile. Update the compiler
+- Keep the seven Rust packages on the shared lockfile. Update the compiler
   through `rust-toolchain.toml`; keep declared minimum Rust support accurate.
 - Keep GitHub Actions pinned by commit and shared build-tool versions aligned.
   Preserve the CMake constraint required by the current x265 build until that
@@ -298,8 +307,8 @@ Other platforms keep target-specific caches. Keep the existing Rust profiles and
 Maturin build settings unchanged unless explicitly requested. The Python
 extension keeps `publish = false` for crates.io.
 
-`[workspace.package].version` is the package-version authority. All four crates
-inherit it and Maturin derives the Python version dynamically. The three exact
+`[workspace.package].version` is the package-version authority. All seven crates
+inherit it and Maturin derives the Python version dynamically. The six exact
 internal dependency pins must match. Use `cargo-edit` to update them together;
 replace this example version with the intended release:
 
@@ -317,7 +326,7 @@ environments `crates-io` and `pypi`. Each Rust crate needs its own registration
 after its initial manual upload. Follow [release instructions](docs/RELEASE.md)
 for bootstrap, tag publication, attestations, and recovery.
 
-Before publication, verify all three package archives and their extracted
+Before publication, verify all six package archives and their extracted
 contents. Each compressed crate must be below 10,000,000 bytes. Keep Cargo's
 publication verification enabled and preserve byte-identical licensed assets in
 crates, wheels, and source distributions.

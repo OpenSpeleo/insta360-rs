@@ -3,8 +3,10 @@
 [CI](../.github/workflows/ci.yml) owns all test suites and runs on pushes to
 `master` and manual dispatch. Pull requests, tag pushes, and pushes to other
 branches, including Dependabot branches, do not start CI. To check a branch
-before merging, manually dispatch the workflow for that branch. All lint and
-tests run on Linux x86_64 (`ubuntu-24.04`).
+before merging, manually dispatch the workflow for that branch. The full lint,
+Rust feature and Python matrices run on Linux x86_64 (`ubuntu-24.04`).
+Additional underwater-engine Rust jobs execute on Linux, macOS ARM64/x86_64 and
+Windows x86_64.
 
 After every check passes, CI fetches tags and looks for the workspace's exact
 `vMAJOR.MINOR.PATCH` version tag on the tested commit. If present, it dispatches
@@ -21,7 +23,7 @@ CI. No CI distribution artifacts are published. See
 [release instructions](RELEASE.md) for dispatch, attestations, and recovery.
 
 For Rust publication, the release job uses this repository’s Cargo workspace.
-The Python extension has `publish = false`, leaving three publishable crates.
+The Python extension has `publish = false`, leaving six publishable crates.
 Cargo packages and verifies all selected crates before its first upload. A
 deliberate compilation failure in any crate must therefore leave every crate
 unpublished. Separate registry requests can still fail after an earlier upload;
@@ -33,8 +35,8 @@ see [release recovery](RELEASE.md#failures-and-retries).
 Rust compiler. Local Cargo, the shared CI setup action, and every wheel builder
 use its channel. There is no independently pinned CI version, moving stable
 channel, or alternate MSRV compiler. Update that file to change the compiler
-everywhere. All four workspace members share the committed root `Cargo.lock`,
-and builds use `--locked`. Default members are the library and both data crates.
+everywhere. All seven workspace members share the committed root `Cargo.lock`,
+and builds use `--locked`. Default members are the library and five data crates.
 Python is tested explicitly so its media/GPU dependencies do not change the
 library feature matrix.
 
@@ -71,16 +73,17 @@ comparisons, and physical GPU qualification remain separate; see
 
 ## Checks and artifacts
 
-| Job                              | Coverage                                                                                                                           |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Prepare shared FFmpeg libraries  | Cached source build and runtime capability validation                                                                              |
-| Full prek                        | Both hook configurations and all Rust manifests                                                                                    |
-| Rust (default/media/gpu/cli/all) | All test targets, doctests, and release builds of the library, enabled CLI, and examples for each feature configuration            |
-| Rust (all)                       | Also executes the binding crate's Rust unit tests and builds API documentation with warnings denied                                |
-| Rust (all)                       | Also packages, size-checks, tests, and builds all three extracted crates with `python scripts/ci/check-packages.py --all-features` |
-| Linux Python build               | Creates an sdist, builds an ABI3 wheel from it, repairs its libraries, and smoke tests a clean installation                        |
-| Python 3.10–3.14                 | Installs the repaired Linux wheel and runs every Python unittest on each interpreter                                               |
-| Trigger matching release         | Dispatches release only for the workspace-version tag on the commit that passed all checks                                         |
+| Job                                            | Coverage                                                                                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Prepare shared FFmpeg libraries                | Cached source build and runtime capability validation                                                                            |
+| Full prek                                      | Both hook configurations and all Rust manifests                                                                                  |
+| Rust (default/media/gpu/cli/underwater-ai/all) | All test targets, doctests, and release builds of the library, enabled CLI, and examples for each feature configuration          |
+| Rust (all)                                     | Also executes the binding crate's Rust unit tests and builds API documentation with warnings denied                              |
+| Rust (all)                                     | Also packages, size-checks, tests, and builds all six extracted crates with `python scripts/ci/check-packages.py --all-features` |
+| Linux Python build                             | Creates an sdist, builds an ABI3 wheel from it, repairs its libraries, and smoke tests a clean installation                      |
+| Python 3.10–3.14                               | Installs the repaired wheel and executes the full Python suite on every interpreter, requiring usable GPU and compiled AI        |
+| Underwater engine platforms                    | All core/AI test targets and doctests on Linux, macOS ARM64/x86_64 and Windows; independent MNN build on each host               |
+| Trigger matching release                       | Dispatches release only for the workspace-version tag on the commit that passed all checks                                       |
 
 CI's `python-test-dist-linux` artifact contains its test wheel and sdist;
 `rust-crates` contains its verified crate archives. These are available for
@@ -104,7 +107,7 @@ On Ubuntu 24.04:
 ```sh
 sudo apt-get update
 sudo apt-get install --no-install-recommends -y \
-  build-essential pkg-config clang libclang-dev llvm-dev \
+  build-essential cmake pkg-config clang libclang-dev llvm-dev \
   ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
   mesa-vulkan-drivers libvulkan1 vulkan-tools python3 python3-dev python3-venv
 cargo --version # rustup installs the toolchain from rust-toolchain.toml
@@ -122,7 +125,7 @@ and runs `use-ffmpeg.py` to export its environment through `GITHUB_ENV`.
 Prek discovers [.pre-commit-config.yaml](../.pre-commit-config.yaml) and the
 nested [Python configuration](../src-python/.pre-commit-config.yaml). It checks
 common file errors, Markdown formatting, YAML, GitHub Actions, Rust formatting,
-unused dependencies, and Clippy across all four workspace members with all
+unused dependencies, and Clippy across all seven workspace members with all
 features and warnings denied. Clippy also performs compilation checks. Rust
 hooks trigger for manifests and lockfiles as well as Rust sources. The Python
 project adds Ruff lint/format and Bandit. Python tests run separately from
@@ -145,7 +148,9 @@ export XDG_RUNTIME_DIR="$(mktemp -d)"
 export VK_LOADER_DRIVERS_SELECT='lvp_icd*'
 export INSTA360_RS_REQUIRE_GPU=1
 export LIBCLANG_PATH="$(llvm-config --libdir)"
-for features in '' media gpu cli media,gpu,cli; do
+python3 scripts/ci/build-mnn.py --output .cache/mnn
+export MNN_ROOT="$PWD/.cache/mnn"
+for features in '' media gpu cli underwater-ai media,gpu,cli,underwater-ai; do
   cargo test --locked --all-targets --no-default-features --features "$features"
   cargo test --locked --doc --no-default-features --features "$features"
   cargo build --locked --release --lib --bins --examples \
@@ -223,3 +228,40 @@ checks, without runtime testing. Linux ARM64, Windows ARM64, musl, PyPy, and
 free-threaded CPython wheels are outside this build matrix. See
 [RELEASE.md](RELEASE.md) for registry configuration and publication from a
 version tag.
+
+## Optional underwater AI native prerequisite
+
+The core and legacy restoration build without MNN. Enabling `underwater-ai`
+requires CMake, a C/C++ compiler and a verified static CPU prefix:
+
+```sh
+python3 scripts/ci/build-mnn.py --output /path/to/mnn-prefix --jobs 2
+export MNN_ROOT=/path/to/mnn-prefix
+cargo test --locked --no-default-features --features underwater-ai --lib underwater
+```
+
+`--prefix` is an alias for `--output`. The builder downloads the official MNN
+3.6.1 source at commit `d407447ed56c4121a11ccbd266dc184ca1ead0c2`, verifies
+archive SHA-256
+`13dca9547df7dac40ab40c7318136406f4a33dfe99cd40bfaa4dbb2270cb8795`, and builds a
+Release static library with position-independent code. CUDA, OpenCL, Metal,
+Vulkan, OpenMP, training, converters, tools and optional KleidiAI/SME2 code are
+disabled. Windows uses the dynamic MSVC C runtime with a static MNN library. The
+Rust build compiles its private C++17 adapter and links MNN only when the
+feature is enabled.
+
+The prefix includes unchanged MNN licensing bytes and third-party notices.
+Release wheels carry both `MNN-LICENSE.txt` and `MNN-THIRD-PARTY-NOTICES.txt`.
+Source/configuration/platform/compiler-environment metadata and per-file hashes
+validate cached prefixes. A mismatching or damaged existing prefix is rejected;
+choose a new output directory or remove the stale build after inspecting it.
+Build output is published only after compilation, header copying and notice
+preparation succeed. The shared `setup-mnn` action and wheel builders use this
+same script; no Insta360 SDK runtime is needed.
+
+Run builder regression tests with
+`python3 -m unittest discover -s scripts/ci -p test_mnn_build.py -v`. Model
+tests actually execute both original graphs through the independent CPU
+interpreter. They cover all four styles and temporal processing, and compare
+selected tensors to an independent MNN reference. Default-feature tests also
+check that requesting AI without the feature returns `MissingCapability`.

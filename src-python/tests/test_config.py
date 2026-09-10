@@ -5,11 +5,11 @@ import unittest
 import insta360_rs as api
 
 ENUM_MEMBERS = {
-    "OpticalSetup": "STRICT_AUTO BARE_AIR BARE_UNDERWATER WATERPROOF_CASE "
-    "DIVE_CASE_AIR DIVE_CASE_UNDERWATER INVISIBLE_DIVE_CASE_AIR "
-    "INVISIBLE_DIVE_CASE_UNDERWATER CLIP_ON_LENS_GUARD "
-    "ADHESIVE_SPHERE_LENS_GUARD PROTECTOR_A PROTECTOR_S PROTECTOR_AS "
-    "ND16 ND32 ND64 ND128",
+    "Housing": "AUTO NONE VENTURE_CASE DIVE_CASE SPHERICAL_DIVE_CASE INVISIBLE_DIVE_CASE DIVE_CASE_PRO",
+    "Environment": "AUTO AIR UNDERWATER",
+    "LensAccessory": "AUTO NONE CLIP_ON_LENS_GUARD ADHESIVE_SPHERE_LENS_GUARD PROTECTOR_A PROTECTOR_S PROTECTOR_AS ND16 ND32 ND64 ND128",
+    "MountingAccessory": "AUTO NONE DIVE_BUDDY",
+    "UnderwaterColorMode": "OFF LEGACY AI",
     "Stabilization": "OFF FLOW_STATE DIRECTION_LOCK",
     "RollingShutterCorrection": "AUTO OFF REQUIRED",
     "ProcessingBackend": "AUTO CPU GPU",
@@ -43,7 +43,11 @@ class ConfigTests(unittest.TestCase):
         for config in (
             api.StitchConfig(),
             api.StitchConfig(
-                optical_setup=None,
+                housing=None,
+                environment=None,
+                lens_accessory=None,
+                mounting_accessory=None,
+                underwater_color=None,
                 stabilization=None,
                 rolling_shutter=None,
                 backend=None,
@@ -52,7 +56,11 @@ class ConfigTests(unittest.TestCase):
                 height=None,
             ),
         ):
-            self.assertEqual(config.optical_setup, api.OpticalSetup.STRICT_AUTO)
+            self.assertEqual(config.housing, api.Housing.AUTO)
+            self.assertEqual(config.environment, api.Environment.AUTO)
+            self.assertEqual(config.lens_accessory, api.LensAccessory.AUTO)
+            self.assertEqual(config.mounting_accessory, api.MountingAccessory.AUTO)
+            self.assertEqual(config.underwater_color.mode, api.UnderwaterColorMode.OFF)
             self.assertEqual(config.stabilization, api.Stabilization.DIRECTION_LOCK)
             self.assertEqual(config.rolling_shutter, api.RollingShutterCorrection.AUTO)
             self.assertEqual(config.backend, api.ProcessingBackend.AUTO)
@@ -63,7 +71,10 @@ class ConfigTests(unittest.TestCase):
 
     def test_every_enum_configuration_value_round_trips(self):
         fields = {
-            "optical_setup": "OpticalSetup",
+            "housing": "Housing",
+            "environment": "Environment",
+            "lens_accessory": "LensAccessory",
+            "mounting_accessory": "MountingAccessory",
             "stabilization": "Stabilization",
             "rolling_shutter": "RollingShutterCorrection",
             "backend": "ProcessingBackend",
@@ -114,7 +125,10 @@ class ConfigTests(unittest.TestCase):
 
     def test_enum_fields_reject_strings_integers_and_wrong_enum_types(self):
         for field in (
-            "optical_setup",
+            "housing",
+            "environment",
+            "lens_accessory",
+            "mounting_accessory",
             "stabilization",
             "rolling_shutter",
             "backend",
@@ -129,15 +143,15 @@ class ConfigTests(unittest.TestCase):
 
     def test_configuration_is_keyword_only(self):
         with self.assertRaises(TypeError):
-            api.StitchConfig(api.OpticalSetup.BARE_AIR)
+            api.StitchConfig(api.Housing.NONE)
         with self.assertRaises(TypeError):
-            api.StitchConfig.underwater_photogrammetry(api.OpticalSetup.BARE_UNDERWATER)
+            api.StitchConfig.underwater_photogrammetry(api.Housing.NONE)
 
     def test_underwater_preset_defaults(self):
         config = api.StitchConfig.underwater_photogrammetry()
-        self.assertEqual(
-            config.optical_setup, api.OpticalSetup.INVISIBLE_DIVE_CASE_UNDERWATER
-        )
+        self.assertEqual(config.housing, api.Housing.AUTO)
+        self.assertEqual(config.environment, api.Environment.UNDERWATER)
+        self.assertEqual(config.underwater_color.mode, api.UnderwaterColorMode.OFF)
         self.assertEqual(config.stabilization, api.Stabilization.DIRECTION_LOCK)
         self.assertEqual(config.rolling_shutter, api.RollingShutterCorrection.AUTO)
         self.assertEqual(config.backend, api.ProcessingBackend.AUTO)
@@ -166,33 +180,73 @@ class ConfigTests(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     api.StitchConfig.underwater_photogrammetry(rolling_shutter=value)
 
-    def test_underwater_preset_accepts_only_underwater_optics(self):
-        allowed = {
-            "BARE_UNDERWATER",
-            "WATERPROOF_CASE",
-            "DIVE_CASE_UNDERWATER",
-            "INVISIBLE_DIVE_CASE_UNDERWATER",
-        }
-        for name in ENUM_MEMBERS["OpticalSetup"].split():
-            value = getattr(api.OpticalSetup, name)
-            with self.subTest(optical_setup=name):
-                if name in allowed:
-                    config = api.StitchConfig.underwater_photogrammetry(
-                        optical_setup=value,
-                        backend=api.ProcessingBackend.CPU,
-                        color_conversion=api.ColorConversion.PRESERVE,
-                        width=128,
-                        height=64,
+    def test_underwater_preset_preserves_every_housing_override(self):
+        for name in ENUM_MEMBERS["Housing"].split():
+            value = getattr(api.Housing, name)
+            with self.subTest(housing=name):
+                config = api.StitchConfig.underwater_photogrammetry(
+                    housing=value,
+                    backend=api.ProcessingBackend.CPU,
+                    width=128,
+                    height=64,
+                )
+                self.assertEqual(config.housing, value)
+                self.assertEqual(config.environment, api.Environment.UNDERWATER)
+                self.assertEqual(config.backend, api.ProcessingBackend.CPU)
+                self.assertEqual((config.width, config.height), (128, 64))
+
+    def test_removed_optical_setup_is_rejected(self):
+        self.assertFalse(hasattr(api, "OpticalSetup"))
+        with self.assertRaises(TypeError):
+            api.StitchConfig(optical_setup="InvisibleDiveCaseUnderwater")
+
+    def test_underwater_options_validate_and_remain_opt_in(self):
+        for mode in (api.UnderwaterColorMode.LEGACY, api.UnderwaterColorMode.AI):
+            for strength in (0.0, 0.3, 1.0):
+                options = api.UnderwaterColorOptions(mode=mode, strength=strength)
+                config = api.StitchConfig(underwater_color=options)
+                self.assertAlmostEqual(config.underwater_color.strength, strength)
+                self.assertEqual(config.underwater_color.mode, mode)
+        for strength in (-0.1, 1.1, float("nan"), float("inf")):
+            with self.subTest(strength=strength):
+                with self.assertRaises(api.InvalidMediaError):
+                    api.UnderwaterColorOptions(
+                        mode=api.UnderwaterColorMode.LEGACY, strength=strength
                     )
-                    self.assertEqual(config.optical_setup, value)
-                    self.assertEqual(config.backend, api.ProcessingBackend.CPU)
-                    self.assertEqual(
-                        config.color_conversion, api.ColorConversion.PRESERVE
-                    )
-                    self.assertEqual((config.width, config.height), (128, 64))
-                else:
-                    with self.assertRaises(api.InvalidMediaError):
-                        api.StitchConfig.underwater_photogrammetry(optical_setup=value)
+        with self.assertRaises(api.InvalidMediaError):
+            api.UnderwaterColorOptions(strength=0.5)
+        with self.assertRaises(api.InvalidMediaError):
+            api.UnderwaterColorOptions(mode=api.UnderwaterColorMode.LEGACY, style=0)
+        with self.assertRaises(api.InvalidMediaError):
+            api.UnderwaterColorOptions(mode=api.UnderwaterColorMode.AI, style=4)
+        self.assertEqual(
+            api.StitchConfig(housing=api.Housing.DIVE_CASE_PRO).underwater_color.mode,
+            api.UnderwaterColorMode.OFF,
+        )
+
+    def test_underwater_options_are_immutable_and_configuration_accepts_replacements(
+        self,
+    ):
+        original = api.UnderwaterColorOptions(
+            mode=api.UnderwaterColorMode.LEGACY, strength=0.8, balance=0.5
+        )
+        config = api.StitchConfig(underwater_color=original)
+        for options in (original, config.underwater_color):
+            for name, value in (
+                ("mode", api.UnderwaterColorMode.OFF),
+                ("strength", 0.0),
+                ("balance", 0.0),
+                ("style", 0),
+            ):
+                with self.subTest(name=name):
+                    with self.assertRaises(AttributeError):
+                        setattr(options, name, value)
+        config.underwater_color = api.UnderwaterColorOptions()
+        self.assertEqual(config.underwater_color.mode, api.UnderwaterColorMode.OFF)
+        self.assertEqual(original.mode, api.UnderwaterColorMode.LEGACY)
+        self.assertAlmostEqual(original.strength, 0.8)
+        with self.assertRaises(TypeError):
+            config.underwater_color = {"mode": "OFF"}
 
     def test_underwater_preset_validates_projection(self):
         with self.assertRaises(api.InvalidMediaError):
@@ -203,7 +257,13 @@ class CapabilityTests(unittest.TestCase):
     def test_capability_fields_are_consistent_and_read_only(self):
         capabilities = api.capabilities()
         self.assertIsInstance(capabilities, api.Capabilities)
-        for field in ("image_export", "video_export", "gpu_compiled", "gpu_available"):
+        for field in (
+            "image_export",
+            "video_export",
+            "gpu_compiled",
+            "gpu_available",
+            "underwater_ai_compiled",
+        ):
             self.assertIsInstance(getattr(capabilities, field), bool)
             with self.assertRaises(AttributeError):
                 setattr(capabilities, field, False)
@@ -239,6 +299,7 @@ class CapabilityTests(unittest.TestCase):
             "UnsupportedCameraError",
             "MissingCalibrationError",
             "AmbiguousOpticalSetupError",
+            "ConflictingOpticsError",
             "MissingCapabilityError",
             "GpuUnavailableError",
             "CancelledError",

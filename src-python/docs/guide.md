@@ -114,11 +114,11 @@ read-only `output_dir`, `manifest_path`, `input_count`, `stream_count`,
 call blocks and releases the GIL while the Rust implementation runs.
 
 ```python
-from insta360_rs import OpticalSetup, StitchConfig, export_frames, probe
+from insta360_rs import Housing, StitchConfig, export_frames, probe
 
 info = probe("recording.insv")
 config = StitchConfig.underwater_photogrammetry(
-    optical_setup=OpticalSetup.INVISIBLE_DIVE_CASE_UNDERWATER
+    housing=Housing.DIVE_CASE_PRO
 )
 result = export_frames(
     "recording.insv",
@@ -135,14 +135,16 @@ the CLI:
 from insta360_rs import (
     AudioPolicy,
     MediaAcceleration,
-    OpticalSetup,
+    Environment,
+    Housing,
     ProcessingBackend,
     StitchConfig,
     export_video,
 )
 
 config = StitchConfig(
-    optical_setup=OpticalSetup.INVISIBLE_DIVE_CASE_UNDERWATER,
+    housing=Housing.DIVE_CASE_PRO,
+    environment=Environment.UNDERWATER,
     backend=ProcessingBackend.AUTO,
 )
 
@@ -184,11 +186,12 @@ Long-running native operations release the GIL. Asynchronous jobs expose
 polling, waiting, and cancellation; Rust worker threads never call arbitrary
 Python callbacks.
 
-`probe()` now canonicalizes recognized ONE X through X6 camera names. Python's
-`OpticalSetup` also exposes legacy waterproof/dive-case and clip-on/adhesive
-lens-guard values in addition to the X5 setups. These values select only an
-already-recorded matching lens type unless an evidence-backed converter exists;
-they never substitute a generic calibration.
+`probe()` canonicalizes the registered ONE, ONE X, ONE R/RS, X2–X6 and X4 Air
+camera aliases. `info.optics` reports detected housing/environment/accessories,
+the encoded lens ID and any ambiguity. Successful exports expose `result.optics`
+with requested, detected and effective values. Housing, environment, lens
+accessory and mount are independent enums; only established calibrations and
+conversions are accepted. See [housings](../../docs/housings.md).
 
 `StitchConfig(color_conversion=ColorConversion.AUTO)` uses the bundled X5
 I-Log-to-Rec.709 table when recording metadata identifies I-Log. Use
@@ -197,9 +200,26 @@ older I-Log file with missing metadata. The option also applies to
 `StitchConfig.underwater_photogrammetry()`. CPU and GPU exports both execute the
 transform. See [runtime asset usage](../../docs/asset-usage.md).
 
-The general Rust asset provider is not a Python conversion argument, and no
-learned-model inference toggle is exposed. SVM accessory classification, AI seam
-flow, and restoration require their additional image/inference implementations.
+Underwater restoration is opt-in and leaves pixel geometry unchanged.
+`UnderwaterColorOptions` is immutable; assign a new options value to the mutable
+`config.underwater_color` property when changing settings:
+
+```python
+from insta360_rs import UnderwaterColorMode, UnderwaterColorOptions
+config.underwater_color = UnderwaterColorOptions(
+    mode=UnderwaterColorMode.LEGACY, strength=0.8, balance=0.5
+)
+# AI uses the optional independent MNN engine; packaged wheels include it.
+config.underwater_color = UnderwaterColorOptions(
+    mode=UnderwaterColorMode.AI, strength=1.0, style=0
+)
+```
+
+Use Off for consistent un-restored photogrammetry data. Color processing retains
+job-local temporal state and resets across independent images and recording
+boundaries. Missing/corrupt required resources fail explicitly. The general Rust
+asset provider is not a Python export argument. SVM accessory classification, AI
+seams and ColorPlus remain unavailable.
 
 Wheels are intended for macOS ARM64/x86_64, Windows x86_64, and manylinux
 x86_64. Their FFmpeg runtime is capability-pruned and carries its third-party

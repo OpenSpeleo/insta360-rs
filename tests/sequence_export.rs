@@ -1,5 +1,7 @@
 #![cfg(feature = "media")]
 
+use insta360_rs::{Environment, Housing};
+
 #[allow(dead_code)]
 mod common;
 
@@ -13,9 +15,8 @@ use ffmpeg::util::mathematics::rescale::Rescale;
 use ffmpeg_next as ffmpeg;
 use insta360_rs::media::{ExportEvent, Exporter};
 use insta360_rs::{
-    AudioPolicy, EquirectangularProjection, InputSet, MediaAcceleration, OpticalSetup,
-    ProcessingBackend, RecordingSequence, RollingShutterCorrection, Stabilization, StitchConfig,
-    VideoExportOptions,
+    AudioPolicy, EquirectangularProjection, InputSet, MediaAcceleration, ProcessingBackend,
+    RecordingSequence, RollingShutterCorrection, Stabilization, StitchConfig, VideoExportOptions,
 };
 
 fn varint(out: &mut Vec<u8>, mut value: u64) {
@@ -159,7 +160,8 @@ fn exporter(sequence: RecordingSequence) -> Exporter {
     Exporter::from_sequence(
         sequence,
         StitchConfig {
-            optical_setup: OpticalSetup::InvisibleDiveCaseUnderwater,
+            housing: Housing::InvisibleDiveCase,
+            environment: Environment::Underwater,
             stabilization: Stabilization::Off,
             rolling_shutter: RollingShutterCorrection::Off,
             backend: ProcessingBackend::Cpu,
@@ -681,7 +683,8 @@ fn configured_real_x5_gpu_audio_smoke() {
     let exporter = Exporter::new(
         InputSet::new(vec![source.into()]).unwrap(),
         StitchConfig {
-            optical_setup: OpticalSetup::BareAir,
+            housing: Housing::None,
+            environment: Environment::Air,
             backend: ProcessingBackend::Gpu,
             projection: Some(EquirectangularProjection {
                 width: 640,

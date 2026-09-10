@@ -62,7 +62,8 @@ jobs:
           path: |
             .cache/wheel/cargo
             .cache/wheel/rustup
-          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+            .cache/wheel/mnn-*
+          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'scripts/ci/build-mnn.py') }}
           restore-keys: wheel-tools-linux-
       - name: Identify the compatible FFmpeg SDK
         id: ffmpeg
@@ -152,17 +153,20 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: publish
-      - name: Build all three packages and check sizes before authentication
+      - name: Build all six packages and check sizes before authentication
         run: |
           cargo publish --workspace --dry-run --locked
           version="${GITHUB_REF_NAME#v}"
           python scripts/ci/check-packages.py --check-size-only \
             "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-$version.crate" \
             "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-data-core-$version.crate" \
-            "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-data-enhancement-$version.crate"
+            "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-data-enhancement-$version.crate" \
+            "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-data-underwater-model-a-$version.crate" \
+            "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-data-underwater-model-b-$version.crate" \
+            "$CARGO_TARGET_DIR/package/tmp-crate/insta360-rs-data-underwater-resources-$version.crate"
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1
         id: auth
-      - name: Verify every package, then upload all three in dependency order
+      - name: Verify every package, then upload all six in dependency order
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |

@@ -12,7 +12,7 @@ use insta360_rs::{
     Exporter, ExtractionReport as CoreExtractionReport, FrameSelection,
     GpuAdapterInfo as CoreGpuAdapterInfo, GpuFailure as CoreGpuFailure, ImageExportOptions,
     ImageFormat as CoreImageFormat, InputSet, MediaAcceleration as CoreMediaAcceleration,
-    OpticalSetup as CoreOpticalSetup, ProcessingBackend as CoreProcessingBackend,
+    ProcessingBackend as CoreProcessingBackend,
     RollingShutterCorrection as CoreRollingShutterCorrection, Stabilization as CoreStabilization,
     StitchConfig as CoreStitchConfig, VideoExportOptions,
 };
@@ -33,64 +33,15 @@ create_exception!(_native, InvalidMediaError, Insta360Error);
 create_exception!(_native, UnsupportedCameraError, Insta360Error);
 create_exception!(_native, MissingCalibrationError, Insta360Error);
 create_exception!(_native, AmbiguousOpticalSetupError, Insta360Error);
+create_exception!(_native, ConflictingOpticsError, Insta360Error);
 create_exception!(_native, MissingCapabilityError, Insta360Error);
 create_exception!(_native, GpuUnavailableError, MissingCapabilityError);
 create_exception!(_native, CancelledError, Insta360Error);
 create_exception!(_native, MediaProcessingError, Insta360Error);
 create_exception!(_native, GpuProcessingError, MediaProcessingError);
 
-#[pyclass(
-    name = "OpticalSetup",
-    module = "insta360_rs._native",
-    eq,
-    eq_int,
-    from_py_object,
-    rename_all = "SCREAMING_SNAKE_CASE"
-)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PyOpticalSetup {
-    StrictAuto,
-    BareAir,
-    BareUnderwater,
-    WaterproofCase,
-    DiveCaseAir,
-    DiveCaseUnderwater,
-    InvisibleDiveCaseAir,
-    InvisibleDiveCaseUnderwater,
-    ClipOnLensGuard,
-    AdhesiveSphereLensGuard,
-    ProtectorA,
-    ProtectorS,
-    ProtectorAs,
-    Nd16,
-    Nd32,
-    Nd64,
-    Nd128,
-}
-
-impl From<PyOpticalSetup> for CoreOpticalSetup {
-    fn from(value: PyOpticalSetup) -> Self {
-        match value {
-            PyOpticalSetup::StrictAuto => Self::StrictAuto,
-            PyOpticalSetup::BareAir => Self::BareAir,
-            PyOpticalSetup::BareUnderwater => Self::BareUnderwater,
-            PyOpticalSetup::WaterproofCase => Self::WaterproofCase,
-            PyOpticalSetup::DiveCaseAir => Self::DiveCaseAir,
-            PyOpticalSetup::DiveCaseUnderwater => Self::DiveCaseUnderwater,
-            PyOpticalSetup::InvisibleDiveCaseAir => Self::InvisibleDiveCaseAir,
-            PyOpticalSetup::InvisibleDiveCaseUnderwater => Self::InvisibleDiveCaseUnderwater,
-            PyOpticalSetup::ClipOnLensGuard => Self::ClipOnLensGuard,
-            PyOpticalSetup::AdhesiveSphereLensGuard => Self::AdhesiveSphereLensGuard,
-            PyOpticalSetup::ProtectorA => Self::ProtectorA,
-            PyOpticalSetup::ProtectorS => Self::ProtectorS,
-            PyOpticalSetup::ProtectorAs => Self::ProtectorAS,
-            PyOpticalSetup::Nd16 => Self::Nd16,
-            PyOpticalSetup::Nd32 => Self::Nd32,
-            PyOpticalSetup::Nd64 => Self::Nd64,
-            PyOpticalSetup::Nd128 => Self::Nd128,
-        }
-    }
-}
+mod optical_config;
+use optical_config::*;
 
 #[pyclass(
     name = "Stabilization",
@@ -336,7 +287,15 @@ impl From<CoreExportPhase> for PyExportPhase {
 #[derive(Clone, Debug)]
 struct PyStitchConfig {
     #[pyo3(get, set)]
-    optical_setup: PyOpticalSetup,
+    housing: PyHousing,
+    #[pyo3(get, set)]
+    environment: PyEnvironment,
+    #[pyo3(get, set)]
+    lens_accessory: PyLensAccessory,
+    #[pyo3(get, set)]
+    mounting_accessory: PyMountingAccessory,
+    #[pyo3(get, set)]
+    underwater_color: PyUnderwaterColorOptions,
     #[pyo3(get, set)]
     stabilization: PyStabilization,
     #[pyo3(get, set)]
@@ -354,9 +313,14 @@ struct PyStitchConfig {
 #[pymethods]
 impl PyStitchConfig {
     #[new]
-    #[pyo3(signature = (*, optical_setup=None, stabilization=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None))]
+    #[pyo3(signature = (*, housing=None, environment=None, lens_accessory=None, mounting_accessory=None, underwater_color=None, stabilization=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
-        optical_setup: Option<PyOpticalSetup>,
+        housing: Option<PyHousing>,
+        environment: Option<PyEnvironment>,
+        lens_accessory: Option<PyLensAccessory>,
+        mounting_accessory: Option<PyMountingAccessory>,
+        underwater_color: Option<PyUnderwaterColorOptions>,
         stabilization: Option<PyStabilization>,
         rolling_shutter: Option<PyRollingShutterCorrection>,
         backend: Option<PyProcessingBackend>,
@@ -365,7 +329,11 @@ impl PyStitchConfig {
         height: Option<u32>,
     ) -> PyResult<Self> {
         let config = Self {
-            optical_setup: optical_setup.unwrap_or(PyOpticalSetup::StrictAuto),
+            housing: housing.unwrap_or(PyHousing::Auto),
+            environment: environment.unwrap_or(PyEnvironment::Auto),
+            lens_accessory: lens_accessory.unwrap_or(PyLensAccessory::Auto),
+            mounting_accessory: mounting_accessory.unwrap_or(PyMountingAccessory::Auto),
+            underwater_color: underwater_color.unwrap_or_default(),
             stabilization: stabilization.unwrap_or(PyStabilization::DirectionLock),
             rolling_shutter: rolling_shutter.unwrap_or(PyRollingShutterCorrection::Auto),
             backend: backend.unwrap_or(PyProcessingBackend::Auto),
@@ -378,9 +346,12 @@ impl PyStitchConfig {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (*, optical_setup=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None))]
+    #[pyo3(signature = (*, housing=None, mounting_accessory=None, underwater_color=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None))]
+    #[allow(clippy::too_many_arguments)]
     fn underwater_photogrammetry(
-        optical_setup: Option<PyOpticalSetup>,
+        housing: Option<PyHousing>,
+        mounting_accessory: Option<PyMountingAccessory>,
+        underwater_color: Option<PyUnderwaterColorOptions>,
         rolling_shutter: Option<PyRollingShutterCorrection>,
         backend: Option<PyProcessingBackend>,
         color_conversion: Option<PyColorConversion>,
@@ -388,7 +359,11 @@ impl PyStitchConfig {
         height: Option<u32>,
     ) -> PyResult<Self> {
         let config = Self {
-            optical_setup: optical_setup.unwrap_or(PyOpticalSetup::InvisibleDiveCaseUnderwater),
+            housing: housing.unwrap_or(PyHousing::Auto),
+            environment: PyEnvironment::Underwater,
+            lens_accessory: PyLensAccessory::Auto,
+            mounting_accessory: mounting_accessory.unwrap_or(PyMountingAccessory::Auto),
+            underwater_color: underwater_color.unwrap_or_default(),
             stabilization: PyStabilization::DirectionLock,
             rolling_shutter: rolling_shutter.unwrap_or(PyRollingShutterCorrection::Auto),
             backend: backend.unwrap_or(PyProcessingBackend::Auto),
@@ -397,14 +372,14 @@ impl PyStitchConfig {
             height,
         };
         let core = config.to_core().map_err(to_py_error)?;
-        CoreStitchConfig::underwater_photogrammetry(core.optical_setup).map_err(to_py_error)?;
+        CoreStitchConfig::underwater_photogrammetry(core.housing).map_err(to_py_error)?;
         Ok(config)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StitchConfig(optical_setup={:?}, stabilization={:?}, rolling_shutter={:?}, backend={:?}, color_conversion={:?}, width={:?}, height={:?})",
-            self.optical_setup, self.stabilization, self.rolling_shutter, self.backend, self.color_conversion, self.width, self.height
+            "StitchConfig(housing={:?}, environment={:?}, lens_accessory={:?}, mounting_accessory={:?}, underwater_color={:?}, stabilization={:?}, rolling_shutter={:?}, backend={:?}, color_conversion={:?}, width={:?}, height={:?})",
+            self.housing, self.environment, self.lens_accessory, self.mounting_accessory, self.underwater_color, self.stabilization, self.rolling_shutter, self.backend, self.color_conversion, self.width, self.height
         )
     }
 }
@@ -424,7 +399,11 @@ impl PyStitchConfig {
         };
 
         Ok(CoreStitchConfig {
-            optical_setup: self.optical_setup.into(),
+            housing: self.housing.into(),
+            environment: self.environment.into(),
+            lens_accessory: self.lens_accessory.into(),
+            mounting_accessory: self.mounting_accessory.into(),
+            underwater_color: self.underwater_color.to_core()?,
             stabilization: self.stabilization.into(),
             rolling_shutter: self.rolling_shutter.into(),
             backend: self.backend.into(),
@@ -480,6 +459,8 @@ struct PyTrailerInfo {
 #[derive(Clone, Debug)]
 struct PyMediaInfo {
     #[pyo3(get)]
+    optics: PyOpticalInspection,
+    #[pyo3(get)]
     inputs: Vec<PathBuf>,
     #[pyo3(get)]
     camera: String,
@@ -511,6 +492,10 @@ struct PyMediaInfo {
 impl From<insta360_rs::MediaInfo> for PyMediaInfo {
     fn from(value: insta360_rs::MediaInfo) -> Self {
         let camera = match &value.camera {
+            CameraModel::One => "ONE".to_owned(),
+            CameraModel::OneR => "ONE R".to_owned(),
+            CameraModel::OneRS => "ONE RS".to_owned(),
+            CameraModel::X4Air => "X4 Air".to_owned(),
             CameraModel::X1 => "X1".to_owned(),
             CameraModel::X2 => "X2".to_owned(),
             CameraModel::X3 => "X3".to_owned(),
@@ -533,6 +518,7 @@ impl From<insta360_rs::MediaInfo> for PyMediaInfo {
         Self {
             inputs: value.inputs,
             camera,
+            optics: value.optics.into(),
             camera_name: value.camera_name,
             serial: value.serial,
             firmware: value.firmware,
@@ -658,6 +644,8 @@ impl From<CoreBackendReport> for PyBackendReport {
 #[derive(Clone, Debug)]
 struct PyExportResult {
     #[pyo3(get)]
+    optics: Option<PyOpticalResolution>,
+    #[pyo3(get)]
     outputs: Vec<PathBuf>,
     #[pyo3(get)]
     frames_written: u64,
@@ -670,6 +658,7 @@ struct PyExportResult {
 impl From<CoreExportResult> for PyExportResult {
     fn from(value: CoreExportResult) -> Self {
         Self {
+            optics: value.optics.map(Into::into),
             outputs: value.outputs,
             frames_written: value.frames_written,
             elapsed_seconds: value.elapsed.as_secs_f64(),
@@ -1106,6 +1095,8 @@ impl From<CoreExportProgress> for PyExportProgress {
 #[derive(Clone, Debug)]
 struct PyCapabilities {
     #[pyo3(get)]
+    underwater_ai_compiled: bool,
+    #[pyo3(get)]
     image_export: bool,
     #[pyo3(get)]
     video_export: bool,
@@ -1124,6 +1115,7 @@ struct PyCapabilities {
 impl From<MediaCapabilities> for PyCapabilities {
     fn from(value: MediaCapabilities) -> Self {
         Self {
+            underwater_ai_compiled: value.underwater_ai_compiled,
             image_export: value.image_export,
             video_export: value.video_export,
             gpu_compiled: value.gpu_compiled,
@@ -1568,7 +1560,11 @@ fn make_exporter(inputs: Vec<PathBuf>, config: Option<PyStitchConfig>) -> PyResu
 
 fn default_py_config() -> PyStitchConfig {
     PyStitchConfig {
-        optical_setup: PyOpticalSetup::StrictAuto,
+        housing: PyHousing::Auto,
+        environment: PyEnvironment::Auto,
+        lens_accessory: PyLensAccessory::Auto,
+        mounting_accessory: PyMountingAccessory::Auto,
+        underwater_color: PyUnderwaterColorOptions::default(),
         stabilization: PyStabilization::DirectionLock,
         rolling_shutter: PyRollingShutterCorrection::Auto,
         backend: PyProcessingBackend::Auto,
@@ -1679,6 +1675,7 @@ fn to_py_error(error: CoreError) -> PyErr {
         CoreError::InvalidMedia(_) => InvalidMediaError::new_err(message),
         CoreError::UnsupportedCamera(_) => UnsupportedCameraError::new_err(message),
         CoreError::MissingCalibration(_) => MissingCalibrationError::new_err(message),
+        CoreError::ConflictingOptics { .. } => ConflictingOpticsError::new_err(message),
         CoreError::AmbiguousOpticalSetup { .. } => AmbiguousOpticalSetupError::new_err(message),
         CoreError::MissingCapability(_) => MissingCapabilityError::new_err(message),
         CoreError::GpuUnavailable(_) => GpuUnavailableError::new_err(message),
@@ -1693,6 +1690,10 @@ fn to_py_error(error: CoreError) -> PyErr {
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    module.add(
+        "ConflictingOpticsError",
+        module.py().get_type::<ConflictingOpticsError>(),
+    )?;
     module.add("Insta360Error", module.py().get_type::<Insta360Error>())?;
     module.add("Insta360IOError", module.py().get_type::<Insta360IOError>())?;
     module.add(
@@ -1729,7 +1730,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
         module.py().get_type::<GpuProcessingError>(),
     )?;
 
-    module.add_class::<PyOpticalSetup>()?;
+    optical_config::register(module)?;
     module.add_class::<PyStabilization>()?;
     module.add_class::<PyRollingShutterCorrection>()?;
     module.add_class::<PyProcessingBackend>()?;

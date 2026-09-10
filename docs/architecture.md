@@ -19,9 +19,10 @@ INSV → bounded container parser → camera registry + calibration/profile reso
 ## Boundaries
 
 - `container` owns ISO-BMFF discovery, INSV trailer records, and input grouping.
-- `profile` owns the ONE X through X6 aliases, lens identifiers, projection
-  generations, optical-setup mappings, fallback FOV/blend values, mask recipes,
-  and evidence provenance. It contains no per-unit calibration.
+- `profile` owns the ONE, ONE R/RS, ONE X through X6 and X4 Air aliases, lens
+  identifiers, projection generations, optical-setup mappings, fallback
+  FOV/blend values, mask recipes, and evidence provenance. It contains no
+  per-unit calibration.
 - `calibration` parses recorded offset strings and selects an explicit optical
   profile. It resolves render geometry once and never substitutes a generic
   camera calibration.
@@ -29,6 +30,11 @@ INSV → bounded container parser → camera registry + calibration/profile reso
   compatibility selection, default-deny qualification, complete multi-file model
   groups, confined providers, SHA-256 verification, and portable parsing of the
   vendor's OpenCV linear SVM data.
+- `optics` keeps housing, environment, lens accessory and mount independent,
+  with requested/detected/effective reports.
+- `underwater` owns reusable scalar Legacy and optional independent MNN AI
+  sessions. Restoration changes RGB values after stitching without moving
+  pixels.
 - `color` verifies and parses bundled 3D CUBEs and applies trilinear RGB color
   transforms. `media` selects the X5 I-Log table from recording metadata and
   configures the CPU or GPU export session.
@@ -53,13 +59,13 @@ INSV → bounded container parser → camera registry + calibration/profile reso
 - `extraction` copies all demuxed streams, container metadata, and V2/V3 tail
   records into an owned staging directory, then publishes a complete folder and
   manifest. Stream-copy extraction has no calibration or camera-family gate.
-- `src-python` maps file-oriented operations to PyO3. It does not expose raw
-  frames or native-library pointers.
+- `src-python` maps file-oriented operations to PyO3. It exposes owned packet
+  and RGB frame bytes, never native-library pointers.
 
 The main media layers return the crate's typed `Error`; optional assets use the
 more specific `AssetError`. Vendor binaries are static evidence or external test
 oracles and are never loaded by the production library. Licensed data assets are
-embedded by the two data crates and served through `BundledAssetProvider`;
+embedded by the five data crates and served through `BundledAssetProvider`;
 applications can also provide external bundles.
 
 ## Calibration policy
@@ -67,21 +73,24 @@ applications can also provide external bundles.
 Factory calibration is part of the recording. The resolver preserves every
 available offset and selects the newest valid representation in this order: V6,
 V3, V2, then V1. It retains recorded crop/layout for dispatch, applies recorded
-track order, and validates the explicitly selected accessory/medium profile.
-Crop is not folded into ray geometry until a camera-specific mapping is
-evidence-backed.
+track order, and validates the explicitly selected accessory/medium profile. The
+shared resolver normalizes supported sensor windows before housing conversion.
+Source housing exclusion remains a radial prepared mask. Both renderers consume
+the same resolved coordinates and mask field.
 
 Resolution authority is explicit: an explicit caller optical setup, then the
 recorded `offset_state` and conclusive automatic `guard_detected_type`, then the
-encoded lens ID. Registry constants never override per-unit intrinsics,
-distortion, principal points, or extrinsics. INSV tag 128 overrides the
+encoded lens ID. Fallback FOV and blend constants do not replace per-unit
+calibration. Supported housing conversion derives target intrinsics and radial
+distortion from the selected source calibration and verified physical model,
+preserving principal points and extrinsics. INSV tag 128 overrides the
 registered blend-angle fallback.
 
-`StrictAuto` resolves an explicit recorded accessory state before considering
-the lens ID. If an automatic guard state has no conclusive detection result, or
-the requested conversion is not implemented, it fails before rendering and
-requires the caller to choose. This prevents an air calibration from being
-silently used for an underwater dive-case recording.
+Automatic optical selection resolves an explicit recorded accessory state before
+considering the lens ID. If an automatic guard state has no conclusive detection
+result, or the requested conversion is not implemented, it fails before
+rendering and requires the caller to choose. This prevents an air calibration
+from being silently used for an underwater dive-case recording.
 
 ## Geometric stability
 
@@ -124,9 +133,10 @@ software FFmpeg decode to retained AVFrames
 ```
 
 GPU submission and readback are synchronous and use one reusable resource set,
-so decode, compute, readback, and encode do not yet overlap. Hardware decoding,
-two/three-slot asynchronous pipelining, native surface import/export, and
-zero-copy encoding are not implemented.
+so decode, compute, readback, and encode do not yet overlap. Export decoding
+uses software FFmpeg; random-access previews separately support hardware
+decoding with software fallback. Two/three-slot asynchronous export pipelining,
+native surface import/export, and zero-copy encoding are not implemented.
 
 `ProcessingBackend::Auto` attempts GPU first. A typed GPU initialization or
 processing failure discards every output owned by that attempt and reruns the

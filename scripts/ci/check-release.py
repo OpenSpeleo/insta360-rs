@@ -13,6 +13,9 @@ import tomllib
 DATA_CRATES = {
     "insta360-rs-data-core": "data/core",
     "insta360-rs-data-enhancement": "data/enhancement",
+    "insta360-rs-data-underwater-model-a": "data/underwater-model-a",
+    "insta360-rs-data-underwater-model-b": "data/underwater-model-b",
+    "insta360-rs-data-underwater-resources": "data/underwater-resources",
 }
 
 
@@ -27,8 +30,7 @@ def validate(tag: str, root: Path) -> str:
         raise ValueError(f"{tag} requires workspace version {version}, found {actual}")
     for relative in [
         "Cargo.toml",
-        "data/core/Cargo.toml",
-        "data/enhancement/Cargo.toml",
+        *(f"{path}/Cargo.toml" for path in DATA_CRATES.values()),
         "src-python/Cargo.toml",
     ]:
         with (root / relative).open("rb") as source:

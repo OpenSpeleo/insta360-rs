@@ -1,14 +1,14 @@
 # Runtime use of bundled assets
 
-The current high-level renderer supports X5 dual-track panoramic recordings. The
-directly applicable processing asset is Studio's X5 I-Log-to-Rec.709 CUBE. It
-now changes image and video exports on CPU and GPU. The other two CUBEs also
-have a working RGB/GPU consumer for callers processing those camera images; they
-are not selected for X5 recordings.
+The high-level renderer accepts validated panorama layouts and registered
+calibration profiles. One implemented processing asset is Studio's X5
+I-Log-to-Rec.709 CUBE. It now changes image and video exports on CPU and GPU.
+The other two CUBEs also have a working RGB/GPU consumer for callers processing
+those camera images; they are not selected for X5 recordings.
 
-All 41 resources remain available through the same provider and asset IDs. The
-two [data crates](packaging.md) change their packaging only; model availability
-still does not imply a working inference pipeline.
+All 51 stored payloads remain available through the same provider and asset IDs.
+The five [data crates](packaging.md) preserve original vendor bytes; model
+availability still does not imply a working inference pipeline.
 
 ## Implemented color conversion
 
@@ -74,7 +74,7 @@ responsibility. Generic asset manifests and providers remain available for
 inspection and model development; their model qualification flags do not
 advertise additional inference capabilities.
 
-## Assessment of all 41 payloads
+## Assessment of bundled payloads
 
 | Payloads                                                             | Count | Runtime decision                                                                                                                                                                        |
 | -------------------------------------------------------------------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -85,6 +85,7 @@ advertise additional inference capabilities.
 | Model catalog                                                        |     1 | Model/algorithm discovery data; does not execute a transform. Its encoded catalog identifies ColorPlus model variants.                                                                  |
 | AI stitch, ColorPlus, defringe, deflicker, JPEG denoise `.ins` files |     6 | Wrapped learned-model resources; require model decoding, inference, and the matching image/temporal pipeline.                                                                           |
 | AI seam CoreML/Espresso constituents                                 |     8 | Complete model data, but no portable graph executor, seam-strip extraction, flow scaling, or compositing implementation.                                                                |
+| Underwater restoration resources                                     |    10 | Original Legacy ILUT and complete nine-member AI group; explicit restoration through scalar CPU and optional independent MNN.                                                           |
 | Studio sharpening JSON                                               |     1 | X5 perspective-output tuning at heights 1080/2160 and FOVs 20/40/60/75 degrees. Strength becomes zero at 75 degrees; applying it to 360-degree output would add no intended sharpening. |
 
 The SVM reader accepts the bundled schema's direct support-vector/alpha order.
@@ -122,3 +123,20 @@ release qualification. CPU and Metal HEVC exports also decode all three frames
 with the expected Auto and Preserve color tags. Video tests used VideoToolbox
 because the local bundled FFmpeg runtime does not provide a software HEVC
 encoder.
+
+## Underwater restoration
+
+`StitchConfig.underwater_color` defaults to Off. Legacy and AI are explicit
+selections with strict mode-specific controls. The shared
+`UnderwaterColorSession` prepares verified resources once, processes packed RGB8
+without moving pixels, and retains bounded temporal state. Export jobs reset it
+at recording boundaries and before independent selected images; GPU stitching
+uses the same CPU restoration after readback. Typed GPU retry recreates the
+entire attempt, including color state. See [housings](housings.md) for exact
+resource provenance, formulas, defaults and qualification limits.
+
+The legacy underwater ILUT is distinct from ordinary I-Log conversion and from
+Studio's alternate `Contents/data/models/underwater.ilut`. AI loads verified
+original model 197/198, the diving feature database and all four style presets.
+No Insta360 runtime library is loaded. MNN is an optional independently compiled
+CPU dependency, pinned by source commit and archive digest.

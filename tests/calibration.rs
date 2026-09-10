@@ -1,3 +1,4 @@
+use insta360_rs::{Environment, Housing, LensAccessory};
 use std::fs::File;
 use std::path::Path;
 
@@ -9,7 +10,7 @@ use insta360_rs::container::{
     EmbeddedOffset, EmbeddedProfile, GuardDetectedType, InsvMetadata, OffsetState,
 };
 use insta360_rs::{
-    CalibrationPolicy, CalibrationResolver, CameraModel, Error, InsvReader, OpticalSetup,
+    CalibrationPolicy, CalibrationResolver, CameraModel, Error, InsvReader, OpticalSelection,
 };
 
 const FLAGS: u32 = 0x400;
@@ -158,7 +159,10 @@ fn parses_the_four_real_offset_layouts() {
     for (version, value, model, coefficient_count, xi) in cases {
         let candidate = CalibrationCandidate::new(version, Some("bare".into()), value);
         let result = resolver
-            .resolve(&[candidate], &OpticalSetup::BareAir)
+            .resolve(
+                &[candidate],
+                &OpticalSelection::new(Housing::None, Environment::Air),
+            )
             .expect("valid offset should parse");
 
         assert_eq!(result.offset_version, version);
@@ -176,22 +180,104 @@ fn parses_the_four_real_offset_layouts() {
 }
 
 #[test]
-fn v1_is_parseable_but_rejected_by_stitch_preflight() {
+fn v1_retains_native_fields_and_prepares_the_explicit_native_default() {
     let result = CalibrationResolver::default()
+        .resolve(
+            &[CalibrationCandidate::new(1, None, v1_offset(40.0, 78))],
+            &OpticalSelection::default(),
+        )
+        .expect("V1 metadata remains inspectable");
+
+    result.validate_for_stitching().unwrap();
+    let lens = &result.lenses[0];
+    assert_eq!(lens.radius, Some(40.0));
+    assert_eq!(lens.fx, 40.0);
+    assert!(lens.distortion_coefficients.is_empty());
+    let prepared = lens.polynomial_projection.unwrap();
+    assert_eq!(
+        prepared.coefficient_source,
+        insta360_rs::PolynomialCoefficientSource::NativeDefault
+    );
+    assert!(prepared.reference_fov_from_default);
+    assert_eq!(prepared.coefficients, [1.0, 0.0, 0.0, 0.0]);
+    assert!((prepared.focal_scale - 2.0 / 190.0_f64.to_radians()).abs() < 1.0e-12);
+}
+
+#[test]
+fn polynomial_serde_compatibility_requires_refresh_and_preserves_encoded_fields() {
+    let calibration = CalibrationResolver::default()
         .resolve(
             &[CalibrationCandidate::new(
                 1,
                 Some("bare".into()),
                 v1_offset(40.0, 113),
             )],
-            &OpticalSetup::BareAir,
+            &OpticalSelection::new(Housing::None, Environment::Air),
         )
-        .expect("V1 metadata remains inspectable");
+        .unwrap();
+    let prepared = calibration.lenses[0].polynomial_projection.unwrap();
+    assert_eq!(
+        prepared.coefficient_source,
+        insta360_rs::PolynomialCoefficientSource::NativeLensTable
+    );
+    assert_eq!(prepared.reference_full_fov_degrees, 200.0);
+    assert!(!prepared.reference_fov_from_default);
+    let mut encoded = serde_json::to_value(&calibration).unwrap();
+    for lens in encoded["lenses"].as_array_mut().unwrap() {
+        lens.as_object_mut()
+            .unwrap()
+            .remove("polynomial_projection");
+    }
+    let mut restored: insta360_rs::ResolvedCalibration = serde_json::from_value(encoded).unwrap();
+    assert!(restored.validate_for_stitching().is_err());
+    for lens in &mut restored.lenses {
+        lens.validate().expect("old metadata is still inspectable");
+        lens.refresh_polynomial_projection().unwrap();
+    }
+    restored.validate_for_stitching().unwrap();
+    assert_eq!(restored.raw_offset, calibration.raw_offset);
+    assert_eq!(restored.lenses[0].radius, Some(40.0));
+    assert!(restored.lenses[0].distortion_coefficients.is_empty());
+    assert_eq!(restored.lenses[0].polynomial_projection, Some(prepared));
+}
 
-    let error = result
-        .validate_for_stitching()
-        .expect_err("V1 projection must fail before rendering");
-    assert!(matches!(error, Error::MissingCalibration(message) if message.contains("parse-only")));
+#[test]
+fn singular_v2_polynomial_stays_inspectable_but_cannot_render() {
+    let calibration = CalibrationResolver::default()
+        .resolve(
+            &[CalibrationCandidate::new(
+                2,
+                Some("bare".into()),
+                v2_offset(45.0, 113),
+            )],
+            &OpticalSelection::new(Housing::None, Environment::Air),
+        )
+        .unwrap();
+    assert_eq!(
+        calibration.lenses[0].distortion_coefficients,
+        [1.0, -0.1, 0.01, -0.001]
+    );
+    assert!(calibration.lenses[0].polynomial_projection.is_none());
+    assert!(matches!(
+        calibration.validate_for_stitching(),
+        Err(Error::MissingCalibration(_))
+    ));
+    let frames = [
+        insta360_rs::LensFrame::new(100, 100, vec![100; 30_000]).unwrap(),
+        insta360_rs::LensFrame::new(100, 100, vec![100; 30_000]).unwrap(),
+    ];
+    assert!(matches!(
+        insta360_rs::CpuStitcher::new().stitch_with_orientation(
+            &frames,
+            &calibration,
+            insta360_rs::EquirectangularProjection {
+                width: 64,
+                height: 32
+            },
+            insta360_rs::Orientation::IDENTITY
+        ),
+        Err(Error::MissingCalibration(_))
+    ));
 }
 
 #[test]
@@ -208,7 +294,7 @@ fn deserialized_calibration_requires_its_projection_parameters() {
                     Some("bare".into()),
                     value,
                 )],
-                &OpticalSetup::BareAir,
+                &OpticalSelection::new(Housing::None, Environment::Air),
             )
             .unwrap();
         let mut json = serde_json::to_value(calibration).unwrap();
@@ -230,7 +316,10 @@ fn chooses_the_newest_usable_real_schema() {
     ];
 
     let result = CalibrationResolver::default()
-        .resolve(&candidates, &OpticalSetup::BareAir)
+        .resolve(
+            &candidates,
+            &OpticalSelection::new(Housing::None, Environment::Air),
+        )
         .expect("V3 should be selected after rejecting invalid V6");
 
     assert_eq!(result.offset_version, 3);
@@ -248,7 +337,10 @@ fn rejects_cross_generation_counts_and_mismatched_footer_version() {
 
     for candidate in [wrong_count, wrong_footer] {
         let error = CalibrationResolver::default()
-            .resolve(&[candidate], &OpticalSetup::BareAir)
+            .resolve(
+                &[candidate],
+                &OpticalSelection::new(Housing::None, Environment::Air),
+            )
             .expect_err("schema mismatch must be rejected");
         assert!(matches!(error, Error::MissingCalibration(_)));
     }
@@ -267,10 +359,18 @@ fn metadata_resolution_never_substitutes_original_and_current() {
     let resolver = CalibrationResolver::default();
 
     let current = resolver
-        .resolve_metadata(&metadata, &OpticalSetup::BareAir, OffsetSource::Current)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::new(Housing::None, Environment::Air),
+            OffsetSource::Current,
+        )
         .expect("current offset");
     let original = resolver
-        .resolve_metadata(&metadata, &OpticalSetup::BareAir, OffsetSource::Original)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::new(Housing::None, Environment::Air),
+            OffsetSource::Original,
+        )
         .expect("original offset");
 
     assert_eq!(current.lenses[0].fx, 55.0);
@@ -290,7 +390,7 @@ fn metadata_resolution_accepts_an_already_converted_x5_offset() {
     let result = CalibrationResolver::default()
         .resolve_metadata(
             &metadata,
-            &OpticalSetup::InvisibleDiveCaseUnderwater,
+            &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
             OffsetSource::Current,
         )
         .expect("lens type 117 is already X5 diving-water geometry");
@@ -309,7 +409,11 @@ fn strict_auto_uses_the_encoded_x5_lens_type_when_accessory_state_is_absent() {
     };
 
     let result = CalibrationResolver::default()
-        .resolve_metadata(&metadata, &OpticalSetup::StrictAuto, OffsetSource::Current)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
         .expect("base X5 lens type is unambiguous");
 
     assert_eq!(result.profile_name.as_deref(), Some("bare"));
@@ -333,16 +437,23 @@ fn strict_auto_converts_the_recorded_x5_dive_case_pro_state() {
     };
 
     let result = CalibrationResolver::default()
-        .resolve_metadata(&metadata, &OpticalSetup::StrictAuto, OffsetSource::Current)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
         .expect("recorded Dive Case Pro underwater state is authoritative");
 
-    assert_eq!(result.profile_name.as_deref(), Some("InvisibleDiveWater"));
-    assert!(result.lenses.iter().all(|lens| lens.lens_type == 117));
+    assert_eq!(
+        result.profile_name.as_deref(),
+        Some("InvisibleDiveWaterPro")
+    );
+    assert!(result.lenses.iter().all(|lens| lens.lens_type == 119));
     assert!(result
         .lens_geometry
         .into_iter()
         .flatten()
-        .all(|geometry| !geometry.blend_angle_recorded));
+        .all(|geometry| geometry.blend_angle_recorded));
 }
 
 #[test]
@@ -354,7 +465,11 @@ fn explicit_setup_overrides_recorded_state_and_inconclusive_auto_is_rejected() {
         ..InsvMetadata::default()
     };
     let result = CalibrationResolver::default()
-        .resolve_metadata(&explicit, &OpticalSetup::BareAir, OffsetSource::Current)
+        .resolve_metadata(
+            &explicit,
+            &OpticalSelection::new(Housing::None, Environment::Air),
+            OffsetSource::Current,
+        )
         .expect("an explicit caller selection has highest authority");
     assert_eq!(result.profile_name.as_deref(), Some("bare"));
 
@@ -366,7 +481,7 @@ fn explicit_setup_overrides_recorded_state_and_inconclusive_auto_is_rejected() {
     assert!(CalibrationResolver::default()
         .resolve_metadata(
             &inconclusive,
-            &OpticalSetup::StrictAuto,
+            &OpticalSelection::default(),
             OffsetSource::Current,
         )
         .is_err());
@@ -382,7 +497,11 @@ fn metadata_resolution_uses_the_registered_x3_lens_geometry() {
     };
 
     let result = CalibrationResolver::default()
-        .resolve_metadata(&metadata, &OpticalSetup::StrictAuto, OffsetSource::Current)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
         .expect("X3 aliases and lens ID 70 are registered");
 
     assert_eq!(result.camera_model, Some(CameraModel::X3));
@@ -405,7 +524,7 @@ fn metadata_resolution_rejects_camera_lens_and_setup_mismatches() {
     assert!(CalibrationResolver::default()
         .resolve_metadata(
             &wrong_lens,
-            &OpticalSetup::StrictAuto,
+            &OpticalSelection::default(),
             OffsetSource::Current
         )
         .is_err());
@@ -418,7 +537,7 @@ fn metadata_resolution_rejects_camera_lens_and_setup_mismatches() {
     assert!(CalibrationResolver::default()
         .resolve_metadata(
             &wrong_setup,
-            &OpticalSetup::InvisibleDiveCaseUnderwater,
+            &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
             OffsetSource::Current,
         )
         .is_err());
@@ -444,7 +563,7 @@ fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
     let result = CalibrationResolver::default()
         .resolve_metadata(
             &metadata,
-            &OpticalSetup::InvisibleDiveCaseUnderwater,
+            &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
             OffsetSource::Current,
         )
         .expect("the embedded profiles provide portable conversion geometry");
@@ -488,7 +607,7 @@ fn profile_conversion_requires_both_source_and_target_curves() {
     let error = CalibrationResolver::default()
         .resolve_metadata(
             &metadata,
-            &OpticalSetup::InvisibleDiveCaseUnderwater,
+            &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
             OffsetSource::Current,
         )
         .expect_err("the physical pixel scale requires the encoded setup profile");
@@ -527,7 +646,11 @@ fn supplied_x5_sample_resolves_without_decoding_media() {
     let mut reader = InsvReader::new(file).expect("bounded sample reader");
     let metadata = reader.metadata().expect("sample metadata");
     let calibration = CalibrationResolver::default()
-        .resolve_metadata(&metadata, &OpticalSetup::StrictAuto, OffsetSource::Current)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
         .expect("sample current X5 calibration");
 
     assert_eq!(calibration.offset_version, 6);
@@ -540,16 +663,20 @@ fn supplied_x5_sample_resolves_without_decoding_media() {
     assert_eq!(calibration.lenses[0].distortion_coefficients.len(), 13);
     assert_eq!(
         (calibration.canvas_width, calibration.canvas_height),
-        (10752, 5376)
+        (10624, 5312)
     );
     assert_eq!(
         calibration.profile_name.as_deref(),
-        Some("InvisibleDiveWater")
+        Some("InvisibleDiveWaterPro")
     );
-    assert_eq!(calibration.lenses[0].lens_type, 117);
+    assert_eq!(calibration.lenses[0].lens_type, 119);
 
     let bare = CalibrationResolver::default()
-        .resolve_metadata(&metadata, &OpticalSetup::BareAir, OffsetSource::Current)
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::new(Housing::None, Environment::Air),
+            OffsetSource::Current,
+        )
         .expect("explicit caller setup overrides the recorded accessory state");
     assert_eq!(bare.profile_name.as_deref(), Some("bare"));
     assert_eq!(bare.lenses[0].lens_type, 113);
@@ -579,4 +706,255 @@ fn coefficient_profile(name: &str, coefficients: [f64; 6]) -> EmbeddedProfile {
         name: name.into(),
         payload,
     }
+}
+
+#[test]
+fn pro_housing_revisions_have_distinct_geometry_and_do_not_double_convert() {
+    for (state, housing, environment, id, name) in [
+        (
+            OffsetState::DiveCase2023Underwater,
+            Housing::InvisibleDiveCase,
+            Environment::Underwater,
+            117,
+            "InvisibleDiveWater",
+        ),
+        (
+            OffsetState::DiveCaseProUnderwater,
+            Housing::DiveCasePro,
+            Environment::Underwater,
+            119,
+            "InvisibleDiveWaterPro",
+        ),
+        (
+            OffsetState::DiveCaseProAboveWater,
+            Housing::DiveCasePro,
+            Environment::Air,
+            120,
+            "InvisibleDiveAirPro",
+        ),
+    ] {
+        let raw = v6_offset(55.0, id);
+        let metadata = InsvMetadata {
+            camera_name: Some("Insta360 X5".into()),
+            offsets: vec![offset(6, false, raw.clone())],
+            offset_state: Some(state),
+            ..InsvMetadata::default()
+        };
+        let result = CalibrationResolver::default()
+            .resolve_metadata(
+                &metadata,
+                &OpticalSelection::default(),
+                OffsetSource::Current,
+            )
+            .unwrap();
+        assert_eq!(result.raw_offset, raw);
+        assert_eq!(result.lenses[0].fx, 55.0);
+        assert_eq!(result.profile_name.as_deref(), Some(name));
+        let resolution = result.optical_resolution.unwrap();
+        assert_eq!(resolution.effective.housing, housing);
+        assert_eq!(resolution.effective.environment, environment);
+        assert_eq!(
+            (resolution.source_lens_id, resolution.target_lens_id),
+            (id, id)
+        );
+    }
+    let original = v6_offset(55.0, 113);
+    let metadata = InsvMetadata {
+        camera_name: Some("Insta360 X5".into()),
+        offsets: vec![offset(6, false, original)],
+        offset_state: Some(OffsetState::DiveCaseProUnderwater),
+        ..InsvMetadata::default()
+    };
+    let resolver = CalibrationResolver::default();
+    let underwater = resolver
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
+        .unwrap();
+    let air = resolver
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection {
+                environment: Environment::Air,
+                ..OpticalSelection::default()
+            },
+            OffsetSource::Current,
+        )
+        .unwrap();
+    assert_eq!(underwater.lenses[0].lens_type, 119);
+    assert_eq!(air.lenses[0].lens_type, 120);
+    assert_ne!(underwater.lenses[0].fx, air.lenses[0].fx);
+    assert_eq!(underwater.lenses[0].cx, air.lenses[0].cx);
+    assert_eq!(underwater.lenses[0].orientation, air.lenses[0].orientation);
+    assert_eq!(underwater.lenses[0].translation, air.lenses[0].translation);
+    assert_eq!(
+        underwater.lenses[0].distortion_coefficients[5..],
+        air.lenses[0].distortion_coefficients[5..]
+    );
+}
+
+#[test]
+fn explicit_optics_override_unknown_detection_and_conflicts_are_typed() {
+    let metadata = InsvMetadata {
+        camera_name: Some("Insta360 X5".into()),
+        offsets: vec![offset(6, false, v6_offset(55.0, 113))],
+        offset_state: Some(OffsetState::Automatic),
+        guard_detected_type: Some(GuardDetectedType::Unknown),
+        ..InsvMetadata::default()
+    };
+    let resolver = CalibrationResolver::default();
+    assert!(resolver
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current
+        )
+        .is_err());
+    assert_eq!(
+        resolver
+            .resolve_metadata(
+                &metadata,
+                &OpticalSelection::new(Housing::None, Environment::Air),
+                OffsetSource::Current
+            )
+            .unwrap()
+            .lenses[0]
+            .lens_type,
+        113
+    );
+    let contradictory = OpticalSelection {
+        lens_accessory: LensAccessory::ProtectorA,
+        ..OpticalSelection::new(Housing::DiveCasePro, Environment::Underwater)
+    };
+    assert!(matches!(
+        resolver.resolve_metadata(&metadata, &contradictory, OffsetSource::Current),
+        Err(Error::ConflictingOptics { .. })
+    ));
+}
+
+#[test]
+fn sensor_crop_is_center_aware_and_does_not_crop_an_encoded_canvas_twice() {
+    let original = CalibrationResolver::default()
+        .resolve_embedded_offset(
+            &offset(6, false, v6_offset(55.0, 113)),
+            &OpticalSelection::default(),
+        )
+        .unwrap();
+    let width = original.canvas_width / 2;
+    let height = original.canvas_height;
+    let crop = insta360_rs::container::CropWindow {
+        source_width: width,
+        source_height: height,
+        destination_width: width - 8,
+        destination_height: height - 12,
+        x_offset: 2,
+        y_offset: -3,
+        unknown_fields: vec![],
+    };
+    let mut metadata = InsvMetadata {
+        camera_name: Some("Insta360 X5".into()),
+        offsets: vec![offset(6, false, original.raw_offset.clone())],
+        crop_window: Some(crop.clone()),
+        ..InsvMetadata::default()
+    };
+    let cropped = CalibrationResolver::default()
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
+        .unwrap();
+    assert_eq!(cropped.canvas_width, 2 * (width - 8));
+    assert_eq!(cropped.canvas_height, height - 12);
+    for i in 0..2 {
+        assert_eq!(
+            cropped.lenses[i].cx,
+            original.lenses[i].cx - 6.0 - i as f64 * 8.0
+        );
+        assert_eq!(cropped.lenses[i].cy, original.lenses[i].cy - 3.0);
+        assert_eq!(cropped.lenses[i].fx, original.lenses[i].fx);
+        assert_eq!(
+            cropped.lenses[i].distortion_coefficients,
+            original.lenses[i].distortion_coefficients
+        );
+    }
+    assert!(
+        cropped
+            .optical_resolution
+            .as_ref()
+            .unwrap()
+            .sensor_crop_applied
+    );
+    // Construct a recorded offset already in the destination canvas, independently
+    // of the normalization routine and its raw-offset serialization behavior.
+    let fields = metadata.offsets[0]
+        .value
+        .split('_')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut fields = fields;
+    for start in [1, 28] {
+        fields[start + 24] = (2 * (width - 8)).to_string();
+        fields[start + 25] = (height - 12).to_string();
+    }
+    metadata.offsets[0].value = fields.join("_");
+    let already = CalibrationResolver::default()
+        .resolve_metadata(
+            &metadata,
+            &OpticalSelection::default(),
+            OffsetSource::Current,
+        )
+        .unwrap();
+    assert!(!already.optical_resolution.unwrap().sensor_crop_applied);
+    assert_eq!(already.lenses[0].cx, original.lenses[0].cx);
+}
+
+#[test]
+fn optical_configuration_serialization_and_concurrent_resolution_stress() {
+    let old = serde_json::json!({"optical_setup":"StrictAuto","calibration_policy":"PreferNewest","stabilization":"Off","seam_mode":"Fixed","backend":"Cpu","projection":null});
+    assert!(serde_json::from_value::<insta360_rs::StitchConfig>(old)
+        .unwrap_err()
+        .to_string()
+        .contains("optical_setup"));
+    let config = insta360_rs::StitchConfig::underwater_photogrammetry(Housing::Auto).unwrap();
+    assert_eq!(config.environment, Environment::Underwater);
+    assert_eq!(config.housing, Housing::Auto);
+    assert_eq!(
+        config.underwater_color.mode,
+        insta360_rs::UnderwaterColorMode::Off
+    );
+    assert_eq!(
+        serde_json::from_str::<insta360_rs::StitchConfig>(&serde_json::to_string(&config).unwrap())
+            .unwrap(),
+        config
+    );
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                let metadata = InsvMetadata {
+                    camera_name: Some("Insta360 X5".into()),
+                    offsets: vec![offset(6, false, v6_offset(55.0, 119))],
+                    offset_state: Some(OffsetState::DiveCaseProUnderwater),
+                    ..InsvMetadata::default()
+                };
+                for _ in 0..256 {
+                    let value = CalibrationResolver::default()
+                        .resolve_metadata(
+                            &metadata,
+                            &OpticalSelection::default(),
+                            OffsetSource::Current,
+                        )
+                        .unwrap();
+                    assert_eq!(value.lenses[0].lens_type, 119);
+                    assert_eq!(value.lenses[0].fx, 55.0);
+                    assert_eq!(
+                        value.optical_resolution.unwrap().effective.housing,
+                        Housing::DiveCasePro
+                    );
+                }
+            });
+        }
+    });
 }

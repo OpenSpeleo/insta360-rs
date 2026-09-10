@@ -76,6 +76,8 @@ pub struct VideoPreflight {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaCapabilities {
+    /// Independent MNN CPU inference is compiled into this build.
+    pub underwater_ai_compiled: bool,
     pub image_export: bool,
     pub video_export: bool,
     pub gpu_compiled: bool,
@@ -120,6 +122,7 @@ impl MediaCapabilities {
         };
 
         Self {
+            underwater_ai_compiled: cfg!(feature = "underwater-ai"),
             image_export: initialized,
             video_export: !hevc_encoders.is_empty(),
             gpu_compiled: cfg!(feature = "gpu"),

@@ -1,0 +1,15 @@
+---
+name: Set up MNN
+description: Verified static CPU MNN for optional underwater inference
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/insta360-mnn
+        key: mnn-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci/build-mnn.py', 'build.rs') }}
+    - name: Verify or build the pinned CPU engine
+      shell: bash
+      run: |
+        python scripts/ci/build-mnn.py --output "$RUNNER_TEMP/insta360-mnn" --jobs 2
+        echo "MNN_ROOT=$RUNNER_TEMP/insta360-mnn" >> "$GITHUB_ENV"

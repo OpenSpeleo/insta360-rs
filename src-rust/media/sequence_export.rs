@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::media::VideoPreflight;
-use crate::paired::{FramePair, PairedReader};
+use crate::paired::{DecodedLayout, PairedReader};
 use crate::{RecordingSequence, Stabilization};
 
 pub(in crate::media) fn preflight_video(
@@ -39,6 +39,7 @@ fn inspect_video(
     config: &StitchConfig,
     options: &VideoExportOptions,
 ) -> Result<VideoPreflight> {
+    config.underwater_color.validate_capabilities()?;
     let first = sequence
         .chapters
         .first()
@@ -55,12 +56,7 @@ fn inspect_video(
             "required rolling-shutter correction conflicts with disabled stabilization".into(),
         ));
     }
-    let first_width = first
-        .inspection
-        .video_tracks
-        .first()
-        .ok_or_else(|| Error::InvalidMedia("recording has no video tracks".into()))?
-        .width;
+    let first_width = DecodedLayout::inspect(first)?.lens_width(first);
     let projection = options
         .projection
         .or(config.projection)
@@ -84,27 +80,11 @@ fn inspect_video(
             Error::InvalidMedia("HEVC export requires a known positive source frame rate".into())
         })?;
     for chapter in &sequence.chapters {
-        if chapter.inputs.paths().len() != 1 {
-            return Err(Error::MissingCapability(
-                "stitched export requires single-file dual-track chapters".into(),
-            ));
-        }
-        validate_x5_source(&SourceData {
-            inspection: chapter.inspection.clone(),
-            stabilizer: None,
-        })?;
-        if chapter
-            .inspection
-            .metadata
-            .reverse_video_track_order
-            .is_none()
-        {
-            return Err(Error::MissingCapability(
-                "recording does not declare which video track belongs to camera A/B".into(),
-            ));
-        }
+        DecodedLayout::inspect(chapter)?;
+        validate_source_color(chapter)?;
         resolve_calibration(&chapter.inspection.metadata, config)?.validate_for_stitching()?;
         resolve_color_lut(&chapter.inspection.metadata, config.color_conversion)?;
+        PairedReader::validate_chapter(chapter)?;
         if chapter
             .inspection
             .fps
@@ -206,6 +186,11 @@ fn export_attempt(
         stitcher.report.clone(),
     )));
     let report = inspect_video(sequence, config, options)?;
+    let mut underwater = underwater_color::UnderwaterProcessor::new(
+        config.underwater_color,
+        Some(report.frame_rate),
+    )?;
+    stitcher.force_rgb = underwater.enabled();
     for warning in &report.warnings {
         context.emit(ExportEvent::Warning(warning.clone()));
     }
@@ -276,6 +261,7 @@ fn export_attempt(
                 }
             }
             stabilizer = current;
+            underwater.reset();
             calibration = Some(resolve_calibration(&chapter.inspection.metadata, config)?);
             stitcher.set_color_lut(resolve_color_lut(
                 &chapter.inspection.metadata,
@@ -309,6 +295,13 @@ fn export_attempt(
             projection,
             &motion,
         )?;
+        let panorama = match panorama {
+            StitchedVideoFrame::Rgb(frame) => {
+                StitchedVideoFrame::Rgb(underwater.process(frame, media_time.as_micros() as i64)?)
+            }
+            #[cfg(feature = "gpu")]
+            frame @ StitchedVideoFrame::Yuv420(_) => frame,
+        };
         context.check_cancelled()?;
         let writer = match &mut writer {
             Some(writer) => writer,
@@ -375,17 +368,8 @@ fn export_attempt(
         frames_written,
         elapsed: started.elapsed(),
         backend: stitcher.report,
+        optics: calibration.and_then(|calibration| calibration.optical_resolution),
     })
-}
-
-fn native_pair(pair: FramePair) -> SynchronizedPair {
-    SynchronizedPair {
-        timestamp: FrameTimestamp::Pts(pair.timestamp_micros),
-        frames: [
-            DecodedVideoFrame::new(pair.a),
-            DecodedVideoFrame::new(pair.b),
-        ],
-    }
 }
 
 struct ProgressGate {

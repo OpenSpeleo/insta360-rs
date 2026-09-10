@@ -1,6 +1,10 @@
 # Performance
 
-## Version 0.1.0 benchmarks (2026-09-09)
+## Historical version 0.1.0 benchmarks (2026-09-09)
+
+These measurements predate the corrected Pro lens ID, sensor-crop mapping and
+prepared radial masks. They describe the earlier implementation and are not a
+performance or quality baseline for the current housing pipeline.
 
 The repaired macOS ARM64 wheel was measured on an Apple M4 Pro with 24 GiB RAM,
 using release Rust 1.97.1, bundled FFmpeg 8.1.2, and software libx265 at
@@ -66,10 +70,11 @@ arithmetic or address-space limits return an error. These checks do not replace
 the caller's memory budget for concurrent exports.
 
 The current GPU path blocks after every submission for readback. Video YUV is
-copied from the mapped readback into an FFmpeg frame, and hardware decode/native
-codec surface sharing are not implemented. These synchronization and transfer
-costs can dominate smaller outputs, so adapter discovery or successful shader
-tests do not establish an end-to-end speedup.
+copied from the mapped readback into an FFmpeg frame. Export decoding is
+software; random-access previews have a separate hardware-decoding policy.
+Native codec surface sharing is not implemented. These synchronization and
+transfer costs can dominate smaller outputs, so adapter discovery or successful
+shader tests do not establish an end-to-end speedup.
 
 ## Stabilization preparation and readout cost
 

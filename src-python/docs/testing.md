@@ -20,10 +20,12 @@ The runner:
 1. Requires Cargo, `ffmpeg`, and `ffprobe`, then snapshots the workspace into a
    temporary directory. It stages byte-identical project notices at the same
    distinct package paths used by release builders, avoiding collisions with
-   root Cargo notices, and builds a wheel and source archive using PEP 517 build
-   isolation.
+   root Cargo notices. It requires the pinned CPU prefix in `MNN_ROOT`, copies
+   its original MNN license and third-party notices, and builds a wheel and
+   source archive using PEP 517 build isolation.
 2. Verifies stable ABI tags, distribution metadata, license/notice files, native
-   module, type stubs, and `py.typed`; rejects leaked development artifacts.
+   module, type stubs, and `py.typed`; requires both MNN notices under the
+   distribution's licenses directory and rejects leaked development artifacts.
 3. Checks that the source archive includes docs, tests, build scripts, core Rust
    sources, and byte-identical embedded assets.
 4. Installs the wheel without dependencies in a fresh virtual environment and
@@ -133,3 +135,19 @@ behavior. They do not establish real-camera stitch quality, every codec's
 behavior, cross-platform GPU correctness, or independence from the host's shared
 libraries. See the broader [Rust test strategy](../../docs/testing.md) and
 [wheel release qualification](../../docs/packaging.md#python-wheels).
+
+## Housing and restoration coverage
+
+Rebuild the extension after calibration or processor changes. The full suite
+checks all housing/environment/accessory enum mappings, strict option controls,
+read-only probe and export optical reports, and actual Legacy/AI image exports.
+Each of four AI styles executes inference; independent selected-image exports
+must reset temporal state, and zero restoration strength preserves exact output.
+CI requires a usable GPU and the AI engine on every Python 3.10–3.14 wheel-test
+row through `INSTA360_RS_REQUIRE_GPU=1` and
+`INSTA360_RS_REQUIRE_UNDERWATER_AI=1`. Installation alone is not the matrix
+test.
+
+Source and all-feature builds need the pinned MNN prefix in `MNN_ROOT`; see
+[installation](installation.md). Plain Rust binding tests omit wheel-only
+`extension-module`, as before.

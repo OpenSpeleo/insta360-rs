@@ -27,8 +27,13 @@ impl AudioLayout {
     pub fn inspect(sequence: &RecordingSequence) -> Result<Self> {
         let mut chapters: Vec<AudioChapter> = Vec::with_capacity(sequence.chapters.len());
         for chapter in &sequence.chapters {
-            let input = crate::stream::open_input(&chapter.inputs.paths()[0])?;
-            let video = input
+            let inputs = chapter
+                .inputs
+                .paths()
+                .iter()
+                .map(|path| crate::stream::open_input(path))
+                .collect::<Result<Vec<_>>>()?;
+            let video = inputs[0]
                 .streams()
                 .find(|stream| stream.parameters().medium() == ffmpeg::media::Type::Video)
                 .ok_or_else(|| {
@@ -43,32 +48,40 @@ impl AudioLayout {
                 )
             };
             let mut tracks = Vec::new();
-            for stream in input
-                .streams()
-                .filter(|stream| stream.parameters().medium() == ffmpeg::media::Type::Audio)
-            {
-                let parameters = stream.parameters().clone();
-                if !matches!(
-                    parameters.id(),
-                    ffmpeg::codec::Id::AAC | ffmpeg::codec::Id::ALAC
-                ) {
-                    return Err(Error::MissingCapability(format!("original {} audio cannot currently be copied into stitched MP4; disable original audio", parameters.id().name())));
+            let mut stream_offset = 0;
+            for input in &inputs {
+                for stream in input
+                    .streams()
+                    .filter(|stream| stream.parameters().medium() == ffmpeg::media::Type::Audio)
+                {
+                    let parameters = stream.parameters().clone();
+                    if !matches!(
+                        parameters.id(),
+                        ffmpeg::codec::Id::AAC | ffmpeg::codec::Id::ALAC
+                    ) {
+                        return Err(Error::MissingCapability(format!(
+                            "original {} audio cannot currently be copied into stitched MP4; disable original audio",
+                            parameters.id().name()
+                        )));
+                    }
+                    if stream.time_base().numerator() <= 0 || stream.time_base().denominator() <= 0
+                    {
+                        return Err(Error::InvalidMedia(
+                            "audio stream has an invalid time base".into(),
+                        ));
+                    }
+                    // SAFETY: the input owns this live stream, and only the scalar
+                    // disposition value is retained; parameters and tags are cloned.
+                    let disposition = unsafe { (*stream.as_ptr()).disposition };
+                    tracks.push(AudioTrack {
+                        source_index: stream_offset + stream.index(),
+                        time_base: stream.time_base(),
+                        parameters,
+                        metadata: stream.metadata().to_owned(),
+                        disposition,
+                    });
                 }
-                if stream.time_base().numerator() <= 0 || stream.time_base().denominator() <= 0 {
-                    return Err(Error::InvalidMedia(
-                        "audio stream has an invalid time base".into(),
-                    ));
-                }
-                // SAFETY: the input owns this live stream, and only the scalar
-                // disposition value is retained; parameters and tags are cloned.
-                let disposition = unsafe { (*stream.as_ptr()).disposition };
-                tracks.push(AudioTrack {
-                    source_index: stream.index(),
-                    time_base: stream.time_base(),
-                    parameters,
-                    metadata: stream.metadata().to_owned(),
-                    disposition,
-                });
+                stream_offset += input.nb_streams() as usize;
             }
             if let Some(first) = chapters.first() {
                 if tracks.len() != first.tracks.len()

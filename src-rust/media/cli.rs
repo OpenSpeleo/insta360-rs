@@ -6,10 +6,11 @@ use std::time::Duration;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
-    probe, AudioPolicy, BackendReport, ColorConversion, EffectiveBackend,
-    EquirectangularProjection, ExportResult, FrameSelection, ImageExportOptions, InputSet,
-    MediaAcceleration, OpticalSetup, ProcessingBackend, RollingShutterCorrection, Stabilization,
-    StitchConfig, VideoExportOptions,
+    probe, AudioPolicy, BackendReport, ColorConversion, EffectiveBackend, Environment,
+    EquirectangularProjection, ExportResult, FrameSelection, Housing, ImageExportOptions, InputSet,
+    LensAccessory, MediaAcceleration, MountingAccessory, ProcessingBackend,
+    RollingShutterCorrection, Stabilization, StitchConfig, UnderwaterColorMode,
+    UnderwaterColorOptions, VideoExportOptions,
 };
 
 use super::{ExportEvent, ExportJob, Exporter, MediaCapabilities};
@@ -91,8 +92,22 @@ enum Command {
 
 #[derive(Clone, Debug, clap::Args)]
 struct StitchArguments {
-    #[arg(long, value_enum, default_value_t = CliOpticalSetup::StrictAuto)]
-    optical_setup: CliOpticalSetup,
+    #[arg(long, value_enum, default_value_t = Housing::Auto)]
+    housing: Housing,
+    #[arg(long, value_enum, default_value_t = Environment::Auto)]
+    environment: Environment,
+    #[arg(long, value_enum, default_value_t = LensAccessory::Auto)]
+    lens_accessory: LensAccessory,
+    #[arg(long, value_enum, default_value_t = MountingAccessory::Auto)]
+    mounting_accessory: MountingAccessory,
+    #[arg(long, value_enum, default_value_t = UnderwaterColorMode::Off)]
+    underwater_color: UnderwaterColorMode,
+    #[arg(long)]
+    underwater_strength: Option<f32>,
+    #[arg(long)]
+    underwater_balance: Option<f32>,
+    #[arg(long)]
+    underwater_style: Option<u32>,
     #[arg(long, value_enum, default_value_t = CliStabilization::DirectionLock)]
     stabilization: CliStabilization,
     /// Correct motion during sensor readout (requires stabilization).
@@ -103,28 +118,6 @@ struct StitchArguments {
     /// Convert identified I-Log to Rec.709 automatically, preserve it, or request conversion explicitly.
     #[arg(long, value_enum, default_value_t = CliColorConversion::Auto)]
     color_conversion: CliColorConversion,
-}
-
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliOpticalSetup {
-    #[default]
-    StrictAuto,
-    BareAir,
-    BareUnderwater,
-    WaterproofCase,
-    DiveCaseAir,
-    DiveCaseUnderwater,
-    InvisibleDiveCaseAir,
-    InvisibleDiveCaseUnderwater,
-    ClipOnLensGuard,
-    AdhesiveSphereLensGuard,
-    ProtectorA,
-    ProtectorS,
-    ProtectorAs,
-    Nd16,
-    Nd32,
-    Nd64,
-    Nd128,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -178,26 +171,15 @@ enum CliMediaAcceleration {
 impl StitchArguments {
     fn config(&self) -> StitchConfig {
         StitchConfig {
-            optical_setup: match self.optical_setup {
-                CliOpticalSetup::StrictAuto => OpticalSetup::StrictAuto,
-                CliOpticalSetup::BareAir => OpticalSetup::BareAir,
-                CliOpticalSetup::BareUnderwater => OpticalSetup::BareUnderwater,
-                CliOpticalSetup::WaterproofCase => OpticalSetup::WaterproofCase,
-                CliOpticalSetup::DiveCaseAir => OpticalSetup::DiveCaseAir,
-                CliOpticalSetup::DiveCaseUnderwater => OpticalSetup::DiveCaseUnderwater,
-                CliOpticalSetup::InvisibleDiveCaseAir => OpticalSetup::InvisibleDiveCaseAir,
-                CliOpticalSetup::InvisibleDiveCaseUnderwater => {
-                    OpticalSetup::InvisibleDiveCaseUnderwater
-                }
-                CliOpticalSetup::ClipOnLensGuard => OpticalSetup::ClipOnLensGuard,
-                CliOpticalSetup::AdhesiveSphereLensGuard => OpticalSetup::AdhesiveSphereLensGuard,
-                CliOpticalSetup::ProtectorA => OpticalSetup::ProtectorA,
-                CliOpticalSetup::ProtectorS => OpticalSetup::ProtectorS,
-                CliOpticalSetup::ProtectorAs => OpticalSetup::ProtectorAS,
-                CliOpticalSetup::Nd16 => OpticalSetup::Nd16,
-                CliOpticalSetup::Nd32 => OpticalSetup::Nd32,
-                CliOpticalSetup::Nd64 => OpticalSetup::Nd64,
-                CliOpticalSetup::Nd128 => OpticalSetup::Nd128,
+            housing: self.housing,
+            environment: self.environment,
+            lens_accessory: self.lens_accessory,
+            mounting_accessory: self.mounting_accessory,
+            underwater_color: UnderwaterColorOptions {
+                mode: self.underwater_color,
+                strength: self.underwater_strength,
+                balance: self.underwater_balance,
+                style: self.underwater_style,
             },
             stabilization: match self.stabilization {
                 CliStabilization::Off => Stabilization::Off,
@@ -562,6 +544,65 @@ mod tests {
                 };
                 assert_eq!(stitch.config().color_conversion, expected);
             }
+        }
+    }
+
+    #[test]
+    fn optical_and_restoration_controls_reach_both_export_configs() {
+        for command in ["export-frames", "export-video"] {
+            let arguments = Arguments::try_parse_from([
+                "insta360-rs",
+                command,
+                "source.insv",
+                "output",
+                "--housing",
+                "dive-case-pro",
+                "--environment",
+                "underwater",
+                "--lens-accessory",
+                "none",
+                "--mounting-accessory",
+                "dive-buddy",
+                "--underwater-color",
+                "legacy",
+                "--underwater-strength",
+                "0.4",
+                "--underwater-balance",
+                "0.7",
+            ])
+            .unwrap();
+            let stitch = match arguments.command {
+                Command::ExportFrames { stitch, .. } | Command::ExportVideo { stitch, .. } => {
+                    stitch
+                }
+                _ => unreachable!(),
+            };
+            let config = stitch.config();
+            assert_eq!(config.housing, Housing::DiveCasePro);
+            assert_eq!(config.environment, Environment::Underwater);
+            assert_eq!(config.lens_accessory, LensAccessory::None);
+            assert_eq!(config.mounting_accessory, MountingAccessory::DiveBuddy);
+            assert_eq!(config.underwater_color.mode, UnderwaterColorMode::Legacy);
+            assert_eq!(config.underwater_color.strength, Some(0.4));
+            assert_eq!(config.underwater_color.balance, Some(0.7));
+            assert_eq!(config.underwater_color.style, None);
+            config.underwater_color.validate().unwrap();
+        }
+        for (flag, value) in [
+            ("--optical-setup", "strict-auto"),
+            ("--housing", "unknown"),
+            ("--environment", "sea"),
+            ("--underwater-color", "colorplus"),
+        ] {
+            assert!(Arguments::try_parse_from([
+                "insta360-rs",
+                "export-video",
+                "source.insv",
+                "output.mp4",
+                flag,
+                value
+            ])
+            .is_err());
         }
     }
 

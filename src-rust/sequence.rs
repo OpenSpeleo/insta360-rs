@@ -329,7 +329,9 @@ fn chapter_group(chapter: &RecordingChapter) -> Result<&RecordingGroup> {
 
 fn validate_sequence_metadata(inspection: &InsvInspection) -> Result<()> {
     if inspection.metadata.sequence_metadata_invalid {
-        Err(invalid("recording has malformed or conflicting sequence metadata; select a single chapter explicitly"))
+        Err(invalid(
+            "recording has malformed or conflicting sequence metadata; select a single chapter explicitly",
+        ))
     } else {
         Ok(())
     }
@@ -358,6 +360,34 @@ fn inspect_chapter(inputs: InputSet) -> Result<RecordingChapter> {
         {
             return Err(invalid(
                 "simultaneous lens files disagree about recording identity",
+            ));
+        }
+        if inspection.duration != secondary.duration
+            || inspection.fps != secondary.fps
+            || !inspection
+                .video_tracks
+                .iter()
+                .map(|track| (track.width, track.height))
+                .eq(secondary
+                    .video_tracks
+                    .iter()
+                    .map(|track| (track.width, track.height)))
+            || inspection.metadata.crop_window != secondary.metadata.crop_window
+            || inspection.metadata.file_rotation != secondary.metadata.file_rotation
+            || inspection.metadata.stream_type != secondary.metadata.stream_type
+            || inspection.metadata.pano_record_type != secondary.metadata.pano_record_type
+            || inspection.metadata.gamma_mode != secondary.metadata.gamma_mode
+            || inspection.metadata.recorded_color_mode != secondary.metadata.recorded_color_mode
+            || inspection.metadata.recorded_color_mode_invalid
+                != secondary.metadata.recorded_color_mode_invalid
+            || (!secondary.metadata.offsets.is_empty()
+                && inspection.metadata.offsets != secondary.metadata.offsets)
+            || (!secondary.metadata.profiles.is_empty()
+                && inspection.metadata.profiles != secondary.metadata.profiles)
+            || inspection.metadata.offset_state != secondary.metadata.offset_state
+        {
+            return Err(invalid(
+                "simultaneous lens files disagree about video timing, geometry, calibration, or color",
             ));
         }
     }

@@ -27,7 +27,7 @@ moves, update the trusted-publisher registrations in both registries.
    [PyPI's setup guide](https://docs.pypi.org/trusted-publishers/adding-a-publisher/)
    and
    [new-project guide](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
-3. Configure all three crates.io crates' GitHub trusted publishers with owner
+3. Configure all six crates.io crates' GitHub trusted publishers with owner
    `OpenSpeleo`, repository `insta360-rs`, workflow filename `release.yml`, and
    environment `crates-io`. Each first crate version must be published manually
    before its registration can be created; see the bootstrap procedure below and
@@ -43,22 +43,21 @@ job receives `actions: write`; release's CI verification and Linux build jobs
 receive `actions: read` to inspect the run and retrieve its FFmpeg SDK. Build
 jobs have read-only repository permissions.
 
-The library depends on `insta360-rs-data-core` and
-`insta360-rs-data-enhancement`; all three packages must be available on
-crates.io. Every compressed archive must be strictly below **10,000,000 bytes**.
-The [packaging verifier](../scripts/ci/check-packages.py) checks all archives
-before any upload, including builds and tests using only extracted package
-contents. The split preserves all resources without a registry size-limit
-exception.
+The library depends on five `insta360-rs-data-*` packages; all six published
+packages must be available on crates.io. Every compressed archive must be
+strictly below **10,000,000 bytes**. The
+[packaging verifier](../scripts/ci/check-packages.py) checks all archives before
+any upload, including builds and tests using only extracted package contents.
+The split preserves all resources without a registry size-limit exception.
 
-The repository is an independent Cargo workspace containing the library, both
+The repository is an independent Cargo workspace containing the library, five
 data crates, and the Python extension. The extension has `publish = false`, so
-`cargo publish --workspace` selects exactly the three crates.io packages. The
+`cargo publish --workspace` selects exactly the six crates.io packages. The
 release uses the checked-in workspace and its shared lockfile directly.
 
 For the initial crates.io publication, run the full checks on a committed, clean
-checkout and verify ownership/name availability for all three packages. Verify
-the entire release before authenticating:
+checkout and verify ownership/name availability for all six packages. Verify the
+entire release before authenticating:
 
 ```sh
 cargo publish --workspace --dry-run --locked
@@ -70,7 +69,7 @@ cargo publish --workspace --locked
 If `CARGO_TARGET_DIR` is set, use that directory instead of `target` when
 checking the archives.
 
-One native Cargo invocation packages and verifies **all three crates before its
+One native Cargo invocation packages and verifies **all six crates before its
 first upload**, then uploads those verified archives in dependency order. It
 uses a temporary registry overlay to resolve the unpublished data crates during
 verification, so the library can build before either dependency exists on
@@ -80,35 +79,35 @@ to build, Cargo exits without uploading any of them. See the
 and
 [package verification](https://github.com/rust-lang/cargo/blob/c980f4866/src/cargo/ops/cargo_package/mod.rs#L308).
 
-CI separately tests the extracted contents of all three package archives and
+CI separately tests the extracted contents of all six package archives and
 enforces the size budget. The release job also performs the native workspace dry
 run and checks every generated archive's size before requesting its short-lived
 credential. A dry run performs no uploads and cannot verify remote publication
 permissions.
 
-Register the same trusted publisher for **each** of the three crates after the
+Register the same trusted publisher for **each** of the six crates after the
 initial manual uploads. If CI dispatches the matching first tag to publish
 Python, the Rust job will encounter already published versions. Verify those
 versions and allow the independent Python job to complete; do not delete or
-retag the release. Future releases publish both data crates before the library,
-after all three verification builds have passed. A local dry run cannot verify
+retag the release. Future releases publish five data crates before the library,
+after all six verification builds have passed. A local dry run cannot verify
 remote permissions or replace the explicit archive-size check.
 
 ## Prepare a release
 
 `[workspace.package].version` in the root `Cargo.toml` is the version authority.
-All four Rust packages inherit it, and Maturin derives the Python version from
+All seven Rust packages inherit it, and Maturin derives the Python version from
 Cargo through `project.dynamic`. Author, repository, edition, and minimum Rust
 version are shared there too. The library and Python extension inherit the
 project license; each data crate retains its vendor-resource license file.
 
-The three exact local dependency pins in the same manifest’s
+The six exact local dependency pins in the same manifest’s
 `[workspace.dependencies]` must match (`=0.1.0` for the initial release). Cargo
 does not interpolate the workspace version into dependency requirements. Use
 `cargo set-version --workspace <version>` from cargo-edit to update the version,
 pins, and lockfile together, previewing with `--dry-run` first. The release gate
 checks the version, inheritance, and pins before publication. The Python Rust
-extension remains `publish = false`; the library and its two data crates go to
+extension remains `publish = false`; the library and its five data crates go to
 crates.io. Tags use stable `vMAJOR.MINOR.PATCH` versions. Prerelease tags and
 Python’s differing prerelease syntax are deliberately rejected by the version
 check; add an explicit version mapping before supporting those releases.
@@ -165,7 +164,7 @@ available to same-tag reruns, not other release tags; matching default-branch
 caches may also be restored. See
 [cache scope](CI.md#github-setup-and-maintenance).
 
-Rust packages and verifies all three crates and checks their sizes before
+Rust packages and verifies all six crates and checks their sizes before
 requesting its temporary credential. It then uses one
 `cargo publish --workspace --locked` command with verification enabled: every
 crate build finishes before any crate is uploaded.
@@ -290,7 +289,7 @@ error can mean the original upload completed. For a partial Rust release, verify
 the already published versions and their contents, then publish only the
 remaining packages from a clean checkout of the same tagged source. Cargo
 rejects a workspace selection that includes an existing version; the automatic
-job does not skip it. For example, when both data crates are already published
+job does not skip it. For example, when five data crates are already published
 and only the library remains:
 
 ```sh

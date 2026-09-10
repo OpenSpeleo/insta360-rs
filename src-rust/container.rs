@@ -1546,6 +1546,8 @@ pub fn probe(inputs: &InputSet) -> Result<MediaInfo> {
         video_tracks: tracks,
         offset_versions,
         optical_profiles,
+        optics: crate::CalibrationResolver::default()
+            .inspect_metadata_optics(&primary.metadata, crate::calibration::OffsetSource::Current),
         gyro_sample_count: primary.metadata.gyro_sample_count,
         exposure_sample_count: primary.metadata.exposure_sample_count,
         trailer: primary.trailer,

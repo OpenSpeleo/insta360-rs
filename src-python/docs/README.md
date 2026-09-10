@@ -33,8 +33,10 @@ if frame is not None:
 `probe` reads INSV metadata. `open_media` accesses decodable container streams
 without requiring an Insta360 trailer or stitch calibration. `extract` saves
 original streams and metadata without stitching. Video/frame exports require
-supported camera metadata and recorded calibration; currently the exporter
-supports X5 single-file recordings with two video tracks.
+supported camera metadata and recorded calibration; the exporter accepts
+validated dual-track, two-file and metadata-proven packed panoramas with
+registered V1/V2/V3/V6 calibration. Real-recording qualification is narrower;
+see [the support table](../../README.md#camera-support).
 
 ## Export selected frames
 
@@ -54,12 +56,13 @@ print(result.outputs, result.frames_written, result.backend.selected)
 ```
 
 The default optical policy selects only an unambiguous recorded profile. Set
-`optical_setup` explicitly for an accessory or water profile; Python does not
-substitute generic calibration. Disabling stabilization in this example removes
-the requirement for gyro data, which the default direction-lock mode needs. For
-stitched video, `audio=AudioPolicy.COPY` preserves compatible AAC/ALAC packets
-and their timing relative to video; cuts keep complete packets. Select `DROP` to
-omit audio. Direct packet access and extraction also preserve audio.
+`housing`, `environment`, `lens_accessory` and `mounting_accessory` explicitly
+when overriding recorded choices; Python does not substitute generic
+calibration. Disabling stabilization in this example removes the requirement for
+gyro data, which the default direction-lock mode needs. For stitched video,
+`audio=AudioPolicy.COPY` preserves compatible AAC/ALAC packets and their timing
+relative to video; cuts keep complete packets. Select `DROP` to omit audio.
+Direct packet access and extraction also preserve audio.
 
 See the [guide](guide.md) for underwater presets, backend selection,
 cancellation, color conversion, and the distinction between reading and

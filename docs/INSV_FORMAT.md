@@ -706,7 +706,7 @@ inside the string.
 
 | Generation | Total tokens for two lenses | Tokens per lens | Trailing global tokens     | Projection family                                  |
 | ---------- | --------------------------: | --------------: | -------------------------- | -------------------------------------------------- |
-| V1         |                          16 |               6 | Width, height, packed word | Polynomial pinhole V1; parse-only in project       |
+| V1         |                          16 |               6 | Width, height, packed word | Polynomial pinhole V1                              |
 | V2         |                          34 |              16 | Packed word                | Polynomial pinhole V2                              |
 | V3         |                          40 |              19 | Packed word                | Unified omnidirectional radial/tangential          |
 | V6         |                          56 |              27 | Packed word                | Extended unified omnidirectional radial/tangential |
@@ -1089,27 +1089,27 @@ This section records the present behavior of `insta360-rs`; it does not weaken
 the format requirements above. Structural inspection, typed payload decoding,
 and end-to-end media export are separate support levels.
 
-| Capability                                     | Current support                                                                                               |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Input discovery                                | One or two existing files; conventional `_00_`/`_10_` pairing; primary ordered first                          |
-| Camera identification                          | ONE X, ONE X2, X3, X4, X5, X6 and registered aliases; unknown names retained                                  |
-| V3 indexed inspection                          | Supported within parser limits, including empty directories and record regions                                |
-| V3 sequential inspection                       | Backward-chain parsing supported; empty/header-only tails are not a supported input                           |
-| Genuine V2 tail                                | Extraction preserves JSON metadata and gyro envelope; bounded `InsvReader` inspection is not implemented      |
-| JSON metadata                                  | Readable JSON and raw bytes during extraction; bounded inspector remains protobuf-only                        |
-| Protobuf metadata                              | Typed subset plus top-level unknown values; some known encodings remain undecoded                             |
-| Media-header inspection                        | Video handlers, first visual sample description, track duration, average frame timing                         |
-| Complete BMFF demuxing                         | Delegated to the media decoding path; the bounded inspector is not a sample-table validator                   |
-| Calibration parsing                            | Two-lens V1, V2, V3, V6                                                                                       |
-| CPU/GPU projection                             | V2, V3, V6 subject to registered lens geometry; V1 parse-only                                                 |
-| Accessory conversion                           | X5 V6 with required embedded polynomial profiles and supported target setup                                   |
-| Primary gyro                                   | Common and packed raw V3 samples; explicit raw flag required                                                  |
-| Exposure                                       | Flat V3 primary and secondary payload decoders                                                                |
-| Frame PTS, GPS, secondary IMU, other telemetry | Raw record access; no complete typed processing path                                                          |
-| Calibrated panorama image/video export         | X5 single-file recordings with exactly two video tracks; other stitched input layouts are not implemented     |
-| Stabilization                                  | X5 compact-raw normalization, gravity fusion, exposure/PTS alignment, and supported sensor readout correction |
-| Audio in video export                          | Optional AAC/ALAC packet copy preserving video-relative timing, with complete-packet cuts                     |
-| Tail rewriting                                 | No complete preserving writer                                                                                 |
+| Capability                                     | Current support                                                                                                                                                 |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input discovery                                | One or two existing files; conventional `_00_`/`_10_` pairing; primary ordered first                                                                            |
+| Camera identification                          | ONE X, ONE X2, X3, X4, X5, X6 and registered aliases; unknown names retained                                                                                    |
+| V3 indexed inspection                          | Supported within parser limits, including empty directories and record regions                                                                                  |
+| V3 sequential inspection                       | Backward-chain parsing supported; empty/header-only tails are not a supported input                                                                             |
+| Genuine V2 tail                                | Extraction preserves JSON metadata and gyro envelope; bounded `InsvReader` inspection is not implemented                                                        |
+| JSON metadata                                  | Readable JSON and raw bytes during extraction; bounded inspector remains protobuf-only                                                                          |
+| Protobuf metadata                              | Typed subset plus top-level unknown values; some known encodings remain undecoded                                                                               |
+| Media-header inspection                        | Video handlers, first visual sample description, track duration, average frame timing                                                                           |
+| Complete BMFF demuxing                         | Delegated to the media decoding path; the bounded inspector is not a sample-table validator                                                                     |
+| Calibration parsing                            | Two-lens V1, V2, V3, V6                                                                                                                                         |
+| CPU/GPU projection                             | V1, V2, V3, V6 subject to registered lens geometry and valid model normalization                                                                                |
+| Accessory conversion                           | Verified V6 routes for X5, X4, X4 Air supplier lenses and X6; embedded profiles are required for the X5 standard route; see [housing contracts](housings.md)    |
+| Primary gyro                                   | Common and packed raw V3 samples; explicit raw flag required                                                                                                    |
+| Exposure                                       | Flat V3 primary and secondary payload decoders                                                                                                                  |
+| Frame PTS, GPS, secondary IMU, other telemetry | Raw record access; no complete typed processing path                                                                                                            |
+| Calibrated panorama image/video export         | Registered V1/V2/V3/V6 calibration with validated dual-track, two-file or metadata-proven packed panoramas; see the housing catalog and decoded-layout contract |
+| Stabilization                                  | X5 compact-raw normalization, gravity fusion, exposure/PTS alignment, and supported sensor readout correction                                                   |
+| Audio in video export                          | Optional AAC/ALAC packet copy preserving video-relative timing, with complete-packet cuts                                                                       |
+| Tail rewriting                                 | No complete preserving writer                                                                                                                                   |
 
 Registered camera/lens geometry does not establish that every mode of that
 camera can pass the media export pipeline. In particular, X6 10-bit format

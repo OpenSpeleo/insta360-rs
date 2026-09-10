@@ -8,7 +8,7 @@ use crate::calibration::LensProjectionModel;
 use crate::color::CubeLut;
 use crate::motion::readout::MAX_READOUT_POSES;
 use crate::motion::{FrameMotion, ReadoutPoseTable};
-use crate::stitch::{prepare_gpu_fisheye_masks_for_dimensions, GpuFisheyeMask};
+use crate::stitch::{MaskCache, PreparedMasks};
 use crate::{
     EquirectangularProjection, Error, GpuAdapterInfo, GpuFailure, GpuFailureCode, GpuFailureStage,
     LensFrame, Orientation, PanoramaFrame, ResolvedCalibration, Result, StitchEngine,
@@ -171,14 +171,6 @@ struct LensParams {
     readout: [f32; 4],
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct MaskParams {
-    center_outer_valid: [f32; 4],
-    boundary01: [f32; 4],
-    boundary23: [f32; 4],
-}
-
 /// Stateful portable GPU renderer.
 ///
 /// It retains the adapter, device, queue, shaders, sampler, and one reusable
@@ -195,6 +187,7 @@ pub struct GpuStitcher {
     sampler: wgpu::Sampler,
     adapter: GpuAdapterInfo,
     resources: Mutex<Option<GpuFrameResources>>,
+    masks: MaskCache,
     color_lut: Option<Arc<CubeLut>>,
 }
 
@@ -206,6 +199,7 @@ struct GpuResourceKey {
     lens_height: u32,
     output_width: u32,
     output_height: u32,
+    mask_bytes: u64,
 }
 
 struct GpuFrameResources {
@@ -216,6 +210,7 @@ struct GpuFrameResources {
     readout_buffer: wgpu::Buffer,
     lens_buffer: wgpu::Buffer,
     mask_buffer: wgpu::Buffer,
+    prepared_masks: Option<Arc<PreparedMasks>>,
     _slopes_buffer: wgpu::Buffer,
     _second_stats_buffer: wgpu::Buffer,
     output_buffer: wgpu::Buffer,
@@ -379,6 +374,7 @@ impl GpuStitcher {
             sampler,
             adapter: adapter_info,
             resources: Mutex::new(None),
+            masks: MaskCache::default(),
             color_lut: None,
         })
     }
@@ -540,7 +536,24 @@ impl GpuStitcher {
         validate_source_frames(sources)?;
         validate_device_limits(&self.device, dimensions, projection, &self.adapter)?;
 
-        let fisheye_masks = prepare_gpu_fisheye_masks_for_dimensions(dimensions, calibration)?;
+        let fisheye_masks = self.masks.prepare(dimensions, calibration)?;
+        let mask_values = fisheye_masks
+            .iter()
+            .flatten()
+            .map(|mask| mask.weights.len() as u64)
+            .sum::<u64>();
+        // WGSL rounds the header plus runtime-array minimum to vec4 alignment.
+        let mask_bytes = 16 + mask_values.max(4) * 4;
+        if mask_bytes > self.device.limits().max_storage_buffer_binding_size
+            || mask_bytes > self.device.limits().max_buffer_size
+        {
+            return Err(gpu_unavailable(
+                GpuFailureCode::UnsupportedLimits,
+                GpuFailureStage::Preparation,
+                "prepared source masks exceed the GPU storage-buffer limit".into(),
+                Some(self.adapter.clone()),
+            ));
+        }
         let radiometry_enabled = calibration.lenses.iter().any(|lens| lens.lens_type != 0);
         let yuv_layout = (output_kind == GpuOutputKind::Yuv420)
             .then(|| yuv_output_layout(projection))
@@ -584,7 +597,6 @@ impl GpuStitcher {
                 motion.readout()[index].as_ref(),
             )
         });
-        let mask_params: [MaskParams; 2] = fisheye_masks.map(gpu_mask_params);
         if lens_params
             .iter()
             .any(|lens| !gpu_lens_params_are_finite(lens))
@@ -605,6 +617,7 @@ impl GpuStitcher {
             lens_height: dimensions[0].1,
             output_width: projection.width,
             output_height: projection.height,
+            mask_bytes,
         };
         let mut resource_guard = self
             .resources
@@ -649,11 +662,28 @@ impl GpuStitcher {
             0,
             bytemuck::cast_slice(&lens_params),
         );
-        self.queue.write_buffer(
-            &resources.mask_buffer,
-            0,
-            bytemuck::cast_slice(&mask_params),
-        );
+        if resources
+            .prepared_masks
+            .as_ref()
+            .is_none_or(|previous| !Arc::ptr_eq(previous, &fisheye_masks))
+        {
+            let mut offsets = [u32::MAX, u32::MAX, 0, 0];
+            let mut offset = 0_u32;
+            for (index, mask) in fisheye_masks.iter().enumerate() {
+                if let Some(mask) = mask {
+                    offsets[index] = offset;
+                    self.queue.write_buffer(
+                        &resources.mask_buffer,
+                        16 + u64::from(offset) * 4,
+                        bytemuck::cast_slice(&mask.weights),
+                    );
+                    offset += mask.weights.len() as u32;
+                }
+            }
+            self.queue
+                .write_buffer(&resources.mask_buffer, 0, bytemuck::cast_slice(&offsets));
+            resources.prepared_masks = Some(Arc::clone(&fisheye_masks));
+        }
         for (index, table) in motion.readout().iter().enumerate() {
             if let Some(table) = table {
                 let mut values = [[0.0_f32; 4]; MAX_READOUT_POSES];
@@ -959,7 +989,7 @@ impl GpuStitcher {
         let mask_buffer = dynamic_buffer(
             &self.device,
             "insta360-rs mask parameters",
-            std::mem::size_of::<[MaskParams; 2]>() as u64,
+            key.mask_bytes,
             wgpu::BufferUsages::STORAGE,
         );
         let slopes_size = u64::from(key.output_width)
@@ -1149,6 +1179,7 @@ impl GpuStitcher {
             readout_buffer,
             lens_buffer,
             mask_buffer,
+            prepared_masks: None,
             _slopes_buffer: slopes_buffer,
             _second_stats_buffer: second_stats_buffer,
             output_buffer,
@@ -1239,15 +1270,18 @@ fn gpu_lens_params(
     readout: Option<&ReadoutPoseTable>,
 ) -> LensParams {
     let mut coefficient_values = [0.0_f32; 16];
-    for (destination, source) in coefficient_values
-        .iter_mut()
-        .zip(lens.distortion_coefficients.iter())
-    {
+    let normalized = lens.polynomial_projection;
+    let coefficients = normalized
+        .as_ref()
+        .map_or(lens.distortion_coefficients.as_slice(), |value| {
+            value.coefficients.as_slice()
+        });
+    let focal_scale = normalized.map_or(1.0, |value| value.focal_scale);
+    for (destination, source) in coefficient_values.iter_mut().zip(coefficients.iter()) {
         *destination = *source as f32;
     }
     let model = match lens.model {
-        LensProjectionModel::PinholePolynomialV1 => 0,
-        LensProjectionModel::PinholePolynomialV2 => 1,
+        LensProjectionModel::PinholePolynomialV1 | LensProjectionModel::PinholePolynomialV2 => 1,
         LensProjectionModel::OmniRadtan => 2,
         LensProjectionModel::OmniRadtanPro => 3,
     };
@@ -1256,8 +1290,8 @@ fn gpu_lens_params(
         intrinsics: [
             lens.cx as f32,
             lens.cy as f32,
-            lens.fx as f32,
-            lens.fy as f32,
+            (lens.fx * focal_scale) as f32,
+            (lens.fy * focal_scale) as f32,
         ],
         native: [
             lens.xi.unwrap_or_default() as f32,
@@ -1275,7 +1309,7 @@ fn gpu_lens_params(
             model,
             lens.lens_type,
             lens_index as u32,
-            lens.distortion_coefficients.len() as u32,
+            coefficients.len() as u32,
         ],
         geometry: geometry.map_or([-1.0, -1.0, 0.0, 0.0], |geometry| {
             [
@@ -1351,33 +1385,6 @@ fn source_metadata(sources: GpuSourceFrames<'_>, lens_index: usize) -> [f32; 2] 
         GpuChromaLocation::Center => 1,
     };
     [1.0, (range | (matrix << 1) | (chroma << 3)) as f32]
-}
-
-fn gpu_mask_params(mask: GpuFisheyeMask) -> MaskParams {
-    MaskParams {
-        center_outer_valid: [
-            mask.center_x,
-            mask.center_y,
-            mask.outer_radius_squared,
-            if mask.valid {
-                mask.feather_weight_per_pixel
-            } else {
-                0.0
-            },
-        ],
-        boundary01: [
-            mask.lower_boundary[0][0],
-            mask.lower_boundary[0][1],
-            mask.lower_boundary[1][0],
-            mask.lower_boundary[1][1],
-        ],
-        boundary23: [
-            mask.lower_boundary[2][0],
-            mask.lower_boundary[2][1],
-            mask.lower_boundary[3][0],
-            mask.lower_boundary[3][1],
-        ],
-    }
 }
 
 fn upload_source_texture(
@@ -1695,6 +1702,7 @@ mod tests {
         }
         let stitcher = super::GpuStitcher::new().expect("GPU renderer");
         let key = super::GpuResourceKey {
+            mask_bytes: 32,
             input_kind: 0,
             output_kind: super::GpuOutputKind::Rgb,
             lens_width: 2,

@@ -23,6 +23,89 @@ fn software_vulkan(stitcher: &insta360_rs::gpu::GpuStitcher) -> bool {
 }
 
 #[test]
+fn native_v1_v2_polynomials_share_cpu_gpu_normalization_and_reuse_frames() {
+    use insta360_rs::calibration::CalibrationCandidate;
+    use insta360_rs::{CalibrationResolver, OpticalSelection};
+
+    if !gpu_available_or_skip() {
+        return;
+    }
+    let gpu = insta360_rs::gpu::GpuStitcher::new().unwrap();
+    let cpu = CpuStitcher::new();
+    let lenses = [textured_lens(128, 128, 0), textured_lens(128, 128, 1)];
+    let projection = EquirectangularProjection {
+        width: 128,
+        height: 64,
+    };
+    let orientation = Orientation::from_euler_degrees(13.0, -21.0, 37.0).unwrap();
+    for (version, id) in [(1, 17), (1, 78), (1, 113), (2, 19), (2, 113)] {
+        let mut fields = vec!["2".to_owned()];
+        for (center, rotation) in [(64.0, 0.0), (192.0, 180.0)] {
+            fields.extend([60.0, center, 64.0, 0.0, 0.0, rotation].map(|value| value.to_string()));
+            if version == 2 {
+                fields.extend(
+                    [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.02,
+                        0.00003,
+                        -0.0000001,
+                        -0.000000001,
+                        256.0,
+                        128.0,
+                        f64::from(id),
+                    ]
+                    .map(|value| value.to_string()),
+                );
+            }
+        }
+        if version == 1 {
+            fields.extend(["256".to_owned(), "128".to_owned(), (0x400 | id).to_string()]);
+        } else {
+            fields.push(((2 << 16) | 0x400).to_string());
+        }
+        let calibration = CalibrationResolver::default()
+            .resolve(
+                &[CalibrationCandidate::new(version, None, fields.join("_"))],
+                &OpticalSelection::default(),
+            )
+            .unwrap();
+        let expected = cpu
+            .stitch_with_orientation(&lenses, &calibration, projection, orientation)
+            .unwrap();
+        let first = gpu
+            .stitch_with_orientation(&lenses, &calibration, projection, orientation)
+            .unwrap();
+        assert!(expected
+            .as_rgb8()
+            .chunks_exact(3)
+            .all(|pixel| pixel != [0, 0, 0]));
+        let differences = sorted_channel_differences(first.as_rgb8(), expected.as_rgb8());
+        let mean = differences
+            .iter()
+            .map(|value| f64::from(*value))
+            .sum::<f64>()
+            / differences.len() as f64;
+        assert!(mean <= 1.0, "V{version} lens{id}: mean error {mean}");
+        assert!(
+            differences[differences.len() * 99 / 100] <= 3,
+            "V{version} lens{id}: p99 error"
+        );
+        for _ in 0..8 {
+            let repeated = gpu
+                .stitch_with_orientation(&lenses, &calibration, projection, orientation)
+                .unwrap();
+            assert_eq!(
+                first.as_rgb8(),
+                repeated.as_rgb8(),
+                "V{version} lens{id}: cached frame changed"
+            );
+        }
+    }
+}
+
+#[test]
 fn gpu_rejects_calibration_that_cannot_be_represented_by_shader_parameters() {
     if !gpu_available_or_skip() {
         return;
@@ -110,7 +193,10 @@ fn gpu_rolling_shutter_recovers_independent_world_rays_and_matches_cpu() {
             } else {
                 corrected_mean * 8.0 < uncorrected_mean
             };
-            assert!(uncorrected_mean > 1.0 && removes_skew, "GPU correction must remove skew: corrected {corrected_mean}, uncorrected {uncorrected_mean}");
+            assert!(
+                uncorrected_mean > 1.0 && removes_skew,
+                "GPU correction must remove skew: corrected {corrected_mean}, uncorrected {uncorrected_mean}"
+            );
             let difference = sorted_channel_differences(corrected.as_rgb8(), expected.as_rgb8());
             assert!(*difference.last().expect("pixels") <= maximum_cpu_difference);
         }
@@ -662,6 +748,99 @@ fn gpu_matches_cpu_for_x5_v6_underwater_mask_and_orientation() {
 }
 
 #[test]
+fn camera_housing_metadata_masks_match_cpu_and_reuse_gpu_frames() {
+    use insta360_rs::calibration::OffsetSource;
+    use insta360_rs::container::{EmbeddedOffset, InsvMetadata};
+    use insta360_rs::{CalibrationResolver, OpticalSelection};
+
+    if !gpu_available_or_skip() {
+        return;
+    }
+    let renderer = insta360_rs::gpu::GpuStitcher::new().unwrap();
+    let cpu = CpuStitcher::new();
+    let projection = EquirectangularProjection {
+        width: 128,
+        height: 64,
+    };
+    let orientation = Orientation::from_euler_degrees(13.0, -21.0, 37.0).unwrap();
+    // Independently encode each housing revision in metadata, retaining the
+    // same per-unit optics. The only recipe selection authority is the lens ID.
+    for (camera, lens_id) in [
+        ("Insta360 X5", 117),
+        ("Insta360 X5", 118),
+        ("Insta360 X5", 119),
+        ("Insta360 X5", 120),
+        ("Insta360 X4", 86),
+        ("Insta360 X4", 87),
+        ("Insta360 X6", 198),
+        ("Insta360 X6", 199),
+        ("Insta360 X4 Air", 147),
+        ("Insta360 X4 Air", 148),
+        ("Insta360 X4 Air", 149),
+        ("Insta360 X4 Air", 150),
+    ] {
+        let fixture = x5_v6_underwater_calibration(128, 128);
+        let mut fields = fixture
+            .raw_offset
+            .split('_')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        for index in [27, 54] {
+            fields[index] = lens_id.to_string();
+        }
+        let metadata = InsvMetadata {
+            camera_name: Some(camera.into()),
+            offsets: vec![EmbeddedOffset {
+                version: 6,
+                original: false,
+                value: fields.join("_"),
+            }],
+            blend_angle: Some(190),
+            ..InsvMetadata::default()
+        };
+        let calibration = CalibrationResolver::default()
+            .resolve_metadata(
+                &metadata,
+                &OpticalSelection::default(),
+                OffsetSource::Current,
+            )
+            .unwrap();
+        assert_eq!(
+            calibration.lenses.each_ref().map(|lens| lens.lens_type),
+            [lens_id; 2]
+        );
+        let lenses = [textured_lens(128, 128, 0), textured_lens(128, 128, 1)];
+        let expected = cpu
+            .stitch_with_orientation(&lenses, &calibration, projection, orientation)
+            .unwrap();
+        let first = renderer
+            .stitch_with_orientation(&lenses, &calibration, projection, orientation)
+            .unwrap();
+        let differences = sorted_channel_differences(first.as_rgb8(), expected.as_rgb8());
+        let mean = differences
+            .iter()
+            .map(|difference| f64::from(*difference))
+            .sum::<f64>()
+            / differences.len() as f64;
+        assert!(mean <= 1.0, "lens{lens_id}: CPU/GPU mean error {mean}");
+        assert!(
+            differences[differences.len() * 99 / 100] <= 3,
+            "lens{lens_id}: p99 error"
+        );
+        for _ in 0..8 {
+            let repeated = renderer
+                .stitch_with_orientation(&lenses, &calibration, projection, orientation)
+                .unwrap();
+            assert_eq!(
+                first.as_rgb8(),
+                repeated.as_rgb8(),
+                "lens{lens_id}: cached frame changed"
+            );
+        }
+    }
+}
+
+#[test]
 fn gpu_matches_cpu_for_a_zero_width_hard_seam() {
     if !gpu_available_or_skip() {
         return;
@@ -718,8 +897,8 @@ fn gpu_exports_real_x5_midpoint_png_when_configured() {
     use std::time::Duration;
 
     use insta360_rs::{
-        probe, EffectiveBackend, FrameSelection, ImageExportOptions, ImageFormat, InputSet,
-        OpticalSetup, ProcessingBackend, Stabilization,
+        probe, EffectiveBackend, Environment, FrameSelection, Housing, ImageExportOptions,
+        ImageFormat, InputSet, ProcessingBackend, Stabilization,
     };
 
     let Some(path) = std::env::var_os("INSTA360_RS_X5_SAMPLE").map(PathBuf::from) else {
@@ -736,7 +915,8 @@ fn gpu_exports_real_x5_midpoint_png_when_configured() {
     let midpoint = Duration::from_secs_f64(duration.as_secs_f64() * 0.5);
     let directory = tempfile::tempdir().expect("temporary real-media output directory");
     let config = insta360_rs::StitchConfig {
-        optical_setup: OpticalSetup::InvisibleDiveCaseUnderwater,
+        housing: Housing::Auto,
+        environment: Environment::Auto,
         stabilization: Stabilization::DirectionLock,
         backend: ProcessingBackend::Gpu,
         projection: Some(EquirectangularProjection {
@@ -760,6 +940,11 @@ fn gpu_exports_real_x5_midpoint_png_when_configured() {
 
     assert_eq!(result.backend.requested, ProcessingBackend::Gpu);
     assert_eq!(result.backend.selected, EffectiveBackend::Gpu);
+    let optics = result.optics.as_ref().expect("resolved optical report");
+    assert_eq!(optics.target_lens_id, 119);
+    assert_eq!(optics.detected.housing, Housing::DiveCasePro);
+    assert_eq!(optics.effective.housing, Housing::DiveCasePro);
+    assert!(optics.sensor_crop_applied);
     assert!(result.backend.adapter.is_some());
     assert!(result.backend.fallback.is_none());
     assert_eq!(result.frames_written, 1);

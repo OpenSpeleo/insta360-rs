@@ -42,3 +42,7 @@ dist/
 .cache/
 
 *.mp4
+
+# Editable Maturin native extension
+/src-python/python/insta360_rs/_native*.so
+/src-python/python/insta360_rs/_native*.pyd

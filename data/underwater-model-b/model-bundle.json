@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "bundle_id": "insta360-rs-data-underwater-model-b",
+  "bundle_version": "2026-09-08.1",
+  "assets": [
+    {
+      "id": "underwater-model197-part1",
+      "kind": "other",
+      "path": "underwater/model197.ins.part1",
+      "sha256": "2e9182461746f50e6fb21b18f9d8928c764518cfbfbbbf04e7d8f15a48c47eca",
+      "byte_length": 7009214,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Studio-5.9.10",
+          "maximum": "Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/adM_RnbzoRM2MizsqIWbMdMiz3mz2iwz3M4zXW3Wd9znU4rUm4m.ins",
+        "source_sha256": "53a24a86a41673adfbb56709cda53ec16584801d8918ad5ee0306f5027a92d5e",
+        "normalization": "byte-preserving slice [8000000, 15009214); concatenate part0 then part1 to reconstruct original"
+      }
+    }
+  ],
+  "groups": []
+}

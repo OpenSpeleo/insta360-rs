@@ -41,8 +41,9 @@ fn backend_reports_distinguish_request_selection_and_fallback() {
 }
 
 #[test]
-fn export_result_deserializes_without_a_backend_report() {
+fn export_result_deserializes_without_new_backend_and_optics_reports() {
     let result = ExportResult {
+        optics: None,
         outputs: Vec::new(),
         frames_written: 0,
         elapsed: Duration::ZERO,
@@ -53,6 +54,7 @@ fn export_result_deserializes_without_a_backend_report() {
         .as_object_mut()
         .expect("export result is an object")
         .remove("backend");
+    serialized.as_object_mut().unwrap().remove("optics");
 
     let decoded: ExportResult =
         serde_json::from_value(serialized).expect("legacy result remains readable");

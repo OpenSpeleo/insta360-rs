@@ -1,10 +1,14 @@
 """Regression coverage for isolated source snapshots and project notice staging."""
 
 import importlib.util
+import hashlib
+import os
 from pathlib import Path
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
+import zipfile
 
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "src-python" / "scripts"
@@ -26,6 +30,26 @@ class PythonPackagingTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        self.mnn_root = self.root / "mnn"
+        self.mnn_root.mkdir()
+        for filename in runner.MNN_NOTICES:
+            (self.mnn_root / filename).write_bytes(b"pinned runtime bytes\r\n" + filename.encode())
+        environment = patch.dict(os.environ, {"MNN_ROOT": str(self.mnn_root)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_vendor_chunks_reconstruct_the_original_identity(self):
+        key = ("Studio/Contents/model.ins", hashlib.sha256(b"original bytes").hexdigest())
+        runner.verify_original_parts({key: [(8,14,b" bytes"),(0,8,b"original")]})
+        for parts in [
+            [(0,8,b"original")],
+            [(0,8,b"original"),(9,15,b" bytes")],
+            [(0,8,b"original"),(7,13,b" bytes")],
+            [(0,8,b"original"),(8,14,b" BYTES")],
+        ]:
+            with self.subTest(parts=parts):
+                with self.assertRaises(RuntimeError):
+                    runner.verify_original_parts({key:parts})
 
     def package(self, name, declaration=True):
         package = self.root / name / "src-python"
@@ -101,6 +125,65 @@ class PythonPackagingTests(unittest.TestCase):
             for path in staged.parent.rglob("*") if path.is_file()
         ))
         self.assertTrue((staged / "python/insta360_rs/_licenses/project/LICENSE.md").is_file())
+        metadata = tomllib.loads((staged / "pyproject.toml").read_text())
+        self.assertIn("python/insta360_rs/_licenses/*.txt", metadata["project"]["license-files"])
+        for filename in runner.MNN_NOTICES:
+            self.assertEqual(
+                (staged / "python/insta360_rs/_licenses" / filename).read_bytes(),
+                (self.mnn_root / filename).read_bytes(),
+            )
+
+    def test_snapshot_requires_complete_runtime_notices_before_copying(self):
+        package = self.package("incomplete")
+        destination = self.root / "staged"
+        with patch.dict(os.environ, {"MNN_ROOT": ""}):
+            with self.assertRaisesRegex(RuntimeError, "MNN_ROOT must identify"):
+                runner.stage_source(package.parent, destination)
+        for filename in runner.MNN_NOTICES:
+            notice = self.mnn_root / filename
+            content = notice.read_bytes()
+            notice.unlink()
+            with self.subTest(filename=filename):
+                with self.assertRaisesRegex(RuntimeError, f"MNN_ROOT lacks {filename}"):
+                    runner.stage_source(package.parent, destination)
+                self.assertFalse(destination.exists())
+            notice.write_bytes(content)
+
+    def test_wheel_requires_each_runtime_notice_in_distribution_licenses(self):
+        files = {
+            "insta360_rs/__init__.py": b"",
+            "insta360_rs/__init__.pyi": b"",
+            "insta360_rs/py.typed": b"",
+            "insta360_rs/_native.abi3.so": b"native fixture",
+            "insta360_rs-0.1.0.dist-info/METADATA": (
+                b"Name: insta360-rs\nRequires-Python: >=3.10\nLicense-Expression: Apache-2.0\n"
+            ),
+            "insta360_rs-0.1.0.dist-info/WHEEL": (
+                b"Root-Is-Purelib: false\nTag: cp310-abi3-manylinux_2_28_x86_64\n"
+            ),
+        }
+        prefix = "insta360_rs-0.1.0.dist-info/licenses/"
+        for filename in ("LICENSE.md", "NOTICE.md", *runner.MNN_NOTICES):
+            files[prefix + filename] = b"license fixture"
+        wheel = self.root / "fixture.whl"
+
+        def write_wheel(entries):
+            with zipfile.ZipFile(wheel, "w") as archive:
+                for name, content in entries.items():
+                    archive.writestr(name, content)
+
+        write_wheel(files)
+        runner.check_wheel(wheel)
+        for filename in runner.MNN_NOTICES:
+            for package_copy in (False, True):
+                with self.subTest(filename=filename, package_copy=package_copy):
+                    incomplete = dict(files)
+                    content = incomplete.pop(prefix + filename)
+                    if package_copy:
+                        incomplete["insta360_rs/_licenses/" + filename] = content
+                    write_wheel(incomplete)
+                    with self.assertRaisesRegex(RuntimeError, f"Wheel lacks runtime license {filename}"):
+                        runner.check_wheel(wheel)
 
     def test_missing_project_license_fails_without_rewriting_metadata(self):
         package = self.package("invalid")

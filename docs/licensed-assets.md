@@ -25,18 +25,17 @@ Optical setup selection follows this order:
 1. explicit caller selection;
 2. explicit recorded accessory/offset state;
 3. the current offset's encoded lens type;
-4. a qualified application-supplied classifier;
-5. an ambiguity error.
+4. an ambiguity error. Image classifiers are not run during optical selection.
 
 Registry data supplies documented fallbacks such as lens-family FOV and blend
 angles. Recorded values take precedence whenever the media provides them.
 
 ## Bundle boundary
 
-Licensed files are checked in under `data/core/assets/` and
-`data/enhancement/assets/`, embedded by the two data crates, and served by
-`BundledAssetProvider`. Applications can also supply external bundles through
-`DirectoryAssetProvider` or `InMemoryAssetProvider`. A bundle manifest records:
+Licensed files are checked in under `data/*/assets/`, embedded by five data
+crates, and served by `BundledAssetProvider`. Applications can also supply
+external bundles through `DirectoryAssetProvider` or `InMemoryAssetProvider`. A
+bundle manifest records:
 
 - its schema version and stable bundle identifier;
 - the `insta360-rs` asset-manifest schema version;
@@ -50,7 +49,9 @@ Qualification is default-deny. A bundled payload is `Unqualified` even when its
 camera family is known. An application may mark a complete model group
 `Qualified` only after its preprocessing, execution, and outputs pass the
 declared camera/lens/target matrix. Empty compatibility dimensions are wildcards
-only after that explicit gate.
+only after that explicit gate. Explicit underwater restoration verifies its
+fixed resource group without claiming camera/platform qualification or automatic
+model selection; it runs only after the caller selects Legacy or AI.
 
 The application constructs an asset provider and selects an explicit policy:
 
@@ -78,12 +79,14 @@ versions are opaque, not a SemVer ordering contract.
 
 ## Direct bundled access
 
-`src-rust/assets/model-bundle.json` describes 41 original resources copied from
-MediaSDK 3.1.5, CameraSDK 2.1.8, iOS SDK 1.10.4, and Insta360 Studio 5.9.10. All
-payloads are copied byte-for-byte, with identity normalization and equal
-source/stored SHA-256 digests. Identical platform copies and Studio classifiers
-already present in the vendor distributions are stored once. Sample recordings
-and optional Android regression images are outside this runtime bundle.
+`src-rust/assets/model-bundle.json` describes 51 stored payloads from 50
+original resources copied from MediaSDK 3.1.5, CameraSDK 2.1.8, iOS SDK 1.10.4,
+and Insta360 Studio 5.9.10. All whole-file payloads are copied byte-for-byte
+with identity normalization and equal source/stored hashes. Model 197 is split
+into contiguous original-byte parts with both part and whole-source hashes
+verified. Identical platform copies and Studio classifiers already present in
+the vendor distributions are stored once. Sample recordings and optional Android
+regression images are outside this runtime bundle.
 
 ```rust
 use insta360_rs::assets::{AssetPolicy, BundledAssetProvider, OpenCvLinearSvm};

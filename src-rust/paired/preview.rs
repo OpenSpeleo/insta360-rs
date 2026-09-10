@@ -22,10 +22,10 @@ pub enum PreviewAcceleration {
 
 #[derive(Clone)]
 struct Chapter {
-    path: PathBuf,
+    paths: Vec<PathBuf>,
+    layout: DecodedLayout,
     start: Duration,
     duration: Duration,
-    reverse: bool,
 }
 
 struct Request {
@@ -124,45 +124,67 @@ impl Drop for Worker {
     }
 }
 
-/// Reusable random-access reader with two independent, bounded lens workers.
+/// Reusable random-access reader with bounded native decoding.
+/// Separate lenses use concurrent workers. Packed sources use one software
+/// decoder per request so each packed picture is decoded only once.
 ///
 /// Each request returns source-resolution original frames, matched using exact
 /// rational PTS. No proxies, frame-number estimates, or rounded time joins occur.
 /// At most one request and one output per lens are queued. Failed reads reset
-/// that lens session, and dropping the reader joins both worker threads.
+/// that lens session, and dropping the reader joins any worker threads.
 pub struct PairedPreviewReader {
     chapters: Arc<Vec<Chapter>>,
-    workers: [Worker; 2],
+    backend: PreviewBackend,
+}
+
+enum PreviewBackend {
+    Lenses([Worker; 2]),
+    Packed(RecordingSequence),
 }
 
 impl PairedPreviewReader {
-    /// Creates workers from an already inspected recording; opening media is lazy.
+    /// Prepares an inspected recording; opening media is lazy. Recordings with
+    /// packed chapters use the serial software path for every request.
     pub fn new(sequence: &RecordingSequence, acceleration: PreviewAcceleration) -> Result<Self> {
         ffmpeg::init().map_err(media)?;
-        let chapters = sequence.chapters.iter().map(|chapter| {
-            if chapter.inputs.paths().len() != 1 {
-                return Err(Error::MissingCapability("paired preview requires one INSV with two video tracks".into()));
-            }
-            Ok(Chapter {
-                path: chapter.inputs.paths()[0].clone(),
-                start: chapter.timeline_start,
-                duration: chapter.duration,
-                reverse: chapter.inspection.metadata.reverse_video_track_order.ok_or_else(|| Error::MissingCapability("recording does not declare which video track belongs to camera A/B".into()))?,
+        let chapters = sequence
+            .chapters
+            .iter()
+            .map(|chapter| {
+                Ok(Chapter {
+                    paths: chapter.inputs.paths().to_vec(),
+                    layout: DecodedLayout::inspect(chapter)?,
+                    start: chapter.timeline_start,
+                    duration: chapter.duration,
+                })
             })
-        }).collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
         let chapters = Arc::new(chapters);
-        Ok(Self {
-            workers: [
+        let backend = if chapters
+            .iter()
+            .any(|chapter| chapter.layout.packed.is_some())
+        {
+            PreviewBackend::Packed(sequence.clone())
+        } else {
+            PreviewBackend::Lenses([
                 Worker::spawn(chapters.clone(), 0, acceleration)?,
                 Worker::spawn(chapters.clone(), 1, acceleration)?,
-            ],
-            chapters,
-        })
+            ])
+        };
+        Ok(Self { chapters, backend })
     }
 
     /// Returns the first simultaneous native pair at or after recording time.
     pub fn frame_at(&mut self, time: Duration, cancel: Arc<AtomicBool>) -> Result<FramePair> {
         check_cancel(&cancel)?;
+        let workers = match &mut self.backend {
+            PreviewBackend::Packed(sequence) => {
+                return PairedReader::open(sequence, time)?
+                    .next_pair(&cancel)?
+                    .ok_or_else(|| invalid("no paired frame at this time"));
+            }
+            PreviewBackend::Lenses(workers) => workers,
+        };
         let mut chapter_index = self
             .chapters
             .iter()
@@ -170,7 +192,7 @@ impl PairedPreviewReader {
             .ok_or_else(|| invalid("preview time lies outside the recording"))?;
         loop {
             let chapter = &self.chapters[chapter_index];
-            for worker in &self.workers {
+            for worker in workers.iter() {
                 worker
                     .sender
                     .as_ref()
@@ -184,11 +206,11 @@ impl PairedPreviewReader {
             }
             // Always drain both replies, even on a decode error, so the next request
             // cannot accidentally consume the previous request's other-camera frame.
-            let a = self.workers[0]
+            let a = workers[0]
                 .receiver
                 .recv()
                 .map_err(|_| invalid("camera A preview worker stopped"));
-            let b = self.workers[1]
+            let b = workers[1]
                 .receiver
                 .recv()
                 .map_err(|_| invalid("camera B preview worker stopped"));
@@ -252,17 +274,19 @@ struct LensReader {
 
 impl LensReader {
     fn open(chapter: &Chapter, camera: usize, acceleration: PreviewAcceleration) -> Result<Self> {
-        let input = ffmpeg::format::input(&chapter.path).map_err(media)?;
+        let source = chapter.layout.lenses[camera];
+        let input = crate::stream::open_input(&chapter.paths[source.input])?;
         let tracks = input
             .streams()
             .filter(|stream| stream.parameters().medium() == ffmpeg::media::Type::Video)
             .collect::<Vec<_>>();
-        if tracks.len() != 2 {
+        let expected = if chapter.paths.len() == 1 { 2 } else { 1 };
+        if tracks.len() != expected {
             return Err(Error::MissingCapability(
-                "paired preview requires exactly two video tracks".into(),
+                "preview input differs from the declared lens layout".into(),
             ));
         }
-        let stream = &tracks[if chapter.reverse { 1 - camera } else { camera }];
+        let stream = &tracks[source.video];
         let time_base = stream.time_base();
         if time_base.numerator() <= 0
             || time_base.denominator() <= 0
