@@ -162,3 +162,47 @@ hardware output uses the resolution-aware high-end photogrammetry curve; its
 140.48 Mb/s bitrate and 263.1 MB file size closely match the 138.40 Mb/s, 259.2
 MB libx265 result. These are single-run measurements and retain the formal
 qualification limitations above.
+
+## Exact native random-access previews
+
+With `media`, `paired::PairedPreviewReader` is the random-access counterpart to
+`PairedReader`'s continuous single-demux export path. It keeps one persistent
+worker, demuxer and decoder per lens; seeks and decode proceed concurrently.
+Capacity-one channels and one returned native frame per lens bound application
+queues. Codec reference surfaces remain subject to the decoded-pixel bound. No
+proxy pictures or intermediate video files are generated.
+
+`PreviewAcceleration::Auto` selects supported FFmpeg hardware decoding and falls
+back to software when device/format setup or codec decoding is unavailable;
+`Software` provides a reference mode. Only requested hardware pictures transfer
+to CPU memory. Consumers own both native frame handles and should retain them
+for exact current-pair exports instead of re-seeking from rounded display time.
+
+Random seeks preserve an extra indexed GOP for reordered streams. Streams that
+declare no B pictures use the preceding indexed keyframe directly. Non-reference
+pictures with packet PTS before the target may be discarded during preroll;
+reference pictures and pictures at/after the target are retained. Final camera
+pairing compares rational PTS and presentation origins exactly. Generated tests
+cover reordered/non-reordered media, random/backwards/repeated/EOF seeks,
+chapter transitions, reversed lens order, missing partners and cancellation.
+
+In FrameForge on an Apple M4 Pro (24 GiB, shared FFmpeg 9.0), the original X5
+HDR two-track 2880×2880 HEVC 60000/1001 recordings were measured across three
+sessions and 16 requests/session. End-to-end native preview including two 640px
+JPEGs improved non-adjacent seek p50/p95 from 2,641/3,604 ms to 303/559 ms
+(8.7×/6.4×). Nearby forward steps stayed approximately 33 ms. Application-side
+persistent parallel JPEG encoders and cached source inspection are included in
+those numbers; they are not a standalone library throughput benchmark.
+
+First-process hardware initialization cost 1,422 ms versus a 167 ms software
+baseline. Subsequent fresh sessions opened in 71–79 ms. Results establish this
+workload on one host, not universal codec/platform speedups. Independent
+demuxers trade duplicated compressed reads for lens concurrency; OS caching
+normally shares the reads, but slow uncached storage can affect that tradeoff.
+
+Set `INSTA360_RS_PREVIEW_SAMPLE` to a real X5 original and run
+`cargo test --locked --features media --test paired_preview` for exact hardware
+versus serial-software native-pixel qualification. The test compares both
+lenses' Y/U/V samples, dimensions, range, color space and rational pair
+identities at five seeks, deinterleaving hardware NV12 and excluding unspecified
+row padding.

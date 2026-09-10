@@ -131,6 +131,97 @@ impl RecordingSequence {
             .flat_map(|chapter| chapter.inputs.paths())
     }
 
+    /// Reports a substantial uncovered interval on the camera's capture clock.
+    ///
+    /// This is positive evidence of discontinuous footage, not a completeness
+    /// test. Raw-gyro timestamps use microseconds. A one-second allowance avoids
+    /// treating encoder priming, frame rounding and small boundary overlaps as
+    /// absent footage. Unknown clocks and time-lapse captures remain unverified;
+    /// filename counters and submedia index gaps are never consulted.
+    pub fn has_capture_gap(&self) -> bool {
+        self.chapters.windows(2).any(|chapters| {
+            let first = &chapters[0];
+            let next = &chapters[1];
+            let (Some(start), Some(next_start)) = (
+                capture_start(&first.inspection),
+                capture_start(&next.inspection),
+            ) else {
+                return false;
+            };
+            start
+                .checked_add(first.duration)
+                .and_then(|end| end.checked_add(Duration::from_secs(1)))
+                .is_some_and(|end| next_start > end)
+        })
+    }
+
+    /// Whether an associated preview represents footage absent from these originals.
+    ///
+    /// Preview files are optional. When one exists, its camera, identity, split
+    /// declaration and capture clock must agree before it can provide evidence.
+    /// Comparing actual capture intervals avoids assumptions about preview index
+    /// stride, original filenames, or how many previews a camera produces.
+    pub fn lacks_preview_footage(&self, preview: &InsvInspection) -> bool {
+        let Some(first) = self.chapters.first() else {
+            return false;
+        };
+        let (Some(group), Some(preview_group)) = (
+            first.inspection.metadata.recording_group.as_ref(),
+            preview.metadata.recording_group.as_ref(),
+        ) else {
+            return false;
+        };
+        if preview.metadata.file_split_type != Some(FileSplitType::Split)
+            || preview.metadata.sequence_metadata_invalid
+            || first.inspection.metadata.file_split_type != Some(FileSplitType::Split)
+            || group.identity.is_empty()
+            || group.identity != preview_group.identity
+            || group.capture_type != preview_group.capture_type
+            || first.inspection.metadata.serial.is_none()
+            || first.inspection.metadata.serial != preview.metadata.serial
+            || first.inspection.metadata.camera_name != preview.metadata.camera_name
+        {
+            return false;
+        }
+        let Some(preview_start) = capture_start(preview) else {
+            return false;
+        };
+        let Some(preview_end) = preview
+            .duration
+            .filter(|duration| !duration.is_zero())
+            .and_then(|duration| preview_start.checked_add(duration))
+        else {
+            return false;
+        };
+        // An unknown original clock cannot establish an uncovered interval.
+        let starts: Option<Vec<_>> = self
+            .chapters
+            .iter()
+            .map(|chapter| capture_start(&chapter.inspection))
+            .collect();
+        let Some(starts) = starts else {
+            return false;
+        };
+        let allowance = Duration::from_secs(1);
+        let mut covered_until = preview_start;
+        for (chapter, start) in self.chapters.iter().zip(starts) {
+            let Some(end) = start.checked_add(chapter.duration) else {
+                return false;
+            };
+            if end < covered_until.saturating_sub(allowance) {
+                continue;
+            }
+            if start > covered_until.saturating_add(allowance) {
+                return true;
+            }
+            covered_until = covered_until.max(end);
+            if preview_end <= covered_until.saturating_add(allowance) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Resolves a half-open recording time to its chapter index.
     pub fn chapter_at(&self, time: Duration) -> Option<usize> {
         self.chapters.iter().position(|chapter| {
@@ -195,6 +286,22 @@ impl RecordingSequence {
             warnings: Vec::new(),
         })
     }
+}
+
+fn capture_start(inspection: &InsvInspection) -> Option<Duration> {
+    let metadata = &inspection.metadata;
+    if metadata.is_raw_gyro != Some(true)
+        || metadata
+            .timelapse_interval
+            .is_some_and(|interval| interval > 0.0)
+        || metadata
+            .timelapse_interval_ms
+            .is_some_and(|interval| interval > 0)
+    {
+        return None;
+    }
+    let timestamp = u64::try_from(metadata.first_frame_timestamp?).ok()?;
+    Some(Duration::from_micros(timestamp))
 }
 
 fn chapter_group(chapter: &RecordingChapter) -> Result<&RecordingGroup> {

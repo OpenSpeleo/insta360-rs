@@ -9,6 +9,9 @@ use ffmpeg_next as ffmpeg;
 
 use crate::{Error, RecordingSequence, Result};
 
+mod preview;
+pub use preview::{PairedPreviewReader, PreviewAcceleration};
+
 const MAX_QUEUED_FRAMES: usize = 16;
 const MAX_QUEUED_BYTES: usize = 256 * 1024 * 1024;
 const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;

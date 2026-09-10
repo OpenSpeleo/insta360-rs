@@ -205,6 +205,95 @@ fn assert_unverified_coverage(sequence: &RecordingSequence) {
     assert!(!error.contains("missing"), "{error}");
 }
 
+fn clocked_inspection(index: u32, timestamp_us: u64) -> insta360_rs::container::InsvInspection {
+    let mut data = metadata(index, 0, 2, "clocked-group");
+    integer(&mut data, 24, timestamp_us);
+    integer(&mut data, 62, 1);
+    InsvReader::new(std::io::Cursor::new(fixture(&data)))
+        .unwrap()
+        .inspect()
+        .unwrap()
+}
+
+#[test]
+fn capture_gaps_use_recorded_time_not_filename_or_submedia_stride() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = write(dir.path(), 3, 0, 2, "clocked-group");
+    let b = write(dir.path(), 400, 0, 2, "clocked-group");
+    let mut sequence = RecordingSequence::new(vec![
+        InputSet::discover(a).unwrap(),
+        InputSet::discover(b).unwrap(),
+    ])
+    .unwrap();
+    sequence.chapters[0].inspection = clocked_inspection(3, 37_320_570);
+    sequence.chapters[1].inspection = clocked_inspection(400, 38_284_613);
+    // A real-camera-sized boundary overlap and wildly sparse indices are valid.
+    assert!(!sequence.has_capture_gap());
+    sequence.chapters[1]
+        .inspection
+        .metadata
+        .first_frame_timestamp = Some(1_838_284_613);
+    assert!(sequence.has_capture_gap());
+    sequence.chapters[1].inspection.metadata.is_raw_gyro = None;
+    assert!(
+        !sequence.has_capture_gap(),
+        "unknown clock units must remain unknown"
+    );
+    sequence.chapters[1].inspection.metadata.is_raw_gyro = Some(true);
+    sequence.chapters[0]
+        .inspection
+        .metadata
+        .timelapse_interval_ms = Some(2000);
+    assert!(
+        !sequence.has_capture_gap(),
+        "capture and playback clocks differ for time-lapse"
+    );
+}
+
+#[test]
+fn only_matching_preview_capture_time_can_prove_unavailable_original_footage() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = write(dir.path(), 3, 0, 2, "clocked-group");
+    let b = write(dir.path(), 400, 0, 2, "clocked-group");
+    let mut sequence = RecordingSequence::new(vec![
+        InputSet::discover(a).unwrap(),
+        InputSet::discover(b).unwrap(),
+    ])
+    .unwrap();
+    sequence.chapters[0].inspection = clocked_inspection(3, 10_000_000);
+    sequence.chapters[1].inspection = clocked_inspection(400, 11_000_000);
+    let mut preview = clocked_inspection(999, 11_000_000);
+    assert!(
+        !sequence.lacks_preview_footage(&preview),
+        "indices do not match one-to-one"
+    );
+    preview.metadata.first_frame_timestamp = Some(12_000_000);
+    preview.duration = Some(Duration::from_secs(157));
+    assert!(
+        sequence.lacks_preview_footage(&preview),
+        "a missing final original starts at the preceding original's end"
+    );
+    preview.metadata.first_frame_timestamp = Some(1_810_000_000);
+    assert!(
+        sequence.lacks_preview_footage(&preview),
+        "a later preview represents another original"
+    );
+    preview.metadata.serial = Some("OTHER-CAMERA".into());
+    assert!(!sequence.lacks_preview_footage(&preview));
+    preview.metadata.serial = Some("SERIAL-1".into());
+    preview.metadata.recording_group.as_mut().unwrap().identity = "other-group".into();
+    assert!(!sequence.lacks_preview_footage(&preview));
+    preview.metadata.recording_group.as_mut().unwrap().identity = "clocked-group".into();
+    sequence.chapters[0]
+        .inspection
+        .metadata
+        .first_frame_timestamp = None;
+    assert!(
+        !sequence.lacks_preview_footage(&preview),
+        "unknown original coverage is not absence"
+    );
+}
+
 #[test]
 fn duplicate_unrelated_and_conflicting_members_are_rejected() {
     let dir = tempfile::tempdir().unwrap();

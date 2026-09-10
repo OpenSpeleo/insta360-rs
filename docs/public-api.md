@@ -69,7 +69,14 @@ omitted: start defaults to zero and an omitted duration runs to end of source.
 The decoder seeks to an earlier keyframe when necessary, discards pre-roll, and
 rebases the first encoded frame to timestamp zero.
 
-`Exporter::from_sequence` stitches a complete `RecordingSequence` through one
+For interactive fisheye preview, `paired::PairedPreviewReader::frame_at` returns
+the first exact native A/B pair at or after a recording time. It accepts
+`PreviewAcceleration::Auto` or `Software`, runs each lens on its own bounded
+worker, and reuses random-seek resources. Continuous processing uses
+`paired::PairedReader` instead. See
+[recording sequences](recording-sequences.md).
+
+`Exporter::from_sequence` stitches a validated `RecordingSequence` through one
 renderer and MP4 writer. `preflight_video` validates the implemented options for
 every chapter without writing files. `ExportEvent::EncoderSelected` reports the
 opened encoder and copied audio count. `AudioPolicy::Copy` preserves compatible

@@ -41,6 +41,25 @@ totals, incompatible properties, and conflicting or malformed declarations
 remain errors. Both recognized fields remain in the raw metadata collection,
 including unknown nested fields.
 
+Applications can assess positive continuity evidence without interpreting index
+gaps. `has_capture_gap()` reports a substantial uncovered interval between
+originals on the recorded raw-gyro microsecond clock. It excludes unknown clocks
+and time-lapse and allows one second for frame rounding and boundary priming.
+`lacks_preview_footage(&inspection)` checks whether an associated preview's
+capture interval is covered by the available originals, using the same
+allowance. It first verifies the camera serial/model, group identity/subtype,
+split marker, and known clocks. A preview beginning at the last original's end
+still represents missing footage when its interval extends beyond the available
+recording.
+
+Neither method establishes whole-recording completeness; absent final chapters
+without surviving evidence, unqualified clocks, and very short discontinuities
+can remain unknown. Optional previews are never required and their metadata
+indices are not compared with originals. Discovery continues to return validated
+available inputs. The application chooses its fallback policy and retains the
+user's selected original before chronological sorting; `single(inputs)` opens
+that original when a complete sequence is unavailable.
+
 Chapter durations come from container track timing and are accumulated as
 checked `Duration` values. `chapter_at()` uses half-open intervals, so a time
 exactly on a join belongs to the following chapter. Camera/exposure clock
@@ -73,6 +92,15 @@ native timestamps and time bases, and `open_at_pair()` can recover that exact
 pair without rounding a displayed time. Applications may instead retain the
 displayed original frame handles for a current-pair export, avoiding another
 seek or decode.
+
+Interactive applications can instead use `paired::PairedPreviewReader` with
+`PreviewAcceleration::Auto` or `Software`. It retains an independent demuxer and
+decoder worker for each lens and returns the same exact native pair contract.
+Random seeks reuse those resources, use hardware decoding when supported, and
+avoid unnecessary non-reference preroll. Continuous exports retain the serial
+`PairedReader` so they do not read the container twice. See
+[performance](performance.md) for measured behavior, bounded ownership and
+hardware/software qualification.
 
 Tests generate independent ISO-BMFF/ExtraInfo fixtures for metadata discovery
 and small MPEG-4 dual-track recordings with delayed frames for decode, chapter
