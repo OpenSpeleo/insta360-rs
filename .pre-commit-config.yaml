@@ -49,11 +49,9 @@ repos:
         pass_filenames: false
       - id: cargo-clippy
         name: cargo clippy (workspace, all features)
-        entry: >-
-          cargo clippy --workspace --locked --all-targets
-          --all-features -- -D warnings
+        entry: python3 scripts/ci/run-clippy.py
         language: system
-        files: (\.rs$|(^|/)Cargo\.(toml|lock)$|pyproject\.toml$)
+        files: (\.rs$|(^|/)Cargo\.(toml|lock)$|pyproject\.toml$|^\.pre-commit-config\.yaml$|^scripts/ci/(run-clippy|build-mnn)\.py$)
         pass_filenames: false
       - id: cargo-machete
         name: cargo machete (unused Rust dependencies)

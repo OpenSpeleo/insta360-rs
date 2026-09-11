@@ -122,12 +122,26 @@ exact source-built Linux FFmpeg libraries, install Docker, run
 selected by `.cache/wheel/sdk-prefix.txt`. CI downloads/extracts that archive
 and runs `use-ffmpeg.py` to export its environment through `GITHUB_ENV`.
 
+On macOS, install Xcode or Command Line Tools plus CMake, pkg-config and FFmpeg
+development libraries (for example, `brew install cmake pkg-config ffmpeg`). The
+Clippy hook selects `SDKROOT` with `xcrun --sdk macosx --show-sdk-path` when it
+is unset. This pairs the SDK with the selected developer installation: an
+implicit Command Line Tools SDK can otherwise be newer than Xcode's linker and
+fail with a TAPI `unknown architecture` error. Explicit `SDKROOT` and other
+compiler settings are preserved; no global Xcode selection is changed. For
+direct native/Cargo builds, export the same SDK before building MNN:
+
+```sh
+export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+```
+
 Prek discovers [.pre-commit-config.yaml](../.pre-commit-config.yaml) and the
 nested [Python configuration](../src-python/.pre-commit-config.yaml). It checks
 common file errors, Markdown formatting, YAML, GitHub Actions, Rust formatting,
 unused dependencies, and Clippy across all seven workspace members with all
 features and warnings denied. Clippy also performs compilation checks. Rust
-hooks trigger for manifests and lockfiles as well as Rust sources. The Python
+hooks trigger for manifests and lockfiles as well as Rust sources. The Clippy
+hook also runs when its configuration or native setup scripts change. The Python
 project adds Ruff lint/format and Bandit. Python tests run separately from
 pre-commit, so hooks do not require an installed Python extension. CI caches
 tools using both hook configurations. Fix Rust formatting with:
@@ -135,6 +149,21 @@ tools using both hook configurations. Fix Rust formatting with:
 ```sh
 cargo fmt --all
 ```
+
+The Clippy hook enters through
+[`scripts/ci/run-clippy.py`](../scripts/ci/run-clippy.py), so direct Git and
+prek invocations prepare the native environment too. If `MNN_ROOT` is unset, it
+runs the pinned MNN builder and caches the verified prefix under `.cache/mnn/`,
+keyed by the builder's configuration identity. The first run needs network
+access, CMake and a C/C++ compiler; subsequent runs verify and reuse that
+prefix. A changed configuration selects a separate cache directory. An explicit
+`MNN_ROOT`, including CI's prepared prefix, is verified without downloading or
+rebuilding it. Invalid prefixes and setup failures stop the hook before Cargo.
+FFmpeg discovery and caller compiler/build settings are preserved. To run the
+same check directly, use `python3 scripts/ci/run-clippy.py`; raw
+`cargo clippy --workspace --locked --all-targets --all-features -- -D warnings`
+still requires a prepared native environment. Runner regression tests are
+included in the `scripts/ci` unittest suite.
 
 Original vendor payload directories are excluded from text hooks: formatting
 would invalidate their hashes. Rust's bundled-asset tests check their integrity.
