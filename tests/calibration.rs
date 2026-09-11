@@ -573,19 +573,44 @@ fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
     assert_eq!(result.lenses[1].lens_type, 117);
     assert_eq!(result.lenses[0].fx, result.lenses[0].fy);
     assert_ne!(result.lenses[0].fx, 55.0);
-    assert!((result.lenses[0].fx - 52.408_612_607_260_07).abs() < 1e-9);
-    let expected_radial = [
-        0.451_706_379_351_284_27,
-        -1.131_649_612_536_728_8,
-        1.977_780_319_251_478_5,
-        4.401_427_788_903_362,
-        0.0,
-    ];
-    for (actual, expected) in result.lenses[0].distortion_coefficients[..5]
-        .iter()
-        .zip(expected_radial)
-    {
-        assert!((actual - expected).abs() < 1e-9);
+    // Independent reference: 65-decimal arithmetic, Taylor-series sin/cos,
+    // and Gauss-Jordan elimination for the 0.1-degree sampled least-squares
+    // system (source 0..100 degrees, target 0..95 degrees, exclusive ends).
+    // Its normal matrix has condition number ~4.1e9: last-bit platform math
+    // differences move the radial coefficients by ~1e-8 while the resulting
+    // pixel radii agree within ~1e-11. Check the geometry across the field of
+    // view rather than a platform-specific snapshot of those coefficients.
+    let expected_focal = 52.408_612_607_364_04;
+    assert!(
+        (result.lenses[0].fx - expected_focal).abs() < 1e-9,
+        "converted focal length: {} versus {expected_focal} pixels",
+        result.lenses[0].fx
+    );
+    for (angle_degrees, expected_radius) in [
+        (0.0_f64, 0.0),
+        (1.0, 0.304_905_609_764_294_4),
+        (10.0, 3.053_615_866_568_929),
+        (30.0, 9.259_740_433_139_534),
+        (45.0, 14.049_012_790_590_294),
+        (60.0, 18.921_725_129_432_33),
+        (75.0, 23.795_628_222_509_626),
+        (90.0, 28.570_408_126_368_065),
+        (94.9, 30.063_107_962_352_9),
+        (95.0, 30.092_887_044_566_015),
+    ] {
+        let lens = &result.lenses[0];
+        let theta = angle_degrees.to_radians();
+        let u = theta.sin() / (theta.cos() + lens.xi.unwrap());
+        let radius = lens.fx
+            * (u + lens.distortion_coefficients[..5]
+                .iter()
+                .enumerate()
+                .map(|(index, coefficient)| coefficient * u.powi(3 + 2 * index as i32))
+                .sum::<f64>());
+        assert!(
+            (radius - expected_radius).abs() < 1e-9,
+            "radial projection at {angle_degrees} degrees: {radius} versus {expected_radius} pixels"
+        );
     }
     assert_eq!(result.lenses[0].distortion_coefficients[4], 0.0);
     assert_eq!(result.lenses[0].distortion_coefficients[5], 0.06);

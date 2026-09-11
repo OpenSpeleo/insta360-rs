@@ -88,6 +88,14 @@ verified. Identical platform copies and Studio classifiers already present in
 the vendor distributions are stored once. Sample recordings and optional Android
 regression images are outside this runtime bundle.
 
+`data/.gitattributes` disables Git newline conversion for every data crate's
+`assets/` tree, including text payloads such as the underwater style manifest.
+Keep new data crates under this rule: converting a vendor file's LF newlines to
+CRLF changes its length and digest and makes the bundled resource unusable.
+`scripts/ci/test_asset_checkout.py` checks every manifest payload after a
+temporary Git checkout with `core.autocrlf=true`, so this Windows checkout
+contract is also tested on Linux and macOS.
+
 ```rust
 use insta360_rs::assets::{AssetPolicy, BundledAssetProvider, OpenCvLinearSvm};
 

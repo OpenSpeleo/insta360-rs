@@ -748,18 +748,39 @@ class VideoExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
             self.assertEqual(output_audio[field], source_audio[field], field)
         source_base = Fraction(source_audio["time_base"])
         output_base = Fraction(output_audio["time_base"])
+        source_packets = [
+            p for p in original["packets"] if p["stream_index"] == source_audio["index"]
+        ]
+        actual = [
+            p for p in copied["packets"] if p["stream_index"] == output_audio["index"]
+        ]
+        # FFprobe 6.1 derives the last packet's duration from track duration
+        # minus its edited DTS, losing the positive initial audio delay. Read
+        # stored sample durations without edits, but check PTS/DTS below on
+        # the normal playback timeline. Positions and hashes align both views.
+        for path, stream, packets in (
+            (source, source_audio, source_packets),
+            (output, output_audio, actual),
+        ):
+            samples = [
+                p
+                for p in ffprobe(path, ignore_editlist=True)["packets"]
+                if p["stream_index"] == stream["index"]
+            ]
+            self.assertEqual(
+                [(p["pos"], p["data_hash"]) for p in packets],
+                [(p["pos"], p["data_hash"]) for p in samples],
+            )
+            for packet, sample in zip(packets, samples, strict=True):
+                packet["sample_duration"] = sample["duration"]
         video = next(s for s in original["streams"] if s["codec_type"] == "video")
         video_origin = int(video["start_pts"]) * Fraction(video["time_base"])
         expected = [
             packet
-            for packet in original["packets"]
-            if packet["stream_index"] == source_audio["index"]
-            and int(packet["pts"]) * source_base >= video_origin + start
-            and (int(packet["pts"]) + int(packet["duration"])) * source_base
+            for packet in source_packets
+            if int(packet["pts"]) * source_base >= video_origin + start
+            and (int(packet["pts"]) + int(packet["sample_duration"])) * source_base
             <= video_origin + end
-        ]
-        actual = [
-            p for p in copied["packets"] if p["stream_index"] == output_audio["index"]
         ]
         self.assertGreater(len(expected), 0)
         self.assertEqual(len(actual), len(expected))
@@ -775,8 +796,8 @@ class VideoExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
                     field,
                 )
             self.assertEqual(
-                int(after["duration"]) * output_base,
-                int(before["duration"]) * source_base,
+                int(after["sample_duration"]) * output_base,
+                int(before["sample_duration"]) * source_base,
             )
         return actual, output_base
 

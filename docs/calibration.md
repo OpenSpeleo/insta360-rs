@@ -130,6 +130,13 @@ table 0x529e4d8 into the V6 branch0x1e2e0b4. The shared target fit is at
 regenerated offset carries the target lens type and validates like a native V6
 offset.
 
+The embedded X5 profile regression checks focal length and projected pixel radii
+against an independent 65-decimal reference fit across the target field of view.
+The sampled normal equations are ill-conditioned, so individual fitted radial
+coefficients can vary across platforms while preserving those pixel radii. The
+test bounds the radius error to `1e-9` pixels for its synthetic calibration; it
+does not establish real-camera accuracy at that tolerance.
+
 ## X4 and X6 housing conversion
 
 X4 uses lens 86 underwater and 87 in air, also used by X3; the camera identity

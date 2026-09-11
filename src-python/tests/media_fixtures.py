@@ -67,7 +67,7 @@ def generate_media(path, *, timecode=False, width=32, height=16):
     return Path(path).read_bytes()
 
 
-def ffprobe(path):
+def ffprobe(path, *, ignore_editlist=False):
     return json.loads(
         run_tool(
             "ffprobe",
@@ -79,6 +79,7 @@ def ffprobe(path):
             "sha256",
             "-of",
             "json",
+            *(["-ignore_editlist", "1"] if ignore_editlist else []),
             path,
         )
     )

@@ -122,13 +122,18 @@ Video success coverage needs a software HEVC encoder in the linked FFmpeg.
 Audio-copy tests exercise both synchronous and asynchronous exports with default
 and explicit `COPY`, compare compressed packet hashes and rational PTS/DTS with
 FFprobe, and repeat clipped exports with sub-millisecond A/V offsets. They also
-cover ALAC, silent-source warnings, and unsupported AC3 rejection with `DROP` as
-an explicit fallback. Fixture generation therefore also needs FFmpeg's native
-ALAC and AC3 encoders. Capability-dependent tests report unavailable hardware
-explicitly. A full validation run must include software HEVC success tests; a
-run with skips does not prove video export. GPU-unavailable/fallback behavior is
-testable on CPU hosts. GPU and hardware-encoder qualification also needs
-suitable devices and the platform release matrix.
+compare stored sample durations with MP4 edit lists disabled, verifying packet
+hashes align with the normal playback view used for timestamp checks. This
+avoids FFprobe 6.1's last-packet duration calculation subtracting the initial
+audio delay from the packet duration; it does not relax the duration or A/V
+offset checks. They cover ALAC, silent-source warnings, and unsupported AC3
+rejection with `DROP` as an explicit fallback. Fixture generation therefore also
+needs FFmpeg's native ALAC and AC3 encoders. Capability-dependent tests report
+unavailable hardware explicitly. A full validation run must include software
+HEVC success tests; a run with skips does not prove video export.
+GPU-unavailable/fallback behavior is testable on CPU hosts. GPU and
+hardware-encoder qualification also needs suitable devices and the platform
+release matrix.
 
 These fixtures establish Python packaging, FFI contracts, and deterministic API
 behavior. They do not establish real-camera stitch quality, every codec's

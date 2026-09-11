@@ -1,0 +1,3 @@
+# Preserve original vendor bytes in every data crate on every platform.
+*/assets/** -text
+.gitattributes text eol=lf
