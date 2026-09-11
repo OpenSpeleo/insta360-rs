@@ -925,12 +925,17 @@ fn configured_real_x5_gpu_audio_smoke() {
 
 #[test]
 fn preflight_rejects_unknown_lens_order_before_export_confirmation() {
+    use std::io::{Seek, SeekFrom};
     let directory = tempfile::tempdir().unwrap();
     let source = source(directory.path(), 0, 1, false);
-    let file = fs::OpenOptions::new().append(true).open(&source).unwrap();
-    file.set_len(file.metadata().unwrap().len() - tail(0, 1).len() as u64)
-        .unwrap();
-    (&file).write_all(&tail_with_stream_type(0, 1, 0)).unwrap();
+    {
+        // Windows append-only handles cannot truncate the original metadata tail.
+        let mut file = fs::OpenOptions::new().write(true).open(&source).unwrap();
+        let offset = file.metadata().unwrap().len() - tail(0, 1).len() as u64;
+        file.set_len(offset).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.write_all(&tail_with_stream_type(0, 1, 0)).unwrap();
+    }
     let sequence = RecordingSequence::single(InputSet::discover(source).unwrap()).unwrap();
     assert_eq!(
         sequence.chapters[0]

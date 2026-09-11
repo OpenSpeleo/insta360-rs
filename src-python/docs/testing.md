@@ -161,3 +161,9 @@ Installation alone is not the matrix test.
 Source and all-feature builds need the pinned MNN prefix in `MNN_ROOT`; see
 [installation](installation.md). Plain Rust binding tests omit wheel-only
 `extension-module`, as before.
+
+On macOS, the Python crate's `build.rs` reserves Mach-O load-command space for
+wheel repair. Delocate replaces short `@rpath` dependencies with longer paths to
+the bundled libraries; without linker padding, the x86_64 wheel can fail repair
+after compiling successfully. CI builds and repairs wheels on both macOS
+architectures to check this packaging contract.
