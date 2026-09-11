@@ -42,29 +42,31 @@ and builds use `--locked`. Default members are the library and five data crates.
 Python is tested explicitly so its media/GPU dependencies do not change the
 library's feature boundaries.
 
-A dedicated FFmpeg prewarm job runs directly in the pinned manylinux_2_28
-Actions job container. A small preceding job reads the image and native cache
-key from `scripts/ci/build-wheel.sh`, so CI and local builds share one image pin
-and one native build identity. The key covers the image digest, FFmpeg build
-script, and `scripts/ci/ffmpeg-runtime-config.sh`; Rust/Python and
-wheel-packaging changes do not invalidate the native SDK.
+One Prepare FFmpeg matrix covers Linux, macOS ARM64/x86_64 and Windows. Each row
+identifies, restores or builds, and uploads its platform's SDK. The Linux row
+calls `scripts/ci/build-wheel.sh --prewarm`, which runs Docker with the pinned
+manylinux_2_28 image. It reads the cache key from that same builder, so CI and
+local builds share one image pin and one native build identity. The key covers
+the image digest, FFmpeg build script, and
+`scripts/ci/ffmpeg-runtime-config.sh`; Rust/Python and wheel-packaging changes
+do not invalidate the native SDK.
 
 The prewarm job caches only the completed `dist/ffmpeg-sdk.tar.gz`, containing
 the installed libraries, headers, notices, and verified source downloads. On an
-exact cache hit it skips package installation and compilation; Actions still
-starts the job container. On a miss it builds and validates the SDK, then saves
-the archive before uploading `ffmpeg-linux-x86_64`. The job summary reports the
-cache key and whether it restored or built the SDK. The Linux lint, Rust, and
-wheel jobs download that exact artifact. `use-ffmpeg.py` relocates pkg-config
-metadata and exports library paths for the consuming checkout. After the Linux
-host checks, Tests restores the pristine archive before building the wheel: its
-pkg-config files must again refer to the container's `/wheel-cache` mount.
-Release can restore the same completed SDK using the exact native/image cache
-key. On a miss, it downloads only `ffmpeg-linux-x86_64` from the verified source
-CI run. If that SDK artifact is absent or expired, the Linux wheel builder
-compiles the SDK. The wheel and sdist are always built afresh.
+exact cache hit the Linux row skips Docker, package installation and
+compilation. On a miss it builds and validates the SDK, then saves the archive
+before uploading `ffmpeg-linux-x86_64`. The job summary reports the cache key
+and whether it restored or built the SDK. The Linux lint, Rust, and wheel jobs
+download that exact artifact. `use-ffmpeg.py` relocates pkg-config metadata and
+exports library paths for the consuming checkout. After the Linux host checks,
+Tests restores the pristine archive before building the wheel: its pkg-config
+files must again refer to the container's `/wheel-cache` mount. Release can
+restore the same completed SDK using the exact native/image cache key. On a
+miss, it downloads only `ffmpeg-linux-x86_64` from the verified source CI run.
+If that SDK artifact is absent or expired, the Linux wheel builder compiles the
+SDK. The wheel and sdist are always built afresh.
 
-The native prewarm matrix prepares matching macOS and Windows SDKs using
+The macOS and Windows rows in the same matrix prepare their SDKs using
 `build-native-wheel.py --prewarm`. This mode builds only FFmpeg and x265 (plus
 Windows zlib), then archives the completed prefix and verified source downloads;
 it does not build MNN or a wheel. `--cache-key` shares the wheel builder's

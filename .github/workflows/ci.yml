@@ -17,81 +17,7 @@ env:
   RUST_BACKTRACE: '1'
 
 jobs:
-  ffmpeg-spec:
-    name: Identify FFmpeg build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      image: ${{ steps.spec.outputs.image }}
-      cache-key: ${{ steps.spec.outputs.cache-key }}
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: spec
-        run: |
-          image=$(bash scripts/ci/build-wheel.sh --image)
-          native_key=$(bash scripts/ci/build-wheel.sh --cache-key)
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "cache-key=ffmpeg-linux-sdk-v1-$native_key" >> "$GITHUB_OUTPUT"
-
   ffmpeg-prewarm:
-    name: Prepare FFmpeg (Linux x86_64)
-    needs: ffmpeg-spec
-    runs-on: ubuntu-24.04
-    container:
-      image: ${{ needs.ffmpeg-spec.outputs.image }}
-    defaults:
-      run:
-        shell: bash
-    env:
-      INSTA360_WHEEL_IMAGE: ${{ needs.ffmpeg-spec.outputs.image }}
-      INSTA360_WHEEL_JOBS: '2'
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Restore the completed FFmpeg SDK
-        id: ffmpeg-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: dist/ffmpeg-sdk.tar.gz
-          key: ${{ needs.ffmpeg-spec.outputs.cache-key }}
-      - name: Build the native FFmpeg libraries on a cache miss
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        run: |
-          # Match the local builder's paths inside the Actions job container.
-          mkdir -p dist .cache/wheel target/wheel-build
-          ln -s "$GITHUB_WORKSPACE" /source
-          ln -s "$GITHUB_WORKSPACE/dist" /dist
-          ln -s "$GITHUB_WORKSPACE/.cache/wheel" /wheel-cache
-          ln -s "$GITHUB_WORKSPACE/target/wheel-build" /wheel-target
-          INSTA360_WHEEL_UID=$(id -u)
-          INSTA360_WHEEL_GID=$(id -g)
-          export INSTA360_WHEEL_UID INSTA360_WHEEL_GID
-          bash scripts/ci/build-wheel.sh --container-prewarm
-      - name: Save the completed FFmpeg SDK
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: dist/ffmpeg-sdk.tar.gz
-          key: ${{ needs.ffmpeg-spec.outputs.cache-key }}
-      - name: Report FFmpeg cache use
-        env:
-          CACHE_HIT: ${{ steps.ffmpeg-cache.outputs.cache-hit }}
-          CACHE_KEY: ${{ needs.ffmpeg-spec.outputs.cache-key }}
-        run: |
-          if [[ "$CACHE_HIT" == true ]]; then
-            echo "FFmpeg SDK restored; native build and package installation skipped." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "FFmpeg SDK built after a cache miss." >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo "Cache key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ffmpeg-linux-x86_64
-          path: dist/ffmpeg-sdk.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-
-  ffmpeg-native:
     name: Prepare FFmpeg (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -99,19 +25,61 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
           - os: macos-15
             target: macos-arm64
           - os: macos-15-intel
             target: macos-x86_64
           - os: windows-2025
             target: windows-x86_64
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Identify the Linux FFmpeg SDK
+        if: runner.os == 'Linux'
+        id: spec
+        run: |
+          native_key=$(bash scripts/ci/build-wheel.sh --cache-key)
+          echo "cache-key=ffmpeg-linux-sdk-v1-$native_key" >> "$GITHUB_OUTPUT"
+      - name: Restore the completed Linux FFmpeg SDK
+        if: runner.os == 'Linux'
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg-sdk.tar.gz
+          key: ${{ steps.spec.outputs.cache-key }}
+      - name: Build the Linux FFmpeg SDK on a cache miss
+        if: runner.os == 'Linux' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci/build-wheel.sh --prewarm
+      - name: Save the completed Linux FFmpeg SDK
+        if: runner.os == 'Linux' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/ffmpeg-sdk.tar.gz
+          key: ${{ steps.spec.outputs.cache-key }}
+      - name: Report Linux FFmpeg cache use
+        if: runner.os == 'Linux'
+        env:
+          CACHE_HIT: ${{ steps.ffmpeg-cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.spec.outputs.cache-key }}
+        run: |
+          if [[ "$CACHE_HIT" == true ]]; then
+            echo "FFmpeg SDK restored; native build and package installation skipped." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "FFmpeg SDK built after a cache miss." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Cache key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: runner.os != 'Linux'
         with:
           python-version: '3.14'
       - uses: ./.github/actions/setup-native-wheel
+        if: runner.os != 'Linux'
       - uses: ./.github/actions/prewarm-native-ffmpeg
+        if: runner.os != 'Linux'
         with:
           target: ${{ matrix.target }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -143,7 +111,7 @@ jobs:
 
   tests:
     name: Tests (${{ matrix.target }})
-    needs: [ffmpeg-prewarm, ffmpeg-native, prek]
+    needs: [ffmpeg-prewarm, prek]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
