@@ -176,7 +176,8 @@ class StreamIntegrationTests(unittest.TestCase):
         for stream, expected in zip(source.streams, self.reference["streams"]):
             info = stream.info
             with self.subTest(stream=info.stream_index):
-                self.assertEqual(stream.source_path, self.recording.resolve())
+                self.assertTrue(stream.source_path.is_absolute())
+                self.assertTrue(stream.source_path.samefile(self.recording))
                 self.assertEqual(info.input_index, 0)
                 self.assertEqual(info.stream_index, expected["index"])
                 self.assertEqual(info.kind, expected["codec_type"])
@@ -516,8 +517,10 @@ class StreamIntegrationTests(unittest.TestCase):
                         ],
                         [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
                     )
-                    self.assertEqual(source.streams[0].source_path, primary.resolve())
-                    self.assertEqual(source.streams[3].source_path, secondary.resolve())
+                    self.assertTrue(source.streams[0].source_path.is_absolute())
+                    self.assertTrue(source.streams[0].source_path.samefile(primary))
+                    self.assertTrue(source.streams[3].source_path.is_absolute())
+                    self.assertTrue(source.streams[3].source_path.samefile(secondary))
                     self.assertIsNotNone(
                         source.video_streams[-1].open_video().read_frame()
                     )

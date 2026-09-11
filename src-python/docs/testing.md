@@ -120,6 +120,12 @@ FFprobe independently checks stream/packet properties; image and video output is
 decoded and inspected. Byte comparisons verify preservation and frame selection
 without depending on encoder output being identical across FFmpeg releases.
 
+Path assertions require absolute paths and use `Path.samefile()` to check file
+or directory identity, including Unicode filenames. Rust's canonical Windows
+paths can retain the `\\?\` prefix and expand short names, so their spelling
+need not match Python's `Path.resolve()` output. Keep the native paths intact so
+extended Windows paths remain usable.
+
 Video success coverage needs a software HEVC encoder in the linked FFmpeg.
 Audio-copy tests exercise both synchronous and asynchronous exports with default
 and explicit `COPY`, compare compressed packet hashes and rational PTS/DTS with

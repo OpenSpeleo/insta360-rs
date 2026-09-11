@@ -76,7 +76,8 @@ class ExtractIntegrationTests(unittest.TestCase):
             report = insta360_rs.extract(source, output)
 
             self.assertIsInstance(report, insta360_rs.ExtractionReport)
-            self.assertEqual(report.output_dir, output.resolve())
+            self.assertTrue(report.output_dir.is_absolute())
+            self.assertTrue(report.output_dir.samefile(output))
             self.assertIsInstance(report.manifest_path, Path)
             self.assertEqual(report.input_count, 1)
             self.assertEqual(report.stream_count, self.stream_count)
@@ -137,7 +138,9 @@ class ExtractIntegrationTests(unittest.TestCase):
             self.assertEqual(report.input_count, len(manifest["inputs"]))
             self.assertEqual(report.record_count, 1)
             entry = manifest["inputs"][0]
-            self.assertEqual(entry["source"], str(source.resolve()))
+            source_path = Path(entry["source"])
+            self.assertTrue(source_path.is_absolute())
+            self.assertTrue(source_path.samefile(source))
             self.assertEqual(entry["size"], len(self.recording))
             base = report.output_dir / entry["directory"]
             trailer = entry["container"]["trailer"]
