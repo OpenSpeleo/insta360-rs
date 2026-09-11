@@ -133,6 +133,7 @@ if os.environ.get('TEST_CONFIGURE_STATUS'):
         self.assertEqual(result.returncode, 0, result.stderr)
         config = json.loads((self.ffmpeg / "configuration.json").read_text())
         self.assertNotIn("--toolchain=msvc", config["args"])
+        self.assertIn("--install-name-dir=@rpath", config["args"])
         for key in ("INCLUDE", "LIB", "PATH"):
             self.assertEqual(config["env"][key], self.env.get(key))
         self.assertFalse((self.prefix / "lib/zlib.lib").exists())

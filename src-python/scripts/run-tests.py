@@ -48,6 +48,16 @@ def main():
             "(libx265 or libkvazaar)"
         )
     print(f"Testing installed extension: {_native.__file__}", flush=True)
+    gpu_status = (
+        "GPU execution available"
+        if capabilities.gpu_available
+        else "No GPU adapter available; GPU execution tests cannot qualify this host"
+    )
+    print(gpu_status, flush=True)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a") as destination:
+            print(f"Python {sys.version.split()[0]}: {gpu_status}.", file=destination)
 
     tests = Path(__file__).resolve().parents[1] / "tests"
     suite = unittest.defaultTestLoader.discover(str(tests))

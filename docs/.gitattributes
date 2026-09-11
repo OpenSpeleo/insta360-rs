@@ -1,0 +1,2 @@
+# The catalog test compares include_str! bytes with the generator's LF output.
+housing-catalog.md text eol=lf

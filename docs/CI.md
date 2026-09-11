@@ -3,10 +3,12 @@
 [CI](../.github/workflows/ci.yml) owns all test suites and runs on pushes to
 `master` and manual dispatch. Pull requests, tag pushes, and pushes to other
 branches, including Dependabot branches, do not start CI. To check a branch
-before merging, manually dispatch the workflow for that branch. The full lint,
-Rust feature and Python matrices run on Linux x86_64 (`ubuntu-24.04`).
-Additional underwater-engine Rust jobs execute on Linux, macOS ARM64/x86_64 and
-Windows x86_64.
+before merging, manually dispatch the workflow for that branch. One `Tests`
+matrix runs all-feature Rust tests and the full installed-wheel Python 3.14
+suite on Linux x86_64 (`ubuntu-24.04`), macOS ARM64 (`macos-15`), macOS x86_64
+(`macos-15-intel`), and Windows x86_64 (`windows-2025`). Linux also runs lint,
+feature-boundary checks, package verification and Python 3.10–3.13 compatibility
+tests against its same wheel. There is no separate underwater inference job.
 
 After every check passes, CI fetches tags and looks for the workspace's exact
 `vMAJOR.MINOR.PATCH` version tag on the tested commit. If present, it dispatches
@@ -38,7 +40,7 @@ channel, or alternate MSRV compiler. Update that file to change the compiler
 everywhere. All seven workspace members share the committed root `Cargo.lock`,
 and builds use `--locked`. Default members are the library and five data crates.
 Python is tested explicitly so its media/GPU dependencies do not change the
-library feature matrix.
+library's feature boundaries.
 
 A dedicated FFmpeg prewarm job runs directly in the pinned manylinux_2_28
 Actions job container. A small preceding job reads the image and native cache
@@ -54,39 +56,73 @@ starts the job container. On a miss it builds and validates the SDK, then saves
 the archive before uploading `ffmpeg-linux-x86_64`. The job summary reports the
 cache key and whether it restored or built the SDK. The Linux lint, Rust, and
 wheel jobs download that exact artifact. `use-ffmpeg.py` relocates pkg-config
-metadata and exports library paths for the consuming checkout. Release can
-restore the same completed SDK using the exact native/image cache key. On a
-miss, it downloads only `ffmpeg-linux-x86_64` from the verified source CI run.
-If that SDK artifact is absent or expired, the Linux wheel builder compiles the
-SDK. The wheel and sdist are always built afresh. Linux, macOS, and Windows
-cannot share compiled native libraries; native release caches remain
-target-specific.
+metadata and exports library paths for the consuming checkout. After the Linux
+host checks, Tests restores the pristine archive before building the wheel: its
+pkg-config files must again refer to the container's `/wheel-cache` mount.
+Release can restore the same completed SDK using the exact native/image cache
+key. On a miss, it downloads only `ffmpeg-linux-x86_64` from the verified source
+CI run. If that SDK artifact is absent or expired, the Linux wheel builder
+compiles the SDK. The wheel and sdist are always built afresh.
+
+The native prewarm matrix prepares matching macOS and Windows SDKs using
+`build-native-wheel.py --prewarm`. This mode builds only FFmpeg and x265 (plus
+Windows zlib), then archives the completed prefix and verified source downloads;
+it does not build MNN or a wheel. `--cache-key` shares the wheel builder's
+native recipe, host, CMake and deployment-target identity, independently of Rust
+or Python packaging changes. `prewarm-native-ffmpeg` restores the completed
+archive and reruns preparation: an existing matching prefix skips compilation,
+while a changed host fingerprint selects a new build. Artifacts are named
+`ffmpeg-macos-arm64`, `ffmpeg-macos-x86_64` and `ffmpeg-windows-x86_64`.
+
+Native tests consume those artifacts. `use-ffmpeg.py` relocates pkg-config paths
+and exports compiler/runtime paths. macOS libraries use `@rpath` names with
+`DYLD_FALLBACK_LIBRARY_PATH`, preserving the separate Homebrew fixture tool's
+absolute library dependencies. Windows receives `FFMPEG_DIR` and the SDK DLL
+directory on PATH. Native release builds use the same prewarm action and cache,
+with the verified source CI artifact as fallback before rebuilding. Native wheel
+builds verify and reuse the MNN prefix already prepared by `setup-mnn`. Its
+cache key hashes `build-mnn.py --configuration`, including the SDK, deployment
+target and compiler settings; an incompatible older prefix must not be restored
+under a new configuration.
 
 The separate system `ffmpeg`/`ffprobe` executables generate test fixtures; the
 application links the prepared FFmpeg libraries. Fixture generation needs
-MPEG-4, AAC, ALAC, AC3, and libx265 encoders and lavfi sources. Linux GPU tests
-use Mesa's software Vulkan driver with `INSTA360_RS_REQUIRE_GPU=1`, so an absent
-adapter fails rather than silently skipping. This exercises Vulkan functionality
-without requiring a physical GPU. Licensed recordings, vendor-oracle
-comparisons, and physical GPU qualification remain separate; see
-[testing.md](testing.md).
+MPEG-4, AAC, ALAC, AC3, and 10-bit-capable libx265 encoders and lavfi sources.
+`check-test-tools.py` requires these capabilities and generates/probes a small
+fixture before the suites run. macOS installs Homebrew FFmpeg; Windows installs
+the static Chocolatey FFmpeg executables. The prepared SDK itself has no fixture
+executables.
+
+Linux requires Mesa software Vulkan and Windows requires a usable D3D12 adapter
+(the hosted runner's software WARP adapter can satisfy this), with
+`INSTA360_RS_REQUIRE_GPU=1`. macOS runs Metal tests when an adapter is
+available; standard hosted runners are not treated as guaranteed GPU hosts. The
+installed Python runner reports GPU availability in the job summary. An
+unavailable macOS adapter leaves GPU execution unqualified even when the
+all-feature build passes. Licensed recordings, vendor-oracle comparisons, and
+physical GPU qualification remain separate; see [testing.md](testing.md).
 
 ## Checks and artifacts
 
-| Job                                            | Coverage                                                                                                                         |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Prepare shared FFmpeg libraries                | Cached source build and runtime capability validation                                                                            |
-| Full prek                                      | Both hook configurations and all Rust manifests                                                                                  |
-| Rust (default/media/gpu/cli/underwater-ai/all) | All test targets, doctests, and release builds of the library, enabled CLI, and examples for each feature configuration          |
-| Rust (all)                                     | Also executes the binding crate's Rust unit tests and builds API documentation with warnings denied                              |
-| Rust (all)                                     | Also packages, size-checks, tests, and builds all six extracted crates with `python scripts/ci/check-packages.py --all-features` |
-| Linux Python build                             | Creates an sdist, builds an ABI3 wheel from it, repairs its libraries, and smoke tests a clean installation                      |
-| Python 3.10–3.14                               | Installs the repaired wheel and executes the full Python suite on every interpreter, requiring usable GPU and compiled AI        |
-| Underwater engine platforms                    | All core/AI test targets and doctests on Linux, macOS ARM64/x86_64 and Windows; independent MNN build on each host               |
-| Trigger matching release                       | Dispatches release only for the workspace-version tag on the commit that passed all checks                                       |
+| Job                              | Coverage                                                                                                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prepare FFmpeg (each platform)   | Restore or build the matching native SDK once for downstream consumers                                                                                           |
+| Full prek                        | Both hook configurations, all Rust manifests and CI-script unit tests                                                                                            |
+| Tests (each platform)            | All-feature Rust test targets, doctests, release builds and binding Rust tests; build/repair a wheel and run the full Python 3.14 suite                          |
+| Tests (Linux), additional checks | Compile isolated features, execute the disabled-AI failure tests, build API docs, verify extracted crate archives, and smoke-test the wheel in a clean container |
+| Python 3.10–3.13 installed wheel | Test the same Linux wheel on the remaining supported interpreters; 3.14 already ran in Tests (Linux)                                                             |
+| Trigger matching release         | Dispatch release for the matching tag only after every test platform and compatibility row passes                                                                |
 
-CI's `python-test-dist-linux` artifact contains its test wheel and sdist;
-`rust-crates` contains its verified crate archives. These are available for
+`--all-features` excludes code guarded by disabled-feature conditions. Linux
+therefore retains `cargo check --all-targets` for default, media, GPU, CLI and
+underwater-AI configurations, plus the specific unit/export failures for missing
+AI support. These checks do not repeat the complete runtime suites. Extracted
+crate tests are retained because they verify the shipped files rather than the
+checkout.
+
+CI's `python-test-dist-<platform>` artifacts contain repaired test wheels;
+`python-test-dist-linux-x86_64` also contains the source distribution.
+`rust-crates` contains verified crate archives. These are available for
 inspection, while release builds its own distributions. Linux's clean smoke test
 uses a fresh Python container without system FFmpeg libraries and checks import,
 capabilities, probing, decoding, extraction, and typing metadata.
@@ -170,7 +206,7 @@ would invalidate their hashes. Rust's bundled-asset tests check their integrity.
 The asset manifest and provider code remain covered by hooks. Markdown and
 whitespace hooks may rewrite files; review those edits and rerun until clean.
 
-Run the test/build matrix:
+Run the full test/build configuration:
 
 ```sh
 export XDG_RUNTIME_DIR="$(mktemp -d)"
@@ -179,16 +215,23 @@ export INSTA360_RS_REQUIRE_GPU=1
 export LIBCLANG_PATH="$(llvm-config --libdir)"
 python3 scripts/ci/build-mnn.py --output .cache/mnn
 export MNN_ROOT="$PWD/.cache/mnn"
-for features in '' media gpu cli underwater-ai media,gpu,cli,underwater-ai; do
-  cargo test --locked --all-targets --no-default-features --features "$features"
-  cargo test --locked --doc --no-default-features --features "$features"
-  cargo build --locked --release --lib --bins --examples \
-    --no-default-features --features "$features"
-done
+cargo test --locked --all-targets --all-features
+cargo test --locked --doc --all-features
+cargo build --locked --release --lib --bins --examples --all-features
 cargo test --locked --manifest-path src-python/Cargo.toml --all-targets
 RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
 python3 scripts/ci/check-packages.py --all-features
 python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+```
+
+The Linux-only feature-boundary checks are:
+
+```sh
+for features in '' media gpu cli underwater-ai; do
+  cargo check --locked --all-targets --no-default-features --features "$features"
+done
+cargo test --locked --no-default-features --lib ai_capability_fails_before_requesting_resources_without_native_feature
+cargo test --locked --no-default-features --features media --test decoded_layouts unavailable_ai_fails_preflight_and_both_exports_before_creating_outputs
 ```
 
 For fast Python development, build and install a native wheel against system
@@ -224,16 +267,16 @@ matrix.
 Enable Actions and allow the referenced actions. CI requires no repository
 secrets or publishing permissions. Its final dispatch job receives
 `actions: write`; other CI jobs have read-only repository permissions. Master
-pushes run Full prek, every Rust matrix job, the Linux test-wheel build, and
-every Python test job. PR checks are not started automatically, so requiring
+pushes run Full prek, every platform's full Tests job, and the additional Linux
+Python compatibility jobs. PR checks are not started automatically, so requiring
 them for merging would require a manual CI run on the PR's current commit.
 
 `Swatinem/rust-cache` caches Rust dependencies and build outputs with separate
-keys for each feature job and each wheel target. `actions/cache` stores prek
+keys for each platform and each wheel target. `actions/cache` stores prek
 environments, completed SDKs, and tool downloads. The Linux wheel tools cache
-contains only Cargo and rustup directories, avoiding another copy of the SDK and
-native build trees. Build artifacts transfer the prepared libraries between CI
-jobs and provide the Linux release job's cache fallback. GitHub scopes cache
+contains Cargo, rustup and MNN directories, avoiding another copy of the FFmpeg
+SDK and native build trees. Build artifacts transfer prepared libraries between
+CI jobs and provide each release platform's cache fallback. GitHub scopes cache
 access by ref: releases can restore the Linux SDK populated on the default
 branch, but a native cache created on one release tag is not available to
 another tag. Native caches can help same-tag reruns or restore matching
@@ -252,11 +295,11 @@ Run `prek autoupdate` to update hooks, review the revisions, and rerun all
 checks. Keep binstall tool versions aligned when upgrading them. Compiler
 upgrades belong only in `rust-toolchain.toml`.
 
-Windows/macOS wheels are built in release and receive compilation and repair
-checks, without runtime testing. Linux ARM64, Windows ARM64, musl, PyPy, and
-free-threaded CPython wheels are outside this build matrix. See
-[RELEASE.md](RELEASE.md) for registry configuration and publication from a
-version tag.
+Every platform builds and runtime-tests its CI wheel. Release builds fresh
+wheels with compilation and repair checks without rerunning the runtime suites.
+Linux ARM64, Windows ARM64, musl, PyPy, and free-threaded CPython wheels are
+outside this build matrix. See [RELEASE.md](RELEASE.md) for registry
+configuration and publication from a version tag.
 
 ## Optional underwater AI native prerequisite
 

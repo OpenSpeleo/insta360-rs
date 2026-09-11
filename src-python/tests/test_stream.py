@@ -447,12 +447,16 @@ class StreamIntegrationTests(unittest.TestCase):
                     packet.pts * packet.time_base[0] / packet.time_base[1], 5
                 )
                 reader = stream.open_video()
-                first = reader.frame_at(0)
-                self.assertEqual(first.timestamp_seconds, 0)
-                self.assertEqual(first.pts, stream.info.start_time)
-                self.assertAlmostEqual(reader.frame_at(0.45).timestamp_seconds, 0.5)
-                self.assertIsNone(reader.frame_at(10))
-                self.assertEqual(reader.frame_at(0).data, first.data)
+                try:
+                    first = reader.frame_at(0)
+                    self.assertEqual(first.timestamp_seconds, 0)
+                    self.assertEqual(first.pts, stream.info.start_time)
+                    self.assertAlmostEqual(reader.frame_at(0.45).timestamp_seconds, 0.5)
+                    self.assertIsNone(reader.frame_at(10))
+                    self.assertEqual(reader.frame_at(0).data, first.data)
+                finally:
+                    # Windows cannot remove a fixture with an open FFmpeg reader.
+                    del reader
 
     def test_changed_or_deleted_source_is_detected_when_opening_new_readers(self):
         with tempfile.TemporaryDirectory() as directory:

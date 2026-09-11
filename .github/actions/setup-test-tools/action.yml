@@ -1,0 +1,30 @@
+---
+name: Set up media test tools
+description: Full FFmpeg fixture executables and the platform's GPU test policy
+runs:
+  using: composite
+  steps:
+    - name: Install fixture tools and software Vulkan (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y ffmpeg mesa-vulkan-drivers libvulkan1 vulkan-tools
+        mkdir -p "$RUNNER_TEMP/xdg-runtime"
+        chmod 700 "$RUNNER_TEMP/xdg-runtime"
+        echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg-runtime" >> "$GITHUB_ENV"
+        echo 'VK_LOADER_DRIVERS_SELECT=lvp_icd*' >> "$GITHUB_ENV"
+    - name: Install fixture tools (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install ffmpeg
+    - name: Install static fixture tools (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install ffmpeg --yes --no-progress
+        if ($LASTEXITCODE -ne 0) { throw 'Installing FFmpeg fixture tools failed' }
+    - name: Require software GPU execution (Linux and Windows)
+      if: runner.os != 'macOS'
+      shell: bash
+      run: echo 'INSTA360_RS_REQUIRE_GPU=1' >> "$GITHUB_ENV"

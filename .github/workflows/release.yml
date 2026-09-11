@@ -106,6 +106,9 @@ jobs:
     needs: verify-ci
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -120,14 +123,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-native-wheel
+      - uses: ./.github/actions/prewarm-native-ffmpeg
+        with:
+          target: ${{ matrix.target }}
+          source-ci-run: ${{ inputs.ci_run_id }}
+      - uses: ./.github/actions/setup-mnn
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: wheel-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh') }}
           workspaces: . -> target/wheel-native
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .cache/wheel-native
-          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh', '.github/actions/setup-native-wheel/action.yml') }}
       - name: Build and repair the native wheel
         run: python scripts/ci/build-native-wheel.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

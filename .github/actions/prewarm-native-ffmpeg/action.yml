@@ -1,0 +1,53 @@
+---
+name: Prepare native FFmpeg SDK
+description: Restore or build the same macOS or Windows SDK used by tests and wheels
+inputs:
+  target:
+    description: Native platform and architecture used for cache and artifact names
+    required: true
+  source-ci-run:
+    description: Verified source CI run to use when the release cache is unavailable
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Identify the native SDK
+      id: spec
+      shell: bash
+      run: |
+        key=$(python scripts/ci/build-native-wheel.py --cache-key)
+        echo "cache-key=ffmpeg-${{ inputs.target }}-sdk-v1-$key" >> "$GITHUB_OUTPUT"
+    - name: Restore the completed native SDK
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: dist/ffmpeg-sdk.tar.gz
+        key: ${{ steps.spec.outputs.cache-key }}
+    - name: Reuse the verified source CI SDK on a cache miss
+      id: artifact
+      if: steps.cache.outputs.cache-hit != 'true' && inputs.source-ci-run != ''
+      continue-on-error: true
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ffmpeg-${{ inputs.target }}
+        run-id: ${{ inputs.source-ci-run }}
+        github-token: ${{ github.token }}
+        path: dist
+    - name: Extract the completed SDK
+      if: steps.cache.outputs.cache-hit == 'true' || steps.artifact.outcome == 'success'
+      shell: bash
+      run: tar -xzf dist/ffmpeg-sdk.tar.gz -C .
+    - name: Verify or build the matching native SDK
+      shell: bash
+      # Recheck the host fingerprint even after an artifact restore: a later
+      # release runner can have a different OS/CMake identity from source CI.
+      run: python scripts/ci/build-native-wheel.py --prewarm
+    - name: Save the completed native SDK
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: dist/ffmpeg-sdk.tar.gz
+        key: ${{ steps.spec.outputs.cache-key }}
+    - name: Configure compiler and runtime paths
+      shell: bash
+      run: python scripts/ci/use-ffmpeg.py

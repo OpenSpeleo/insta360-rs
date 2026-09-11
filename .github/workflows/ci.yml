@@ -34,7 +34,7 @@ jobs:
           echo "cache-key=ffmpeg-linux-sdk-v1-$native_key" >> "$GITHUB_OUTPUT"
 
   ffmpeg-prewarm:
-    name: Prepare shared FFmpeg libraries
+    name: Prepare FFmpeg (Linux x86_64)
     needs: ffmpeg-spec
     runs-on: ubuntu-24.04
     container:
@@ -91,6 +91,36 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  ffmpeg-native:
+    name: Prepare FFmpeg (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+          - os: windows-2025
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - uses: ./.github/actions/setup-native-wheel
+      - uses: ./.github/actions/prewarm-native-ffmpeg
+        with:
+          target: ${{ matrix.target }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: dist/ffmpeg-sdk.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
   prek:
     needs: ffmpeg-prewarm
     name: Full prek
@@ -111,79 +141,102 @@ jobs:
         run: python -m unittest discover -s scripts/ci -p 'test_*.py' -v
       - run: prek run --all-files --show-diff-on-failure
 
-  rust:
-    needs: [ffmpeg-prewarm, prek]
-    name: Rust (${{ matrix.features.name }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  tests:
+    name: Tests (${{ matrix.target }})
+    needs: [ffmpeg-prewarm, ffmpeg-native, prek]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        features:
-          - name: default
-            args: --no-default-features
-          - name: media
-            args: --no-default-features --features media
-          - name: gpu
-            args: --no-default-features --features gpu
-          - name: cli
-            args: --no-default-features --features cli
-          - name: underwater-ai
-            args: --no-default-features --features underwater-ai
-          - name: all
-            args: --all-features
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x86_64
+          - os: windows-2025
+            target: windows-x86_64
     env:
-      INSTA360_RS_REQUIRE_GPU: '1'
+      INSTA360_RS_REQUIRE_UNDERWATER_AI: '1'
+      PYO3_PYTHON: python
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-linux
+        if: runner.os == 'Linux'
         with:
-          cache-key: rust-${{ matrix.features.name }}
-      - name: Verify generated-fixture and GPU prerequisites
+          cache-key: tests-${{ matrix.target }}
+      - uses: ./.github/actions/setup-rust
+        if: runner.os != 'Linux'
+      - uses: ./.github/actions/setup-native-wheel
+        if: runner.os != 'Linux'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: runner.os != 'Linux'
+        with:
+          name: ffmpeg-${{ matrix.target }}
+          path: .cache/artifacts
+      - name: Configure the prepared native SDK
+        if: runner.os != 'Linux'
+        shell: bash
         run: |
-          ffmpeg -hide_banner -h encoder=libx265 2>&1 | tee /tmp/encoder.txt
-          grep -q 'Encoder libx265' /tmp/encoder.txt
-          vulkaninfo --summary
-      - name: All test targets
-        run: cargo test --locked --all-targets ${{ matrix.features.args }}
-      - name: Documentation tests
-        run: cargo test --locked --doc ${{ matrix.features.args }}
+          tar -xzf .cache/artifacts/ffmpeg-sdk.tar.gz -C .
+          python scripts/ci/use-ffmpeg.py
+      - uses: ./.github/actions/setup-mnn
+        if: runner.os != 'Linux'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: runner.os != 'Linux'
+        with:
+          key: tests-${{ matrix.target }}
+          workspaces: |
+            . -> target
+            . -> target/wheel-native
+      - uses: ./.github/actions/setup-test-tools
+        if: runner.os != 'Linux'
+      - name: Require Linux software Vulkan execution
+        if: runner.os == 'Linux'
+        run: echo 'INSTA360_RS_REQUIRE_GPU=1' >> "$GITHUB_ENV"
+      - name: Verify fixture prerequisites
+        run: python scripts/ci/check-test-tools.py
+      - name: All Rust test targets
+        run: cargo test --locked --all-targets --all-features
+      - name: Rust documentation tests
+        run: cargo test --locked --doc --all-features
       - name: Release build (library, CLI, and examples)
-        run: cargo build --locked --release --lib --bins --examples ${{ matrix.features.args }}
+        run: cargo build --locked --release --lib --bins --examples --all-features
       - name: Python binding Rust unit tests
-        env:
-          PYO3_PYTHON: python
-        if: matrix.features.name == 'all'
         run: cargo test --locked --manifest-path src-python/Cargo.toml --all-targets
+      - name: Check isolated features without repeating the complete test suites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for features in '' media gpu cli underwater-ai; do
+            cargo check --locked --all-targets --no-default-features --features "$features"
+          done
+          cargo test --locked --no-default-features --lib ai_capability_fails_before_requesting_resources_without_native_feature
+          cargo test --locked --no-default-features --features media --test decoded_layouts unavailable_ai_fails_preflight_and_both_exports_before_creating_outputs
       - name: Check API documentation
-        if: matrix.features.name == 'all'
+        if: runner.os == 'Linux'
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked --no-deps --all-features
-      - name: Verify all crates.io archives and their size limits
-        if: matrix.features.name == 'all'
+      - name: Verify shipped crates and their size limits
+        if: runner.os == 'Linux'
         run: python scripts/ci/check-packages.py --all-features
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: matrix.features.name == 'all'
+        if: runner.os == 'Linux'
         with:
           name: rust-crates
           path: dist/crates/*.crate
           if-no-files-found: error
           compression-level: 0
-
-  python-build:
-    needs: [ffmpeg-prewarm, prek]
-    name: Build Linux wheel for testing
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: runner.os == 'Linux'
         with:
           key: wheel-${{ hashFiles('scripts/ci/*.sh') }}
           workspaces: . -> target/wheel-build
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: runner.os == 'Linux'
         with:
           path: |
             .cache/wheel/cargo
@@ -191,37 +244,43 @@ jobs:
             .cache/wheel/mnn-*
           key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'scripts/ci/build-mnn.py') }}
           restore-keys: wheel-tools-linux-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ffmpeg-linux-x86_64
-          path: .cache/artifacts
-      - name: Restore the prepared native FFmpeg libraries
-        run: |
-          mkdir -p .cache/wheel
-          tar -xzf .cache/artifacts/ffmpeg-sdk.tar.gz -C .
-      - name: Build and repair manylinux wheel from the source distribution
+      - name: Restore container paths in the Linux SDK
+        if: runner.os == 'Linux'
+        # Rust's host setup relocated pkg-config files. The manylinux builder
+        # mounts the SDK at /wheel-cache, so restore its original metadata.
+        run: tar -xzf .cache/artifacts/ffmpeg-sdk.tar.gz -C .
+      - name: Build and repair the Linux wheel from its source distribution
+        if: runner.os == 'Linux'
         run: bash scripts/ci/build-wheel.sh
+      - name: Build and repair the native wheel from its source distribution
+        if: runner.os != 'Linux'
+        run: python scripts/ci/build-native-wheel.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-test-dist-linux
+          name: python-test-dist-${{ matrix.target }}
           path: |
             dist/*.whl
             dist/insta360*.tar.gz
           if-no-files-found: error
+      - name: Install the repaired wheel
+        shell: bash
+        run: python -m pip install --no-deps dist/*.whl
+      - name: Full Python 3.14 tests against the installed wheel
+        run: python -I -X faulthandler src-python/scripts/run-tests.py
       - name: Smoke test without system FFmpeg libraries
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
           ffmpeg -v error -f lavfi -i color=c=blue:s=32x16:r=5 \
             -t 0.4 -c:v mpeg4 /tmp/fixture.mp4
-          PYTHONPATH=src-python/tests python3 - <<'PY'
+          PYTHONPATH=src-python/tests python3 - <<'PYTHON'
           from pathlib import Path
           from media_fixtures import v3_tail
 
           Path("/tmp/fixture.insv").write_bytes(
               Path("/tmp/fixture.mp4").read_bytes() + v3_tail()
           )
-          PY
+          PYTHON
           docker run --rm \
             -v "$PWD/dist:/dist:ro" \
             -v "$PWD/scripts/ci:/checks:ro" \
@@ -231,7 +290,7 @@ jobs:
 
   python-test:
     name: Python ${{ matrix.python }} installed wheel
-    needs: python-build
+    needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -240,7 +299,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python: ['3.10', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -248,40 +307,19 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-test-dist-linux
+          name: python-test-dist-linux-x86_64
           path: dist
-      - name: Install fixture generator and the built wheel
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg mesa-vulkan-drivers libvulkan1 vulkan-tools
-          mkdir -p "$RUNNER_TEMP/xdg-runtime"
-          chmod 700 "$RUNNER_TEMP/xdg-runtime"
-          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg-runtime" >> "$GITHUB_ENV"
-          echo 'VK_LOADER_DRIVERS_SELECT=lvp_icd*' >> "$GITHUB_ENV"
-          python -m pip install --no-deps dist/*.whl
+      - uses: ./.github/actions/setup-test-tools
+      - name: Verify fixture prerequisites
+        run: python scripts/ci/check-test-tools.py
+      - name: Install the built wheel
+        run: python -m pip install --no-deps dist/*.whl
       - name: Full Python tests against the installed extension
         run: python -I -X faulthandler src-python/scripts/run-tests.py
 
-  underwater-platform:
-    name: Underwater inference (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2025]
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/setup-mnn
-      - name: Full core and underwater inference tests
-        run: cargo test --locked --all-targets --no-default-features --features underwater-ai
-      - name: Underwater documentation tests
-        run: cargo test --locked --doc --no-default-features --features underwater-ai
-
   trigger-release:
     name: Trigger matching release
-    needs: [prek, rust, python-build, python-test, underwater-platform]
+    needs: [prek, tests, python-test]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

@@ -92,12 +92,14 @@ Ruff and formatting hooks can rewrite files; review changes and rerun them.
 test suite. Missing prerequisites fail instead of turning media coverage into
 skips. Rebuild the extension after Rust changes before running tests.
 
-CI's Full prek job runs both hook configurations. The dedicated Python 3.10–3.14
-jobs use `scripts/run-tests.py` against the repaired Linux wheel retained as
-`python-test-dist-linux`. All test suites run in `ci.yml`. After a matching
-version tag passes CI, `release.yml` builds fresh Linux, macOS, and Windows
-distributions. Release performs build and repair checks without rerunning the
-runtime suites or publishing CI's test wheel.
+CI's Full prek job runs both hook configurations. The common Tests matrix runs
+`scripts/run-tests.py` against a repaired wheel on Python 3.14 for Linux, macOS
+ARM64/x86_64 and Windows. Additional Python 3.10–3.13 jobs test the same Linux
+wheel retained as `python-test-dist-linux-x86_64`, avoiding a duplicate 3.14
+run. All test suites run in `ci.yml`. After a matching version tag passes CI,
+`release.yml` builds fresh Linux, macOS, and Windows distributions. Release
+performs build and repair checks without rerunning the runtime suites or
+publishing CI's test wheel.
 
 ## Contract coverage
 
@@ -148,10 +150,13 @@ checks all housing/environment/accessory enum mappings, strict option controls,
 read-only probe and export optical reports, and actual Legacy/AI image exports.
 Each of four AI styles executes inference; independent selected-image exports
 must reset temporal state, and zero restoration strength preserves exact output.
-CI requires a usable GPU and the AI engine on every Python 3.10–3.14 wheel-test
-row through `INSTA360_RS_REQUIRE_GPU=1` and
-`INSTA360_RS_REQUIRE_UNDERWATER_AI=1`. Installation alone is not the matrix
-test.
+CI requires the AI engine on every platform through
+`INSTA360_RS_REQUIRE_UNDERWATER_AI=1`. Linux (Python 3.10–3.14) and Windows
+(Python 3.14) require a usable GPU through `INSTA360_RS_REQUIRE_GPU=1`; software
+Vulkan and D3D12/WARP satisfy those checks. macOS runs GPU tests when Metal is
+available. The runner reports adapter availability in the job summary, so a
+successful macOS run without an adapter does not establish GPU execution.
+Installation alone is not the matrix test.
 
 Source and all-feature builds need the pinned MNN prefix in `MNN_ROOT`; see
 [installation](installation.md). Plain Rust binding tests omit wheel-only

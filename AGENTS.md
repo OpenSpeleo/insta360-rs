@@ -184,15 +184,19 @@ cargo test --locked --all-targets --no-default-features
 cargo test --locked --doc --no-default-features
 ```
 
-For media, GPU, CLI, or shared public API changes, run the relevant
-configurations from CI's `default`, `media`, `gpu`, `cli`, and `all` feature
-matrix. The combined configuration uses:
+For media, GPU, CLI, or shared public API changes, run the combined
+configuration used by CI's Linux, macOS ARM64/x86_64 and Windows test matrix:
 
 ```sh
 cargo test --locked --all-targets --all-features
 cargo test --locked --doc --all-features
 cargo build --locked --release --lib --bins --examples --all-features
 ```
+
+All-feature builds exclude disabled-feature code. Linux CI retains isolated
+`cargo check --all-targets` configurations and the specific disabled-AI unit and
+export failure tests without repeating every complete runtime suite. Preserve
+these distinct contracts when changing CI; see `docs/CI.md` for exact commands.
 
 Default workspace members exclude the Python extension to preserve feature
 isolation. Test its Rust code separately:
@@ -287,8 +291,11 @@ validation.
 
 `.github/workflows/ci.yml` owns all test suites and runs on `master` pushes and
 manual dispatch. Pull requests, tags, and other branch pushes do not trigger it;
-dispatch CI explicitly when branch validation is needed. Linux runs the
-test/lint matrix and Python 3.10-3.14 tests against a wheel built for testing.
+dispatch CI explicitly when branch validation is needed. One Tests matrix runs
+all-feature Rust tests and the full Python 3.14 repaired-wheel suite on Linux,
+macOS ARM64/x86_64 and Windows. Linux also runs lint, feature-boundary/package
+checks and Python 3.10-3.13 against the same wheel. Linux Vulkan and Windows
+D3D12 execution are required; macOS Metal availability is reported explicitly.
 
 After all checks pass, CI fetches tags and dispatches `release.yml` on the
 stable `vMAJOR.MINOR.PATCH` tag matching both the workspace version and tested
@@ -303,9 +310,11 @@ source distribution; both publishing jobs wait for every wheel build. macOS and
 Windows jobs build and repair wheels without runtime test suites. The shared
 source-built Linux FFmpeg SDK uses an exact native/image cache key, then falls
 back to the verified CI run's SDK artifact, then compilation if unavailable.
-Other platforms keep target-specific caches. Keep the existing Rust profiles and
-Maturin build settings unchanged unless explicitly requested. The Python
-extension keeps `publish = false` for crates.io.
+macOS and Windows prewarm matching SDKs for CI and reuse the same cache/artifact
+fallback during release, rechecking the current host fingerprint. Native wheels
+reuse the verified MNN prefix prepared for the job. Keep the existing Rust
+profiles and Maturin build settings unchanged unless explicitly requested. The
+Python extension keeps `publish = false` for crates.io.
 
 `[workspace.package].version` is the package-version authority. All seven crates
 inherit it and Maturin derives the Python version dynamically. The six exact

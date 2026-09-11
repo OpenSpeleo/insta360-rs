@@ -103,6 +103,10 @@ parameters. Already-matching IDs are not converted again. The
 [generated catalog](housing-catalog.md) includes the complete registry, exact
 coefficients, source software/version and artifact-relative paths.
 
+Regenerate it with `cargo run --locked --example housing_catalog`. The catalog
+test compares the checked-in file exactly with the generator output, so
+`docs/.gitattributes` preserves LF line endings on Windows checkouts too.
+
 ## Embedded profile descriptors
 
 The supplied sample's named profile submessages have one of two protobuf shapes:

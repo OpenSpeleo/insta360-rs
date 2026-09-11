@@ -1,5 +1,6 @@
 """Check the SDK cache identity independently of wheel and Rust dependencies."""
 
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -7,6 +8,108 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+
+SPEC = importlib.util.spec_from_file_location(
+    "use_ffmpeg", Path(__file__).with_name("use-ffmpeg.py")
+)
+ffmpeg = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(ffmpeg)
+
+
+class PreparedFFmpegTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="prepared ffmpeg ")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name).resolve()
+
+    def sdk(self, native):
+        cache = self.root / ".cache" / ("wheel-native" if native else "wheel")
+        prefix = cache / "native/test/prefix"
+        (prefix / "include/libavcodec").mkdir(parents=True)
+        (prefix / "include/libavcodec/avcodec.h").write_text("original header\n")
+        (prefix / "lib/pkgconfig").mkdir(parents=True)
+        (prefix / "lib/pkgconfig/libavcodec.pc").write_text(
+            "prefix=/previous/checkout\nlibdir=/previous/checkout/lib\n"
+        )
+        (cache / "sdk-prefix.txt").write_text("native/test/prefix\n")
+        return prefix
+
+    def test_linux_sdk_preserves_existing_runtime_paths(self):
+        prefix = self.sdk(native=False)
+        with (
+            patch.object(ffmpeg.sys, "platform", "linux"),
+            patch.dict(os.environ, {"LD_LIBRARY_PATH": "/existing/lib"}, clear=True),
+        ):
+            env = ffmpeg.configure(self.root)
+        self.assertEqual(env, {
+            "PKG_CONFIG_PATH": str(prefix / "lib/pkgconfig"),
+            "LD_LIBRARY_PATH": str(prefix / "lib") + os.pathsep + "/existing/lib",
+        })
+        self.assertEqual(
+            (prefix / "lib/pkgconfig/libavcodec.pc").read_text(),
+            f"prefix={prefix}\nlibdir={prefix}/lib\n",
+        )
+
+    def test_windows_sdk_exports_compiler_and_dll_search_paths(self):
+        prefix = self.sdk(native=True)
+        with (
+            patch.object(ffmpeg.sys, "platform", "win32"),
+            patch.dict(os.environ, {"PATH": "compiler-tools"}, clear=True),
+            patch.object(ffmpeg.subprocess, "check_output") as output,
+        ):
+            env = ffmpeg.configure(self.root)
+        output.assert_not_called()
+        self.assertEqual(env["FFMPEG_DIR"], str(prefix))
+        self.assertEqual(env["PATH"], str(prefix / "bin") + os.pathsep + "compiler-tools")
+        self.assertNotIn("LD_LIBRARY_PATH", env)
+
+    def test_macos_uses_fallback_loading_and_selected_sdk(self):
+        prefix = self.sdk(native=True)
+        inherited = {
+            "DYLD_FALLBACK_LIBRARY_PATH": "/other/lib",
+            "SDKROOT": "/selected/sdk",
+            "LIBCLANG_PATH": "/selected/clang/lib",
+            "MACOSX_DEPLOYMENT_TARGET": "12.0",
+            "BINDGEN_EXTRA_CLANG_ARGS": "--sysroot=/selected/sdk -DSELECTED=1",
+        }
+        with (
+            patch.object(ffmpeg.sys, "platform", "darwin"),
+            patch.dict(os.environ, inherited, clear=True),
+            patch.object(ffmpeg.subprocess, "check_output") as output,
+        ):
+            env = ffmpeg.configure(self.root)
+        output.assert_not_called()
+        self.assertEqual(env["FFMPEG_DIR"], str(prefix))
+        self.assertNotIn("DYLD_LIBRARY_PATH", env)
+        self.assertEqual(
+            env["DYLD_FALLBACK_LIBRARY_PATH"], str(prefix / "lib") + os.pathsep + "/other/lib",
+        )
+        for key in inherited.keys() - {"DYLD_FALLBACK_LIBRARY_PATH"}:
+            self.assertEqual(env[key], inherited[key])
+
+    def test_macos_discovers_missing_sdk_configuration(self):
+        self.sdk(native=True)
+        with (
+            patch.object(ffmpeg.sys, "platform", "darwin"),
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(ffmpeg.subprocess, "check_output", side_effect=[
+                "/selected/sdk\n", "/selected/toolchain/bin/clang\n",
+            ]),
+        ):
+            env = ffmpeg.configure(self.root)
+        self.assertEqual(env["SDKROOT"], "/selected/sdk")
+        self.assertEqual(env["LIBCLANG_PATH"], str(Path("/selected/toolchain/lib")))
+        self.assertEqual(env["BINDGEN_EXTRA_CLANG_ARGS"], "--sysroot=/selected/sdk")
+        self.assertEqual(env["MACOSX_DEPLOYMENT_TARGET"], "11.0")
+
+    def test_prefix_cannot_escape_the_extracted_cache(self):
+        prefix = self.sdk(native=True)
+        cache = prefix.parents[2]
+        (cache / "sdk-prefix.txt").write_text("../../../outside\n")
+        with patch.object(ffmpeg.sys, "platform", "win32"):
+            with self.assertRaisesRegex(RuntimeError, "invalid prefix"):
+                ffmpeg.configure(self.root)
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "requires POSIX bash")

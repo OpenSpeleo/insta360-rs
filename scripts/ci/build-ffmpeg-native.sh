@@ -62,7 +62,7 @@ if [[ $wheel_platform == macos ]]; then
     x265_options+=(
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:?set deployment target}"
         "-DCMAKE_OSX_ARCHITECTURES=$(uname -m)"
-        "-DCMAKE_INSTALL_NAME_DIR=$prefix/lib"
+        -DCMAKE_INSTALL_NAME_DIR=@rpath
     )
 else
     x265_options+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -DSTATIC_LINK_CRT=OFF)
@@ -86,6 +86,7 @@ fi
 
 if [[ $wheel_platform == macos ]]; then
     ffmpeg_options+=(
+        --install-name-dir=@rpath
         "--extra-cflags=-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
         "--extra-ldflags=-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
     )

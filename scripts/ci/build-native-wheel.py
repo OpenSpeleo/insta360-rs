@@ -1,4 +1,4 @@
-"""Build and repair a macOS or Windows wheel without running runtime tests."""
+"""Prewarm native FFmpeg or build and repair a macOS or Windows wheel."""
 
 import argparse
 import hashlib
@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
@@ -70,15 +71,55 @@ def verify_archive(wheel, target):
 def prepare_mnn(cache, env):
     """Build MNN with the same target and compiler environment as the wheel."""
     builder = ROOT / "scripts/ci/build-mnn.py"
+    if env.get("MNN_ROOT"):
+        prefix = Path(env["MNN_ROOT"]).resolve()
+        run(sys.executable, builder, "--output", prefix, "--verify-only", env=env)
+        env["MNN_ROOT"] = str(prefix)
+        return prefix
     prefix = cache / "mnn" / hashlib.sha256(builder.read_bytes()).hexdigest()
     run(sys.executable, builder, "--output", prefix, env=env)
     env["MNN_ROOT"] = str(prefix)
     return prefix
 
 
+def native_cache_key(env, cmake_executable):
+    """Keep prewarm and wheel prefixes independent of Rust and packaging edits."""
+    script = ROOT / "scripts/ci/build-ffmpeg-native.sh"
+    fingerprint = hashlib.sha256(script.read_bytes())
+    fingerprint.update(script.with_name("ffmpeg-runtime-config.sh").read_bytes())
+    fingerprint.update(platform.platform().encode())
+    fingerprint.update(env.get("MACOSX_DEPLOYMENT_TARGET", "").encode())
+    fingerprint.update(output(cmake_executable, "--version").encode())
+    return fingerprint.hexdigest()
+
+
+def archive_sdk(cache, prefix, destination):
+    """Publish the completed SDK and original sources, excluding build trees."""
+    if not (prefix / "share/insta360-rs/complete").is_file():
+        raise RuntimeError("Cannot archive an incomplete FFmpeg SDK")
+    marker = cache / "sdk-prefix.txt"
+    marker.write_text(prefix.relative_to(cache).as_posix() + "\n")
+    destination.mkdir(parents=True, exist_ok=True)
+    archive_path = destination / "ffmpeg-sdk.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for path in (prefix, cache / "downloads", marker):
+            member = Path(".cache/wheel-native") / path.relative_to(cache)
+            archive.add(path, arcname=member.as_posix())
+    print(f"Prepared native FFmpeg SDK: {archive_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=ROOT / "dist")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--cache-key", action="store_true",
+        help="Print the native SDK cache key without building",
+    )
+    mode.add_argument(
+        "--prewarm", action="store_true",
+        help="Build only FFmpeg and archive the SDK in --out",
+    )
     args = parser.parse_args()
     if sys.platform not in ("darwin", "win32"):
         parser.error("Use build-wheel.sh for Linux wheels")
@@ -100,7 +141,6 @@ def main():
         )
         env.setdefault("BINDGEN_EXTRA_CLANG_ARGS", f"--sysroot={env['SDKROOT']}")
     cache = ROOT / ".cache" / "wheel-native"
-    cache.mkdir(parents=True, exist_ok=True)
     env["INSTA360_WHEEL_CACHE"] = str(cache)
     env.setdefault("INSTA360_WHEEL_JOBS", str(min(os.cpu_count() or 2, 4)))
     env.setdefault("CARGO_BUILD_JOBS", env["INSTA360_WHEEL_JOBS"])
@@ -114,12 +154,12 @@ def main():
     env["INSTA360_CMAKE"] = str(cmake_executable)
     native_script = ROOT / "scripts" / "ci" / "build-ffmpeg-native.sh"
     runtime_config = native_script.with_name("ffmpeg-runtime-config.sh")
-    fingerprint = hashlib.sha256(native_script.read_bytes())
-    fingerprint.update(runtime_config.read_bytes())
-    fingerprint.update(platform.platform().encode())
-    fingerprint.update(env.get("MACOSX_DEPLOYMENT_TARGET", "").encode())
-    fingerprint.update(output(cmake_executable, "--version").encode())
-    prefix = cache / "native" / fingerprint.hexdigest() / "prefix"
+    key = native_cache_key(env, cmake_executable)
+    if args.cache_key:
+        print(key)
+        return
+    cache.mkdir(parents=True, exist_ok=True)
+    prefix = cache / "native" / key / "prefix"
     env["INSTA360_FFMPEG_PREFIX"] = str(prefix)
 
     if sys.platform == "win32":
@@ -138,12 +178,18 @@ def main():
         target = "win_amd64"
     else:
         run("bash", native_script, env=env)
-        env["DYLD_LIBRARY_PATH"] = str(prefix / "lib")
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = str(prefix / "lib") + (
+            os.pathsep + env["DYLD_FALLBACK_LIBRARY_PATH"]
+            if env.get("DYLD_FALLBACK_LIBRARY_PATH") else ""
+        )
         target = f"macosx_{env['MACOSX_DEPLOYMENT_TARGET'].replace('.', '_')}_{machine}"
     env["FFMPEG_DIR"] = str(prefix)
     env["PKG_CONFIG_PATH"] = str(prefix / "lib" / "pkgconfig")
 
     destination = args.out.resolve()
+    if args.prewarm:
+        archive_sdk(cache, prefix, destination)
+        return
     destination.mkdir(parents=True, exist_ok=True)
     mnn_prefix = prepare_mnn(cache, env)
 

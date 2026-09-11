@@ -3,6 +3,14 @@
 See [CI](CI.md) for the automated test matrix and commands for running it
 locally.
 
+CI runs the all-feature Rust suite and the full Python 3.14 installed-wheel
+suite once on each supported platform. Linux retains compile checks for isolated
+features, the specific disabled-AI failure tests, extracted-archive verification
+and Python 3.10–3.13 compatibility. Feature-gated code that is absent from an
+all-feature build must keep focused coverage when the matrix changes. Media
+fixture capabilities are checked before testing; Linux Vulkan and Windows D3D12
+execution are required, while unavailable macOS Metal coverage is reported.
+
 ## Public fixtures
 
 Unit and property tests use generated ISO-BMFF boxes, trailer records,
@@ -194,5 +202,6 @@ copied-audio checks. Native preview seeks also matched the software reader at
 five timestamps, including backward seeks. Separate 1920×960 midpoint CPU/Metal
 exports selected Pro lens 119 and applied the sensor window. These local checks
 do not establish Studio pixel equivalence or qualification on other cameras,
-operating systems or GPUs. CI's Linux software-Vulkan and cross-platform
-inference jobs remain necessary platform checks.
+operating systems or GPUs. CI's cross-platform all-feature jobs remain necessary
+platform checks; macOS GPU execution still depends on an available Metal
+adapter.

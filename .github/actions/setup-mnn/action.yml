@@ -4,10 +4,27 @@ description: Verified static CPU MNN for optional underwater inference
 runs:
   using: composite
   steps:
+    - name: Identify the native engine configuration
+      id: configuration
+      shell: bash
+      run: |
+        python - <<'PY'
+        import hashlib
+        import os
+        import subprocess
+        import sys
+
+        configuration = subprocess.check_output(
+            [sys.executable, "scripts/ci/build-mnn.py", "--configuration"]
+        )
+        key = hashlib.sha256(configuration).hexdigest()
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            print(f"cache-key=mnn-v2-{key}", file=output)
+        PY
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/insta360-mnn
-        key: mnn-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci/build-mnn.py', 'build.rs') }}
+        key: ${{ steps.configuration.outputs.cache-key }}
     - name: Verify or build the pinned CPU engine
       shell: bash
       run: |

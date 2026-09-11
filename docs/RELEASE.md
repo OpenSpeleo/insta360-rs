@@ -158,10 +158,13 @@ verify source completeness, using the existing release settings and Rust
 profiles. Release first tries the exact native/image cache key for the completed
 Linux FFmpeg SDK. On a miss it downloads only `ffmpeg-linux-x86_64` from the
 verified source CI run; if that artifact is absent or expired, the builder
-compiles the SDK. Other platforms keep separate native caches because their
-compiled libraries are incompatible. Native caches created on a release tag are
-available to same-tag reruns, not other release tags; matching default-branch
-caches may also be restored. See
+compiles the SDK. macOS and Windows use the shared native prewarm action:
+restore the matching platform cache, fall back to `ffmpeg-<platform>` from the
+verified CI run, then verify or build the current host fingerprint. Their SDK
+archives retain complete prefixes and verified sources, and MNN is reused from
+the platform's separate verified cache. Native caches created on a release tag
+are available to same-tag reruns, not other release tags; matching
+default-branch caches may also be restored. See
 [cache scope](CI.md#github-setup-and-maintenance).
 
 Rust packages and verifies all six crates and checks their sizes before
@@ -197,9 +200,12 @@ wheels for:
 | macOS x86_64   | macOS 11+                    | Build and repair   |
 | Windows x86_64 | win_amd64                    | Build and repair   |
 
-CI separately runs a clean-container smoke test and full Python 3.10–3.14 suites
-against its Linux wheel from the same source commit. Release wheels are fresh
-builds and do not undergo those runtime suites. macOS/Windows runtime and
+CI runs all-feature Rust tests and the full Python 3.14 suite against a repaired
+wheel on each of these four platforms. Linux additionally runs a clean-container
+smoke test and Python 3.10–3.13 against its same wheel. Release wheels are fresh
+builds and do not undergo those runtime suites. Linux software Vulkan and
+Windows D3D12 execution are required in CI; macOS Metal coverage depends on
+adapter availability and is reported in the job summary. Real-camera and
 physical GPU qualification remain separate.
 
 The release also includes a Linux-produced sdist. Source builds need Rust,
