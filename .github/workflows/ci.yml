@@ -251,7 +251,7 @@ jobs:
       - name: Install the repaired wheel
         shell: bash
         run: python -m pip install --no-deps dist/*.whl
-      - name: Full Python 3.14 tests against the installed wheel
+      - name: Full Python 3.14 tests against the wheel
         run: python -I -X faulthandler src-python/scripts/run-tests.py
       - name: Smoke test without system FFmpeg libraries
         if: runner.os == 'Linux'
@@ -275,7 +275,7 @@ jobs:
             sh -ec 'pip install --no-deps /dist/*.whl; python /checks/smoke-wheel.py /fixture.insv'
 
   python-test:
-    name: Python ${{ matrix.python }} installed wheel
+    name: Python ${{ matrix.python }} - tests against wheel
     needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
