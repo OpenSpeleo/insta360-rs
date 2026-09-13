@@ -5,7 +5,7 @@ default-members = [".", "data/core", "data/ai-stitch-video", "data/enhancement",
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jonathan Dekhtiar <jonathan@dekhtiar.com>"]
 edition = "2021"
 rust-version = "1.90"
@@ -13,13 +13,13 @@ repository = "https://github.com/OpenSpeleo/insta360-rs"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-insta360-rs = { version = "=0.1.0", path = "." }
-insta360-rs-data-ai-stitch-video = { version = "=0.1.0", path = "data/ai-stitch-video" }
-insta360-rs-data-core = { version = "=0.1.0", path = "data/core" }
-insta360-rs-data-enhancement = { version = "=0.1.0", path = "data/enhancement" }
-insta360-rs-data-underwater-model-a = { version = "=0.1.0", path = "data/underwater-model-a" }
-insta360-rs-data-underwater-model-b = { version = "=0.1.0", path = "data/underwater-model-b" }
-insta360-rs-data-underwater-resources = { version = "=0.1.0", path = "data/underwater-resources" }
+insta360-rs = { version = "=0.2.0", path = "." }
+insta360-rs-data-ai-stitch-video = { version = "=0.2.0", path = "data/ai-stitch-video" }
+insta360-rs-data-core = { version = "=0.2.0", path = "data/core" }
+insta360-rs-data-enhancement = { version = "=0.2.0", path = "data/enhancement" }
+insta360-rs-data-underwater-model-a = { version = "=0.2.0", path = "data/underwater-model-a" }
+insta360-rs-data-underwater-model-b = { version = "=0.2.0", path = "data/underwater-model-b" }
+insta360-rs-data-underwater-resources = { version = "=0.2.0", path = "data/underwater-resources" }
 
 [package]
 name = "insta360-rs"

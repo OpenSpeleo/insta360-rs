@@ -624,7 +624,7 @@ dependencies = [
 
 [[package]]
 name = "insta360-rs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "base64",
@@ -651,31 +651,31 @@ dependencies = [
 
 [[package]]
 name = "insta360-rs-data-ai-stitch-video"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "insta360-rs-data-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "insta360-rs-data-enhancement"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "insta360-rs-data-underwater-model-a"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "insta360-rs-data-underwater-model-b"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "insta360-rs-data-underwater-resources"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "insta360-rs-python"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "insta360-rs",
  "pyo3",
