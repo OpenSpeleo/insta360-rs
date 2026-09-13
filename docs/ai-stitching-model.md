@@ -150,10 +150,14 @@ resize sampling, quarter-grid flow scaling, directional conversion, occlusion
 rejection and a real model inference through confidence filtering into the
 spherical field. Rendered synthetic spherical charts require more than 5%
 accepted correction coverage and more than 10% geometric error reduction, with
-deterministic repeated plans. Rotated and resized CPU/Metal output satisfies the
-shared parity bound (mean absolute error below 0.2 and maximum at most 8 byte
-levels). These checks passed on macOS ARM64. They cover the portable video
-profile; cross-platform execution remains part of the release matrix.
+deterministic repeated plans. Rotated and resized CPU/GPU correction effects
+(each measured against that backend's fixed-calibration render) must agree with
+mean absolute error below 0.2 and maximum at most 8 byte levels. Total error
+must be less than half the CPU correction magnitude, rejecting an ignored
+correction even when its effect fits the absolute budget. Baseline renderer
+parity is tested separately. These checks passed on macOS ARM64. They cover the
+portable video profile; cross-platform execution remains part of the release
+matrix.
 
 See [reference provenance](../tests/reference/README.md) for the exact recipe,
 fixture format and regeneration command. These numerical checks establish the

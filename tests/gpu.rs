@@ -37,6 +37,22 @@ fn prepared_corrections_match_cpu_and_gpu() {
     let mut planner = StitchPlanner::new();
     let gpu = insta360_rs::gpu::GpuStitcher::new().unwrap();
     let cpu = CpuStitcher::new();
+    let adapter = gpu.adapter_info();
+    // Isolate the prepared correction from each backend's baseline projection
+    // and texture-filtering error. Absolute render parity has separate tests.
+    let baselines = [256, 512].map(|width| {
+        let projection = EquirectangularProjection {
+            width,
+            height: width / 2,
+        };
+        let cpu_fixed = cpu
+            .stitch_with_motion(&lenses, &calibration, projection, &motion)
+            .unwrap();
+        let gpu_fixed = gpu
+            .stitch_with_motion(&lenses, &calibration, projection, &motion)
+            .unwrap();
+        (projection, cpu_fixed, gpu_fixed)
+    });
     for mode in [
         SeamMode::Dynamic,
         SeamMode::OpticalFlow,
@@ -47,16 +63,13 @@ fn prepared_corrections_match_cpu_and_gpu() {
             .prepare(&lenses, &calibration, &motion, mode)
             .unwrap();
         assert!(plan.confidence_coverage() > 0.05);
-        for width in [256, 512] {
-            let projection = EquirectangularProjection {
-                width,
-                height: width / 2,
-            };
+        for (projection, cpu_fixed, gpu_fixed) in &baselines {
+            let width = projection.width;
             let a = cpu
                 .stitch_with_motion_and_plan(
                     &lenses,
                     &calibration,
-                    projection,
+                    *projection,
                     &motion,
                     Some(&plan),
                 )
@@ -65,7 +78,7 @@ fn prepared_corrections_match_cpu_and_gpu() {
                 .stitch_with_motion_and_plan(
                     &lenses,
                     &calibration,
-                    projection,
+                    *projection,
                     &motion,
                     Some(&plan),
                 )
@@ -73,16 +86,37 @@ fn prepared_corrections_match_cpu_and_gpu() {
             let differences: Vec<_> = a
                 .as_rgb8()
                 .iter()
-                .zip(b.as_rgb8())
-                .map(|(&a, &b)| a.abs_diff(b))
+                .zip(cpu_fixed.as_rgb8())
+                .zip(b.as_rgb8().iter().zip(gpu_fixed.as_rgb8()))
+                .map(|((&a, &cpu_fixed), (&b, &gpu_fixed))| {
+                    let cpu_effect = i16::from(a) - i16::from(cpu_fixed);
+                    let gpu_effect = i16::from(b) - i16::from(gpu_fixed);
+                    cpu_effect.abs_diff(gpu_effect)
+                })
                 .collect();
-            let mean =
-                differences.iter().map(|&v| f64::from(v)).sum::<f64>() / differences.len() as f64;
-            assert!(mean < 0.2, "{mode:?} width{width}:mean{mean}");
+            let error_sum = differences.iter().map(|&v| u64::from(v)).sum::<u64>();
+            let mean = error_sum as f64 / differences.len() as f64;
+            assert!(
+                mean < 0.2,
+                "{mode:?} width {width}: mean correction error {mean}; {adapter:?}"
+            );
             assert!(
                 differences.iter().all(|&v| v <= 8),
-                "{mode:?}:maximum{}",
+                "{mode:?} width {width}: maximum correction error {}; {adapter:?}",
                 differences.iter().max().unwrap()
+            );
+            // A zero/ignored correction can fit the absolute error budget for
+            // OpticalFlow. Require agreement relative to a nonzero CPU effect.
+            let correction_sum = a
+                .as_rgb8()
+                .iter()
+                .zip(cpu_fixed.as_rgb8())
+                .map(|(&corrected, &fixed)| u64::from(corrected.abs_diff(fixed)))
+                .sum::<u64>();
+            assert!(
+                error_sum * 2 < correction_sum,
+                "{mode:?} width {width}: correction error {error_sum} must be less than half \
+                 the CPU correction magnitude {correction_sum}; {adapter:?}"
             );
         }
     }

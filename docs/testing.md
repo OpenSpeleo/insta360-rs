@@ -116,6 +116,16 @@ successful-frame temporal reuse.
 
 ## GPU qualification status
 
+Prepared-correction parity compares each backend's signed RGB change from its
+own fixed-calibration render, at both tested output sizes and with global
+rotation. The mean difference between these effects must stay below 0.2 byte
+levels and the maximum at most 8. Total error must also stay below half the CPU
+correction magnitude, so an ignored or zero correction cannot pass on a weak
+signal. Baseline projection and texture-filtering differences are covered by the
+separate absolute-render and independent world-ray tests; they must not be
+attributed to the prepared correction. In particular, Mesa software Vulkan can
+exceed the correction budget even with no plan applied.
+
 Current focused tests cover adapter discovery, synthetic RGB CPU/GPU parity,
 same-adapter repeatability, neutral planar YUV420P upload, and encoder-layout
 YUV420P output. NV12 tests compare against the planar GPU path with padded and
