@@ -423,7 +423,7 @@ class CIReleaseGateTests(unittest.TestCase):
             self.assertEqual(release.read_ci_run(self.repository, 123, 12), self.run_payload())
         run.assert_called_once_with(
             ["gh", "api", "--method", "GET", "repos/OpenSpeleo/insta360-rs/actions/runs/123"],
-            check=True, capture_output=True, text=True, timeout=12,
+            check=True, capture_output=True, text=True, encoding="utf-8", timeout=12,
         )
 
 

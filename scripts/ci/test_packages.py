@@ -24,10 +24,12 @@ class PackageChecksTests(unittest.TestCase):
 
     def test_every_publishable_workspace_member_has_extracted_archive_verification(self):
         root = Path(__file__).resolve().parents[2]
-        manifest = tomllib.loads((root / "Cargo.toml").read_text())
+        manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
         published = set()
         for relative in manifest["workspace"]["members"]:
-            package = tomllib.loads((root / relative / "Cargo.toml").read_text())["package"]
+            package = tomllib.loads(
+                (root / relative / "Cargo.toml").read_text(encoding="utf-8")
+            )["package"]
             if package.get("publish") is not False:
                 published.add(relative)
         self.assertEqual(set(packages.PACKAGE_PATHS), published)
@@ -90,10 +92,13 @@ class PackageChecksTests(unittest.TestCase):
                 member.size = len(content)
                 package.addfile(member, io.BytesIO(content))
 
+        extraction_directory = tempfile.TemporaryDirectory(prefix="packaged \u00e9 ")
+        self.addCleanup(extraction_directory.cleanup)
         for all_features in (False, True):
             with (
                 self.subTest(all_features=all_features),
                 mock.patch.object(packages, "PACKAGE_PATHS", ("data", ".")),
+                mock.patch.object(packages.tempfile, "tempdir", extraction_directory.name),
                 mock.patch.object(packages, "run") as run,
                 mock.patch.dict(packages.os.environ, {"CARGO_TARGET_DIR": str(target)}),
             ):
@@ -118,8 +123,8 @@ class PackageChecksTests(unittest.TestCase):
                         command[command.index("--manifest-path") + 1], str(cwd / "Cargo.toml")
                     )
                     patch = command[command.index("--config") + 1]
-                    self.assertIn(str(cwd.parent / "example-data-0.1.0"), patch)
-                    self.assertNotIn(str(self.root.resolve() / "data"), patch)
+                    dependency_path = tomllib.loads(patch)["patch"]["crates-io"]["example-data"]["path"]
+                    self.assertEqual(dependency_path, str(cwd.parent / "example-data-0.1.0"))
                     self.assertEqual(environment["CARGO_TARGET_DIR"], str(target.resolve()))
 
 

@@ -155,7 +155,7 @@ def ci_run_succeeded(
 def read_ci_run(repository: str, run_id: int, timeout: float) -> dict:
     result = subprocess.run(
         ["gh", "api", "--method", "GET", f"repos/{repository}/actions/runs/{run_id}"],
-        check=True, capture_output=True, text=True, timeout=timeout,
+        check=True, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
     )
     return json.loads(result.stdout)
 

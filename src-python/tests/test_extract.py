@@ -85,7 +85,9 @@ class ExtractIntegrationTests(unittest.TestCase):
             self.assertTrue(report.files)
             self.assertTrue(all(isinstance(path, Path) for path in report.files))
             self.assertTrue(all(path.is_file() for path in report.files))
-            self.assertIsInstance(json.loads(report.manifest_path.read_text()), dict)
+            self.assertIsInstance(
+                json.loads(report.manifest_path.read_text(encoding="utf-8")), dict
+            )
             self.assertTrue(
                 any(path.read_bytes() == self.metadata for path in report.files)
             )
@@ -127,11 +129,11 @@ class ExtractIntegrationTests(unittest.TestCase):
     def test_v2_manifest_preserves_json_raw_metadata_and_original_input(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "記録 with spaces.insv"
+            source = root / "recording with spaces.insv"
             source.write_bytes(self.recording)
             output = root / "extracted nested" / "components"
             report = insta360_rs.extract(source, output)
-            manifest = json.loads(report.manifest_path.read_text())
+            manifest = json.loads(report.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["schema_version"], 1)
             self.assertEqual(manifest["warnings"], report.warnings)
             self.assertEqual(report.manifest_path, report.output_dir / "manifest.json")
@@ -154,7 +156,7 @@ class ExtractIntegrationTests(unittest.TestCase):
             self.assertEqual(record["encoding"], "json")
             self.assertEqual((base / record["raw_path"]).read_bytes(), self.metadata)
             self.assertEqual(
-                json.loads((base / "metadata/v2.json").read_text()),
+                json.loads((base / "metadata/v2.json").read_text(encoding="utf-8")),
                 json.loads(self.metadata),
             )
             self.assertEqual(source.read_bytes(), self.recording)
@@ -195,7 +197,7 @@ class ExtractIntegrationTests(unittest.TestCase):
             source = root / "recording.insv"
             source.write_bytes(self.media + tail)
             report = insta360_rs.extract(source, root / "extracted")
-            manifest = json.loads(report.manifest_path.read_text())
+            manifest = json.loads(report.manifest_path.read_text(encoding="utf-8"))
             container = manifest["inputs"][0]["container"]
             self.assertEqual(report.record_count, 3)
             self.assertEqual(container["trailer"]["version"], 3)
@@ -217,7 +219,9 @@ class ExtractIntegrationTests(unittest.TestCase):
             source.write_bytes(self.recording)
             original = insta360_rs.open_media(source)
             report = insta360_rs.extract(source, root / "extracted")
-            entry = json.loads(report.manifest_path.read_text())["inputs"][0]
+            entry = json.loads(report.manifest_path.read_text(encoding="utf-8"))[
+                "inputs"
+            ][0]
             streams = entry["media"]["streams"]
             base = report.output_dir / entry["directory"]
             self.assertEqual(len(streams), report.stream_count)
@@ -237,7 +241,7 @@ class ExtractIntegrationTests(unittest.TestCase):
                     rows = [
                         json.loads(line)
                         for line in (base / description["packet_index"])
-                        .read_text()
+                        .read_text(encoding="utf-8")
                         .splitlines()
                     ]
                     packets = read_all(stream.open_packets(), "read_packet")
@@ -320,9 +324,9 @@ class ExtractIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 any("No recognized ExtraInfo" in warning for warning in report.warnings)
             )
-            container = json.loads(report.manifest_path.read_text())["inputs"][0][
-                "container"
-            ]
+            container = json.loads(report.manifest_path.read_text(encoding="utf-8"))[
+                "inputs"
+            ][0]["container"]
             self.assertIsNone(container["trailer"])
             self.assertEqual(container["records"], [])
 

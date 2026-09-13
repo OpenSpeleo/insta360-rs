@@ -55,7 +55,7 @@ class InstalledApiTests(unittest.TestCase):
     def test_installed_typing_contract_covers_exports_members_and_signatures(self):
         package = Path(sdk.__file__).parent
         self.assertTrue((package / "py.typed").is_file())
-        tree = ast.parse((package / "__init__.pyi").read_text())
+        tree = ast.parse((package / "__init__.pyi").read_text(encoding="utf-8"))
         names = set()
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)):

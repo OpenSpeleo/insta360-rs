@@ -60,7 +60,7 @@ def main():
     print(gpu_status, flush=True)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a") as destination:
+        with open(summary, "a", encoding="utf-8") as destination:
             print(f"Python {sys.version.split()[0]}: {gpu_status}.", file=destination)
 
     tests = Path(__file__).resolve().parents[1] / "tests"

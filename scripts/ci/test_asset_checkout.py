@@ -33,7 +33,7 @@ class AssetCheckoutTests(unittest.TestCase):
 
             payloads = []
             for manifest_path in sorted((ROOT / "data").glob("*/model-bundle.json")):
-                manifest = json.loads(manifest_path.read_text())
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 for asset in manifest["assets"]:
                     source = manifest_path.parent / "assets" / asset["path"]
                     target = checkout / source.relative_to(ROOT)

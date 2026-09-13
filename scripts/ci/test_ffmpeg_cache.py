@@ -36,6 +36,7 @@ class PreparedFFmpegTests(unittest.TestCase):
         return prefix
 
     def test_linux_sdk_preserves_existing_runtime_paths(self):
+        self.root /= "caf\u00e9 checkout"
         prefix = self.sdk(native=False)
         with (
             patch.object(ffmpeg.sys, "platform", "linux"),
@@ -47,8 +48,8 @@ class PreparedFFmpegTests(unittest.TestCase):
             "LD_LIBRARY_PATH": str(prefix / "lib") + os.pathsep + "/existing/lib",
         })
         self.assertEqual(
-            (prefix / "lib/pkgconfig/libavcodec.pc").read_text(),
-            f"prefix={prefix}\nlibdir={prefix}/lib\n",
+            (prefix / "lib/pkgconfig/libavcodec.pc").read_bytes().decode("utf-8").splitlines(),
+            [f"prefix={prefix}", f"libdir={prefix}/lib"],
         )
 
     def test_windows_sdk_exports_compiler_and_dll_search_paths(self):

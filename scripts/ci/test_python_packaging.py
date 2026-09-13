@@ -54,11 +54,15 @@ class PythonPackagingTests(unittest.TestCase):
     def package(self, name, declaration=True):
         package = self.root / name / "src-python"
         package.mkdir(parents=True)
-        text = '[project]\nname = "example"\nlicense = "Apache-2.0"\n'
+        text = (
+            '[project]\nname = "example"\n'
+            'description = "Field recording by \u0141ukasz"\n'
+            'license = "Apache-2.0"\n'
+        )
         if declaration:
             text += 'license-files = [\n  "LICENSE.md",\n  "NOTICE.md",\n]\n'
         text += '\n[tool.other]\nlicense-files = ["unrelated.txt"]\n'
-        (package / "pyproject.toml").write_text(text)
+        (package / "pyproject.toml").write_text(text, encoding="utf-8")
         for name in ("LICENSE.md", "NOTICE.md"):
             (package / name).write_bytes(b"original project bytes\r\n" + name.encode())
             (package.parent / name).write_bytes(b"different workspace notice\n")
@@ -70,12 +74,17 @@ class PythonPackagingTests(unittest.TestCase):
                 with self.subTest(declaration=declaration, runtime=runtime):
                     package = self.package(f"{declaration}-{runtime}", declaration)
                     licenses.stage_project_licenses(package, runtime=runtime)
-                    metadata = tomllib.loads((package / "pyproject.toml").read_text())
+                    metadata = tomllib.loads(
+                        (package / "pyproject.toml").read_text(encoding="utf-8")
+                    )
                     patterns = ["python/insta360_rs/_licenses/project/*.md"]
                     if runtime:
                         patterns.append("python/insta360_rs/_licenses/*.txt")
                     self.assertEqual(metadata["project"]["license-files"], patterns)
                     self.assertEqual(metadata["project"]["license"], "Apache-2.0")
+                    self.assertEqual(
+                        metadata["project"]["description"], "Field recording by \u0141ukasz"
+                    )
                     self.assertEqual(
                         metadata["tool"]["other"]["license-files"], ["unrelated.txt"]
                     )
@@ -125,7 +134,7 @@ class PythonPackagingTests(unittest.TestCase):
             for path in staged.parent.rglob("*") if path.is_file()
         ))
         self.assertTrue((staged / "python/insta360_rs/_licenses/project/LICENSE.md").is_file())
-        metadata = tomllib.loads((staged / "pyproject.toml").read_text())
+        metadata = tomllib.loads((staged / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertIn("python/insta360_rs/_licenses/*.txt", metadata["project"]["license-files"])
         for filename in runner.MNN_NOTICES:
             self.assertEqual(
@@ -188,10 +197,10 @@ class PythonPackagingTests(unittest.TestCase):
     def test_missing_project_license_fails_without_rewriting_metadata(self):
         package = self.package("invalid")
         original = '[project]\nname = "example"\n'
-        (package / "pyproject.toml").write_text(original)
+        (package / "pyproject.toml").write_text(original, encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "license declaration"):
             licenses.stage_project_licenses(package)
-        self.assertEqual((package / "pyproject.toml").read_text(), original)
+        self.assertEqual((package / "pyproject.toml").read_text(encoding="utf-8"), original)
 
 
 if __name__ == "__main__":

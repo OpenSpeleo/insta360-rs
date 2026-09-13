@@ -9,7 +9,7 @@ from pathlib import Path
 
 def stage_project_licenses(package, *, runtime=False):
     metadata_path = package / "pyproject.toml"
-    text = metadata_path.read_text()
+    text = metadata_path.read_text(encoding="utf-8")
     project = re.search(r"(?ms)^\[project\][ \t]*\n(.*?)(?=^\[|\Z)", text)
     if project is None:
         raise RuntimeError("Expected a project metadata table")
@@ -36,7 +36,9 @@ def stage_project_licenses(package, *, runtime=False):
     notices.mkdir(parents=True, exist_ok=True)
     for name in ("LICENSE.md", "NOTICE.md"):
         shutil.copy2(package / name, notices / name)
-    metadata_path.write_text(text[: project.start(1)] + body + text[project.end(1) :])
+    metadata_path.write_text(
+        text[: project.start(1)] + body + text[project.end(1) :], encoding="utf-8"
+    )
 
 
 def main():

@@ -14,16 +14,16 @@ def prepend_path(directory: Path, variable: str) -> str:
 def configure(root: Path) -> dict[str, str]:
     native = sys.platform in ("darwin", "win32")
     cache = (root / ".cache" / ("wheel-native" if native else "wheel")).resolve()
-    relative = Path((cache / "sdk-prefix.txt").read_text().strip())
+    relative = Path((cache / "sdk-prefix.txt").read_text(encoding="utf-8").strip())
     prefix = (cache / relative).resolve()
     if not prefix.is_relative_to(cache) or not (prefix / "include/libavcodec/avcodec.h").is_file():
         raise RuntimeError("Prepared FFmpeg installation is missing or has an invalid prefix")
     pkg_config = prefix / "lib/pkgconfig"
     for path in pkg_config.glob("*.pc"):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
         previous = next(line.removeprefix("prefix=") for line in lines if line.startswith("prefix="))
-        path.write_text(text.replace(previous, str(prefix)))
+        path.write_text(text.replace(previous, str(prefix)), encoding="utf-8")
     environment = {"PKG_CONFIG_PATH": str(pkg_config)}
     if not native:
         environment["LD_LIBRARY_PATH"] = prepend_path(prefix / "lib", "LD_LIBRARY_PATH")
@@ -59,11 +59,11 @@ def configure(root: Path) -> dict[str, str]:
 
 if __name__ == "__main__":
     environment = configure(Path(__file__).resolve().parents[2])
-    with open(os.environ["GITHUB_ENV"], "a") as destination:
+    with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as destination:
         for key, value in environment.items():
             if key != "PATH":
                 print(f"{key}={value}", file=destination)
     if "PATH" in environment:
-        with open(os.environ["GITHUB_PATH"], "a") as destination:
+        with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as destination:
             print(Path(environment["FFMPEG_DIR"]) / "bin", file=destination)
     print("Prepared FFmpeg libraries configured for this checkout")

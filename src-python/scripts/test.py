@@ -183,7 +183,7 @@ def check_sdist(path, destination):
     # Payloads live in six transitive data crates. Verify the complete bundle
     # without depending on Maturin's directory layout for path dependencies.
     data_manifests = [
-        (path, json.loads(path.read_text()))
+        (path, json.loads(path.read_text(encoding="utf-8")))
         for path in root.rglob("model-bundle.json")
         if path != manifest
     ]
@@ -208,7 +208,7 @@ def check_sdist(path, destination):
             )
         payload_roots.append(dependency / "assets")
     original_parts = {}
-    for descriptor in json.loads(manifest.read_text())["assets"]:
+    for descriptor in json.loads(manifest.read_text(encoding="utf-8"))["assets"]:
         payloads = [
             directory / descriptor["path"]
             for directory in payload_roots

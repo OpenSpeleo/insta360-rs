@@ -126,6 +126,14 @@ paths can retain the `\\?\` prefix and expand short names, so their spelling
 need not match Python's `Path.resolve()` output. Keep the native paths intact so
 extended Windows paths remain usable.
 
+Read extraction manifests, decoded JSON metadata, and JSONL packet indexes with
+`encoding="utf-8"`. The Windows default encoding can turn UTF-8 into valid JSON
+with corrupted source paths, causing `samefile()` to fail on an existing file.
+Apply the same rule to typing stubs, asset manifests and package TOML, including
+staging rewrites. CI helpers also preserve UTF-8 when relocating SDK paths,
+writing GitHub environment files, and decoding GitHub API JSON. ASCII-only
+fixtures cannot establish that these boundaries preserve non-ASCII text.
+
 Video success coverage needs a software HEVC encoder in the linked FFmpeg.
 Audio-copy tests exercise both synchronous and asynchronous exports with default
 and explicit `COPY`, compare compressed packet hashes and rational PTS/DTS with

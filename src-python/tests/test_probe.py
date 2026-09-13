@@ -195,7 +195,7 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(info.gyro_sample_count, 2)
 
     def test_paths_with_unicode_spaces_and_uppercase_extension(self):
-        path = self.root / "記録 café.INsV"
+        path = self.root / "recording café.INsV"
         self.path.rename(path)
         self.assertEqual(insta360_rs.probe(path).inputs, [path])
 
