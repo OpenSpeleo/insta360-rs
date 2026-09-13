@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "bundle_id": "insta360-bundled-assets",
-  "bundle_version": "2026-09-08.1",
+  "bundle_version": "2026-09-11.1",
   "assets": [
     {
       "id": "ai-seam-coreml-v22-analytics-coremldata-bin",
@@ -1004,6 +1004,166 @@
         "source_sha256": "cebca0b3d04108c7285a94c3ee1460b9e5dde8c0d9044937e3313ada0047ed29",
         "normalization": "identity"
       }
+    },
+    {
+      "id": "ai-seam-studio-video-213-mnn",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/model.ins",
+      "sha256": "a855aa2106101edd5c28ed0922d21223c2e420c3520917cbd7d371b7437e0cce",
+      "byte_length": 4002162,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzQUXIMQmM.ins",
+        "source_sha256": "a855aa2106101edd5c28ed0922d21223c2e420c3520917cbd7d371b7437e0cce",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-analytics-coremldata-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/analytics/coremldata.bin",
+      "sha256": "d8d247414ac5a9f74eabc08ae1132d8373a54f268aa312c8658d370038da0ab7",
+      "byte_length": 243,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/analytics/coremldata.bin",
+        "source_sha256": "d8d247414ac5a9f74eabc08ae1132d8373a54f268aa312c8658d370038da0ab7",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-coremldata-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/coremldata.bin",
+      "sha256": "e51cb7be9f790f60f1a40481834bace0611e3c13293cb61aba66ded83712c779",
+      "byte_length": 479,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/coremldata.bin",
+        "source_sha256": "e51cb7be9f790f60f1a40481834bace0611e3c13293cb61aba66ded83712c779",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-ins_metadata-json",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/ins_metadata.json",
+      "sha256": "0575cd6108d90381d38ff6d616fcddbf39a415ee2a27befa0475bf98c680c6de",
+      "byte_length": 3114,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/ins_metadata.json",
+        "source_sha256": "0575cd6108d90381d38ff6d616fcddbf39a415ee2a27befa0475bf98c680c6de",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-ins_model-mil",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/ins_model.mil",
+      "sha256": "00a73586be51369093026be0bf2423c5547ae73d5d314bc187a6ed4266fac86c",
+      "byte_length": 131799,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/ins_model.mil",
+        "source_sha256": "00a73586be51369093026be0bf2423c5547ae73d5d314bc187a6ed4266fac86c",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-metadata-json",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/metadata.json",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "byte_length": 0,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/metadata.json",
+        "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-model-mil",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/model.mil",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "byte_length": 0,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/model.mil",
+        "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "normalization": "identity"
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213-coreml-weights-weight-bin",
+      "kind": "ai_stitch",
+      "path": "models/ai-seam-studio-video-213/coreml/weights/weight.bin",
+      "sha256": "dcc2fd3a532b39136e9709fb9df13af9dbb73bdf5fa555a86df66d35f3198266",
+      "byte_length": 1020032,
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
+        }
+      },
+      "provenance": {
+        "sdk_release": "Insta360-Studio-5.9.10",
+        "source_path": "Insta360 Studio.app/Contents/data/models/asqXMbz4bMndz3mzYzsn4VUzErnVN.mlmodelc/weights/weight.bin",
+        "source_sha256": "dcc2fd3a532b39136e9709fb9df13af9dbb73bdf5fa555a86df66d35f3198266",
+        "normalization": "identity"
+      }
     }
   ],
   "groups": [
@@ -1047,6 +1207,27 @@
         "source_sdk": {
           "minimum": "Studio-5.9.10",
           "maximum": "Studio-5.9.10"
+        }
+      }
+    },
+    {
+      "id": "ai-seam-studio-video-213",
+      "kind": "ai_stitch",
+      "members": [
+        "ai-seam-studio-video-213-mnn",
+        "ai-seam-studio-video-213-coreml-analytics-coremldata-bin",
+        "ai-seam-studio-video-213-coreml-coremldata-bin",
+        "ai-seam-studio-video-213-coreml-ins_metadata-json",
+        "ai-seam-studio-video-213-coreml-ins_model-mil",
+        "ai-seam-studio-video-213-coreml-metadata-json",
+        "ai-seam-studio-video-213-coreml-model-mil",
+        "ai-seam-studio-video-213-coreml-weights-weight-bin"
+      ],
+      "compatibility": {
+        "qualification": "unqualified",
+        "source_sdk": {
+          "minimum": "Insta360-Studio-5.9.10",
+          "maximum": "Insta360-Studio-5.9.10"
         }
       }
     }

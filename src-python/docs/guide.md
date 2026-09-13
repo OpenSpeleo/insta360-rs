@@ -218,8 +218,16 @@ config.underwater_color = UnderwaterColorOptions(
 Use Off for consistent un-restored photogrammetry data. Color processing retains
 job-local temporal state and resets across independent images and recording
 boundaries. Missing/corrupt required resources fail explicitly. The general Rust
-asset provider is not a Python export argument. SVM accessory classification, AI
-seams and ColorPlus remain unavailable.
+asset provider is not a Python export argument. SVM accessory classification and
+ColorPlus remain unavailable.
+
+`config.seam_mode = SeamMode.AI` selects video AI stitching through the
+independent MNN engine included in packaged wheels. Dynamic and Optical Flow are
+also available; `SeamMode.FIXED` remains the default for geometry-stable output.
+Unlike underwater restoration, stitching optimizers can change overlap geometry.
+Use `SeamMode.AI.unavailable_reason()` to inspect build support without loading
+a model. See [stitching optimization](../../docs/stitching-optimization.md) for
+the algorithms and qualification boundaries.
 
 Wheels are intended for macOS ARM64/x86_64, Windows x86_64, and manylinux
 x86_64. Their FFmpeg runtime is capability-pruned and carries its third-party

@@ -12,11 +12,14 @@ pub mod error;
 pub mod extraction;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+#[cfg(any(feature = "underwater-ai", feature = "ai-stitching"))]
+mod mnn;
 pub mod motion;
 pub mod optics;
 #[cfg(feature = "media")]
 pub mod paired;
 pub mod profile;
+pub mod seam_ai;
 pub mod sequence;
 pub mod stitch;
 #[cfg(feature = "media")]

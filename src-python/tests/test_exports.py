@@ -138,6 +138,39 @@ class ExportValidationTests(unittest.TestCase):
     MEDIA_TOOLS_AVAILABLE, "ffmpeg and ffprobe fixture tools unavailable"
 )
 class FrameExportIntegrationTests(ExportFixtureMixin, unittest.TestCase):
+    def test_seam_modes_export_real_images_or_report_unavailable_capability(self):
+        for name in ("DYNAMIC", "OPTICAL_FLOW", "AI"):
+            mode = getattr(api.SeamMode, name)
+            config = cpu_config(seam_mode=mode, width=64, height=32)
+            output = self.root / name.lower()
+            with self.subTest(mode=name):
+                self.assertEqual(config.seam_mode, mode)
+                reason = mode.unavailable_reason()
+                if reason is not None:
+                    self.assertEqual(mode, api.SeamMode.AI)
+                    self.assertIsInstance(reason, str)
+                    self.assertTrue(reason.strip())
+                    with self.assertRaises(api.MissingCapabilityError) as raised:
+                        api.export_frames(
+                            self.source, output, indices=[0], config=config
+                        )
+                    self.assertIn(reason, str(raised.exception))
+                    self.assertFalse(output.exists())
+                    continue
+
+                result = api.export_frames(
+                    self.source, output, indices=[0], config=config
+                )
+                self.assert_cpu_result(result, 1)
+                self.assertEqual(config.seam_mode, mode)
+                image = result.outputs[0]
+                self.assertTrue(image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+                descriptor = media_description(image)["streams"][0]
+                self.assertEqual((descriptor["width"], descriptor["height"]), (64, 32))
+                pixels = rgb_pixels(image)
+                self.assertEqual(len(pixels), 64 * 32 * 3)
+                self.assertGreater(len(set(pixels)), 1)
+
     def test_indices_are_sorted_deduplicated_and_written_as_valid_png(self):
         result = api.export_frames(
             self.source, self.root / "frames", indices=(7, 0, 7, 2), config=cpu_config()

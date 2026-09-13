@@ -544,7 +544,7 @@ fn metadata_resolution_rejects_camera_lens_and_setup_mismatches() {
 }
 
 #[test]
-fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
+fn x5_v6_conversion_uses_lens_id_curves_despite_different_embedded_descriptors() {
     let bare = [0.0, 0.03159, -0.00008415, 0.000002201, -1.284e-8, 0.0];
     let coefficients = [0.000238, 0.03112, 0.000007306, 0.0000004427, -3.892e-9, 0.0];
     let profile = coefficient_profile("InvisibleDiveWater", coefficients);
@@ -566,7 +566,7 @@ fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
             &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
             OffsetSource::Current,
         )
-        .expect("the embedded profiles provide portable conversion geometry");
+        .expect("registered lens curves provide portable conversion geometry");
 
     assert_eq!(result.profile_name.as_deref(), Some("InvisibleDiveWater"));
     assert_eq!(result.lenses[0].lens_type, 117);
@@ -580,7 +580,7 @@ fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
     // differences move the radial coefficients by ~1e-8 while the resulting
     // pixel radii agree within ~1e-11. Check the geometry across the field of
     // view rather than a platform-specific snapshot of those coefficients.
-    let expected_focal = 52.408_612_607_364_04;
+    let expected_focal = 52.006_819_512_460_94;
     assert!(
         (result.lenses[0].fx - expected_focal).abs() < 1e-9,
         "converted focal length: {} versus {expected_focal} pixels",
@@ -588,15 +588,15 @@ fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
     );
     for (angle_degrees, expected_radius) in [
         (0.0_f64, 0.0),
-        (1.0, 0.304_905_609_764_294_4),
-        (10.0, 3.053_615_866_568_929),
-        (30.0, 9.259_740_433_139_534),
-        (45.0, 14.049_012_790_590_294),
-        (60.0, 18.921_725_129_432_33),
-        (75.0, 23.795_628_222_509_626),
-        (90.0, 28.570_408_126_368_065),
-        (94.9, 30.063_107_962_352_9),
-        (95.0, 30.092_887_044_566_015),
+        (1.0, 0.302_568_744_271_646_15),
+        (10.0, 3.030_861_029_251_668_4),
+        (30.0, 9.196_536_555_521),
+        (45.0, 13.933_454_060_153_126),
+        (60.0, 18.693_648_673_700_26),
+        (75.0, 23.395_674_663_108_636),
+        (90.0, 27.969_367_905_431_312),
+        (94.9, 29.387_628_968_142_344),
+        (95.0, 29.415_820_331_153_87),
     ] {
         let lens = &result.lenses[0];
         let theta = angle_degrees.to_radians();
@@ -619,25 +619,21 @@ fn converts_x5_v6_geometry_from_embedded_angle_radius_profiles() {
 }
 
 #[test]
-fn profile_conversion_requires_both_source_and_target_curves() {
+fn x5_conversion_does_not_require_embedded_named_profiles() {
     let metadata = InsvMetadata {
         camera_name: Some("Insta360 X5".into()),
         offsets: vec![offset(6, false, v6_offset(55.0, 113))],
-        profiles: vec![coefficient_profile(
-            "InvisibleDiveWater",
-            [0.000238, 0.03112, 0.000007306, 0.0000004427, -3.892e-9, 0.0],
-        )],
         ..InsvMetadata::default()
     };
-    let error = CalibrationResolver::default()
+    let result = CalibrationResolver::default()
         .resolve_metadata(
             &metadata,
             &OpticalSelection::new(Housing::InvisibleDiveCase, Environment::Underwater),
             OffsetSource::Current,
         )
-        .expect_err("the physical pixel scale requires the encoded setup profile");
-
-    assert!(error.to_string().contains("bare optical profile"));
+        .expect("physical curves are selected by registered lens ID");
+    assert_eq!(result.lenses[0].lens_type, 117);
+    assert!((result.lenses[0].fx - 52.006_819_512_460_94).abs() < 1e-9);
 }
 
 #[test]

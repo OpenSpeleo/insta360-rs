@@ -76,7 +76,7 @@ fail the export and remove its incomplete outputs.
 
 ## Configuration and enums
 
-`StitchConfig(*, housing=None, environment=None, lens_accessory=None, mounting_accessory=None, underwater_color=None, stabilization=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None)`
+`StitchConfig(*, housing=None, environment=None, lens_accessory=None, mounting_accessory=None, underwater_color=None, stabilization=None, rolling_shutter=None, backend=None, seam_mode=None, color_conversion=None, width=None, height=None)`
 accepts only keyword arguments. Omitted values and explicit `None` select
 defaults:
 
@@ -90,6 +90,7 @@ defaults:
 | `stabilization`      | `Stabilization.DIRECTION_LOCK`            |
 | `rolling_shutter`    | `RollingShutterCorrection.AUTO`           |
 | `backend`            | `ProcessingBackend.AUTO`                  |
+| `seam_mode`          | `SeamMode.FIXED`                          |
 | `color_conversion`   | `ColorConversion.AUTO`                    |
 | `width`, `height`    | `None`, `None` (native projection choice) |
 
@@ -98,10 +99,20 @@ Construction validates dimensions; after assigning mutable properties, the
 configuration is validated again when passed to an export. Each export takes a
 configuration snapshot, so later assignments do not change an active job.
 
-`StitchConfig.underwater_photogrammetry(*, housing=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None)`
+`seam_mode` selects alignment independently of the CPU/GPU backend and
+underwater restoration. Fixed retains calibrated geometry and housing masks.
+Dynamic, Optical Flow and AI may change local geometry in the overlap. Each
+`SeamMode` member provides `unavailable_reason()`, returning a
+build/qualification reason or `None` without loading a model or device.
+Source/runtime checks still occur at export. A typed unavailable choice remains
+inspectable; attempting to render it fails without switching to another
+algorithm. These modes do not promise identical Insta360 Studio output.
+
+`StitchConfig.underwater_photogrammetry(*, housing=None, rolling_shutter=None, backend=None, seam_mode=None, color_conversion=None, width=None, height=None)`
 uses direction lock, `Environment.UNDERWATER`, automatic housing detection and
-underwater color Off. An explicit housing overrides detection. The preset still
-requires corresponding recorded calibration and supported motion data.
+underwater color Off and fixed seams. An explicit housing overrides detection.
+The preset still requires corresponding recorded calibration and supported
+motion data.
 
 `UnderwaterColorOptions(*, mode=None, strength=None, balance=None, style=None)`
 is an immutable value validated at construction and in the export snapshot.
@@ -132,6 +143,7 @@ cannot be combined with `Stabilization.OFF`.
 | `Stabilization`            | `OFF`, `FLOW_STATE`, `DIRECTION_LOCK`                                                                                                             |
 | `RollingShutterCorrection` | `AUTO`, `OFF`, `REQUIRED`                                                                                                                         |
 | `ProcessingBackend`        | `AUTO`, `CPU`, `GPU`                                                                                                                              |
+| `SeamMode`                 | `FIXED`, `DYNAMIC`, `OPTICAL_FLOW`, `AI`                                                                                                          |
 | `ColorConversion`          | `AUTO`, `PRESERVE`, `I_LOG_TO_REC709`                                                                                                             |
 | `EffectiveBackend`         | `CPU`, `GPU`, `UNKNOWN`                                                                                                                           |
 | `ImageFormat`              | `PNG`, `JPEG`                                                                                                                                     |

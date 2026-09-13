@@ -457,9 +457,9 @@ impl CalibrationResolver {
     ///
     /// `source` is strict: selecting [`OffsetSource::Current`] never falls back
     /// to an original record, and selecting [`OffsetSource::Original`] never
-    /// falls back to a current record. A V6 X5 offset can be converted when the
-    /// metadata contains both its encoded and requested six-coefficient optical
-    /// profiles.
+    /// falls back to a current record. Supported V6 X5 optical conversions use
+    /// registered source/target lens curves and retain the per-unit measured
+    /// calibration; named metadata profiles do not override these curves.
     pub fn resolve_metadata(
         &self,
         metadata: &InsvMetadata,
@@ -495,7 +495,7 @@ impl CalibrationResolver {
         let (resolved_setup, mut optical_resolution) =
             resolve_optical_selection(Some(metadata), *optical_selection, camera, &calibration)?;
         if camera.is_some_and(|profile| profile.camera == CameraModel::X5) {
-            apply_x5_setup(&mut calibration, &resolved_setup, &metadata.profiles)?;
+            apply_x5_setup(&mut calibration, &resolved_setup)?;
         } else {
             apply_registered_setup(&mut calibration, camera, &resolved_setup)?;
         }
@@ -530,7 +530,7 @@ impl CalibrationResolver {
         let (optical_setup, mut resolution) =
             resolve_optical_selection(None, *optical_selection, camera, &calibration)?;
         if camera.is_some_and(|profile| profile.camera == CameraModel::X5) {
-            apply_x5_setup(&mut calibration, &optical_setup, &[])?;
+            apply_x5_setup(&mut calibration, &optical_setup)?;
         } else {
             apply_registered_setup(&mut calibration, camera, &optical_setup)?;
         }
@@ -1294,11 +1294,7 @@ fn populate_render_geometry(
     Ok(())
 }
 
-fn apply_x5_setup(
-    calibration: &mut ResolvedCalibration,
-    requested: &OpticalProfile,
-    profiles: &[EmbeddedProfile],
-) -> Result<()> {
+fn apply_x5_setup(calibration: &mut ResolvedCalibration, requested: &OpticalProfile) -> Result<()> {
     let first_type = calibration.lenses[0].lens_type;
     let second_type = calibration.lenses[1].lens_type;
     if first_type != second_type {
@@ -1351,9 +1347,13 @@ fn apply_x5_setup(
             "portable X5 V6 conversion to {requested_name} is not evidence-backed"
         ))
     })?;
-    // Generic InvisibleDiveWater/Air names do not identify a housing revision.
-    // Native Pro conversion selects its exact lens curve by ID, never by those names.
-    let pro_conversion = matches!(first_type, 119 | 120) || matches!(target_type, 119 | 120);
+    // Native conversion selects physical curves by lens ID for standard and
+    // Pro housings. Embedded names are descriptors, not conversion overrides:
+    // a standard X5 recording can carry an InvisibleDiveWater curve that moves
+    // the projected rim outward by tens of pixels. Studio 5.9.10's target fit
+    // 0x101838264 calls getCoeff at 0x101166e24; ID117 dispatches to
+    // 0x101167a3c. Keep this selection separate from each unit's measured
+    // source focal/radial scale, principal point and residual distortion.
     let curve = |id| -> Result<[f64; PROFILE_COEFFICIENT_COUNT]> {
         let curve = crate::profile::physical_curve(id).ok_or_else(|| {
             Error::MissingCalibration(format!("lens {id} has no verified physical curve"))
@@ -1362,16 +1362,8 @@ fn apply_x5_setup(
         coefficients[..5].copy_from_slice(&curve.coefficients);
         Ok(coefficients)
     };
-    let source_profile = if pro_conversion {
-        curve(first_type)?
-    } else {
-        find_six_coefficient_profile(profiles, encoded_name)?
-    };
-    let target_profile = if pro_conversion {
-        curve(target_type)?
-    } else {
-        find_six_coefficient_profile(profiles, requested_name)?
-    };
+    let source_profile = curve(first_type)?;
+    let target_profile = curve(target_type)?;
 
     convert_x5_v6_profile(
         calibration,
@@ -1384,26 +1376,6 @@ fn apply_x5_setup(
     calibration.profile_name = Some(requested_name.to_owned());
     calibration.raw_offset = encode_v6_offset(calibration);
     calibration.validate()
-}
-
-fn find_six_coefficient_profile(
-    profiles: &[EmbeddedProfile],
-    name: &str,
-) -> Result<[f64; PROFILE_COEFFICIENT_COUNT]> {
-    let profile = profiles
-        .iter()
-        .find(|profile| profile.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| {
-            Error::MissingCalibration(format!(
-                "the metadata does not contain the {name} optical profile required for V6 conversion"
-            ))
-        })?;
-    match ParsedEmbeddedProfile::parse(profile)?.payload {
-        EmbeddedProfilePayload::SixCoefficientTransform(coefficients) => Ok(coefficients),
-        EmbeddedProfilePayload::ClassificationValue(_) => Err(Error::MissingCalibration(format!(
-            "the metadata profile {name} is a classifier hint, not an optical transform"
-        ))),
-    }
 }
 
 fn x5_conversion_target(setup: &OpticalProfile) -> Option<(u32, f64)> {

@@ -12,11 +12,36 @@ import tomllib
 
 DATA_CRATES = {
     "insta360-rs-data-core": "data/core",
+    "insta360-rs-data-ai-stitch-video": "data/ai-stitch-video",
     "insta360-rs-data-enhancement": "data/enhancement",
     "insta360-rs-data-underwater-model-a": "data/underwater-model-a",
     "insta360-rs-data-underwater-model-b": "data/underwater-model-b",
     "insta360-rs-data-underwater-resources": "data/underwater-resources",
 }
+PUBLISHED_CRATES = {"insta360-rs": ".", **DATA_CRATES}
+
+
+def validate_package_inventory(manifest: dict, root: Path) -> None:
+    """Keep workspace publication within the packages CI verifies and size-checks."""
+    workspace = manifest["workspace"]
+    published_paths = set(PUBLISHED_CRATES.values())
+    for field, expected in (
+        ("members", published_paths | {"src-python"}),
+        ("default-members", published_paths),
+    ):
+        actual = workspace.get(field, [])
+        if not isinstance(actual, list) or set(actual) != expected or len(actual) != len(expected):
+            raise ValueError(f"workspace.{field} must match the verified package inventory")
+    if workspace.get("exclude"):
+        raise ValueError("workspace.exclude must not remove verified packages")
+    for name, path in {**PUBLISHED_CRATES, "insta360-rs-python": "src-python"}.items():
+        relative = Path(path) / "Cargo.toml"
+        with (root / relative).open("rb") as source:
+            package = tomllib.load(source)["package"]
+        if package.get("name") != name:
+            raise ValueError(f"{relative} must declare package name {name}")
+        if name in PUBLISHED_CRATES and package.get("publish", True) not in (True, ["crates-io"]):
+            raise ValueError(f"{relative} must allow publication to crates.io")
 
 
 def validate(tag: str, root: Path) -> str:
@@ -28,6 +53,7 @@ def validate(tag: str, root: Path) -> str:
     actual = manifest["workspace"]["package"]["version"]
     if actual != version:
         raise ValueError(f"{tag} requires workspace version {version}, found {actual}")
+    validate_package_inventory(manifest, root)
     for relative in [
         "Cargo.toml",
         *(f"{path}/Cargo.toml" for path in DATA_CRATES.values()),
@@ -44,7 +70,7 @@ def validate(tag: str, root: Path) -> str:
     if "version" in project or "version" not in project.get("dynamic", []):
         raise ValueError("src-python/pyproject.toml must derive its version dynamically from Cargo")
     dependencies = manifest["workspace"]["dependencies"]
-    for name, path in {"insta360-rs": ".", **DATA_CRATES}.items():
+    for name, path in PUBLISHED_CRATES.items():
         dependency = dependencies[name]
         if not isinstance(dependency, dict) or dependency.get("version") != f"={version}":
             raise ValueError(f"Cargo.toml must pin {name} to exactly ={version}")

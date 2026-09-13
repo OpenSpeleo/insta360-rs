@@ -1,4 +1,6 @@
 mod common;
+#[path = "common/correspondence.rs"]
+mod correspondence;
 #[path = "common/rolling_shutter.rs"]
 mod rolling_shutter;
 
@@ -14,6 +16,81 @@ fn solid_lens(width: u32, height: u32, color: [u8; 3]) -> LensFrame {
         rgb.extend_from_slice(&color);
     }
     LensFrame::new(width, height, rgb).expect("solid frame has the right size")
+}
+
+#[test]
+fn prepared_corrections_are_source_deterministic_and_reject_stale_geometry() {
+    use insta360_rs::stitch::StitchPlanner;
+    use insta360_rs::{FrameMotion, SeamMode};
+    let (lenses, calibration) = correspondence::chart(0.8);
+    let motion = FrameMotion::global(Orientation::IDENTITY).unwrap();
+    let projection = EquirectangularProjection {
+        width: 512,
+        height: 256,
+    };
+    let cpu = CpuStitcher::new();
+    let fixed = cpu.stitch(&lenses, &calibration, projection).unwrap();
+    let (aligned, _) = correspondence::chart(0.0);
+    let reference = cpu.stitch(&aligned, &calibration, projection).unwrap();
+    let error = |frame: &PanoramaFrame| {
+        (120..136)
+            .flat_map(|y| (0..512).map(move |x| (y * 512 + x) * 3))
+            .map(|i| f64::from(frame.as_rgb8()[i].abs_diff(reference.as_rgb8()[i])))
+            .sum::<f64>()
+    };
+    let mut planner = StitchPlanner::new();
+    for mode in [
+        SeamMode::Dynamic,
+        SeamMode::OpticalFlow,
+        #[cfg(feature = "ai-stitching")]
+        SeamMode::Ai,
+    ] {
+        let plan = planner
+            .prepare(&lenses, &calibration, &motion, mode)
+            .unwrap();
+        assert!(
+            plan.confidence_coverage() > 0.05,
+            "{mode:?}:{}",
+            plan.confidence_coverage()
+        );
+        let render = |plan| {
+            cpu.stitch_with_motion_and_plan(&lenses, &calibration, projection, &motion, Some(plan))
+                .unwrap()
+        };
+        let corrected = render(&plan);
+        assert_ne!(
+            corrected, fixed,
+            "selected algorithm must change misaligned input"
+        );
+        assert!(
+            error(&corrected) < error(&fixed) * 0.9,
+            "{mode:?}: corrected{} baseline{}",
+            error(&corrected),
+            error(&fixed)
+        );
+        // Simulate arbitrary other frame requests, then independently recompute.
+        let (other, _) = correspondence::chart(-1.0);
+        planner
+            .prepare(&other, &calibration, &motion, mode)
+            .unwrap();
+        let fresh = StitchPlanner::new()
+            .prepare(&lenses, &calibration, &motion, mode)
+            .unwrap();
+        assert_eq!(render(&fresh), corrected, "frame history changed{mode:?}");
+        let mut changed = calibration.clone();
+        changed.lenses[1].cx += 1.0;
+        assert!(cpu
+            .stitch_with_motion_and_plan(&lenses, &changed, projection, &motion, Some(&plan))
+            .is_err());
+        // Output resolution is deliberately absent from plan validation.
+        let larger = EquirectangularProjection {
+            width: 1024,
+            height: 512,
+        };
+        assert!(cpu
+            .stitch_with_motion_and_plan(&lenses, &calibration, larger, &motion, Some(&plan))
+            .is_ok());
+    }
 }
 
 #[test]

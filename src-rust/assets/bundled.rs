@@ -44,6 +44,7 @@ impl AssetProvider for BundledAssetProvider {
 fn payloads() -> impl Iterator<Item = &'static (&'static str, &'static [u8])> {
     insta360_rs_data_core::PAYLOADS
         .iter()
+        .chain(insta360_rs_data_ai_stitch_video::PAYLOADS)
         .chain(insta360_rs_data_enhancement::PAYLOADS)
         .chain(insta360_rs_data_underwater_model_a::PAYLOADS)
         .chain(insta360_rs_data_underwater_model_b::PAYLOADS)
@@ -113,6 +114,10 @@ mod tests {
         let mut groups = Vec::new();
         for (manifest, payloads) in [
             (
+                insta360_rs_data_ai_stitch_video::MANIFEST,
+                insta360_rs_data_ai_stitch_video::PAYLOADS,
+            ),
+            (
                 insta360_rs_data_core::MANIFEST,
                 insta360_rs_data_core::PAYLOADS,
             ),
@@ -148,9 +153,15 @@ mod tests {
         expected.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(assets, expected);
         let mut expected_groups = bundle.groups;
-        let underwater = expected_groups.pop().unwrap();
+        let index = expected_groups
+            .iter()
+            .position(|group| group.id == "underwater-ai-studio-5-9-10")
+            .unwrap();
+        let underwater = expected_groups.remove(index);
         assert_eq!(underwater.id, "underwater-ai-studio-5-9-10");
         assert_eq!(underwater.members.len(), 9);
+        groups.sort_by(|a, b| a.id.cmp(&b.id));
+        expected_groups.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(groups, expected_groups);
     }
 

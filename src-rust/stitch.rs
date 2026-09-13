@@ -1,13 +1,24 @@
-//! Asset-free, geometry-stable CPU stitching primitives.
+//! Calibrated CPU stitching and shared per-pair optimization primitives.
 
 use std::f64::consts::PI;
 use std::sync::Arc;
 
+#[cfg(feature = "ai-stitching")]
+mod ai;
+pub mod diagnostics;
+mod flow;
 mod mask;
+mod optimization;
+mod source;
 use mask::FisheyeMask;
 pub(crate) use mask::MaskCache;
 #[cfg(feature = "gpu")]
 pub(crate) use mask::PreparedMasks;
+pub use optimization::{PreparedStitchPlan, StitchPlanner};
+use source::ProjectionSource;
+pub use source::{
+    ChromaLocation, Nv12Frame, Plane, StitchSource, Yuv42016Frame, Yuv420Frame, YuvMatrix, YuvRange,
+};
 
 use rayon::prelude::*;
 
@@ -226,6 +237,19 @@ impl CpuStitcher {
         Self::default()
     }
 
+    #[cfg(feature = "media")]
+    pub(crate) fn mask_cache(&self) -> Arc<MaskCache> {
+        Arc::clone(&self.masks)
+    }
+
+    #[cfg(feature = "media")]
+    pub(crate) fn with_masks(masks: Arc<MaskCache>) -> Self {
+        Self {
+            feather_fraction: DEFAULT_FEATHER_FRACTION,
+            masks,
+        }
+    }
+
     /// Creates a stitcher with an edge feather expressed as a lens-size fraction.
     pub fn with_feather_fraction(feather_fraction: f64) -> Result<Self> {
         if !feather_fraction.is_finite() || !(0.0..=0.5).contains(&feather_fraction) {
@@ -267,10 +291,29 @@ impl CpuStitcher {
         projection: EquirectangularProjection,
         motion: &FrameMotion,
     ) -> Result<PanoramaFrame> {
+        self.stitch_with_motion_and_plan(lenses, calibration, projection, motion, None)
+    }
+
+    /// Renders using the retained correction for this exact source pair.
+    pub fn stitch_with_motion_and_plan(
+        &self,
+        lenses: &[LensFrame; 2],
+        calibration: &ResolvedCalibration,
+        projection: EquirectangularProjection,
+        motion: &FrameMotion,
+        plan: Option<&PreparedStitchPlan>,
+    ) -> Result<PanoramaFrame> {
         let projection = projection.validate()?;
         calibration.validate_for_stitching()?;
         for lens in lenses {
             frame_buffer_len(lens.width, lens.height)?;
+        }
+        if let Some(plan) = plan {
+            plan.validate(
+                calibration,
+                lenses.each_ref().map(|f| (f.width(), f.height())),
+                motion,
+            )?;
         }
 
         let width = usize::try_from(projection.width)
@@ -318,7 +361,7 @@ impl CpuStitcher {
                             frame,
                             lens,
                             lens_index,
-                            direction,
+                            plan.map_or(direction, |plan| plan.direction(lens_index, direction)),
                             self.feather_fraction,
                             fisheye_masks[lens_index],
                             lens_geometry[lens_index],
@@ -406,7 +449,7 @@ fn equirectangular_direction(column: usize, row: usize, width: usize, height: us
 
 #[allow(clippy::too_many_arguments)]
 fn project_and_sample(
-    frame: &LensFrame,
+    frame: &impl ProjectionSource,
     lens: &ParsedLens,
     lens_index: usize,
     world_direction: [f64; 3],
@@ -415,16 +458,17 @@ fn project_and_sample(
     geometry: Option<ResolvedLensGeometry>,
     readout: Option<&ReadoutPoseTable>,
 ) -> Option<ProjectedSample> {
+    let (frame_width, frame_height) = frame.dimensions();
     // OffsetParser produces r_c_b: body/sphere rays rotate into lens coordinates.
     // Solve in the decoded source sensor, since its row determines capture time.
     let mut capture_direction = readout.map_or(world_direction, |table| {
         table
             .rotation_at_source(
                 [
-                    f64::from(frame.width) * 0.5 - 0.5,
-                    f64::from(frame.height) * 0.5 - 0.5,
+                    f64::from(frame_width) * 0.5 - 0.5,
+                    f64::from(frame_height) * 0.5 - 0.5,
                 ],
-                [frame.width, frame.height],
+                [frame_width, frame_height],
             )
             .rotate_vector(world_direction)
     });
@@ -434,8 +478,13 @@ fn project_and_sample(
         let local = lens.orientation.rotate_vector(capture_direction);
         let (calibration_x, calibration_y) =
             project_camera_ray_with_clipping(lens, local, geometry, readout.is_none())?;
-        let (source_x, source_y) =
-            calibration_to_source(frame, lens, lens_index, calibration_x, calibration_y);
+        let (source_x, source_y) = calibration_to_source_dimensions(
+            (frame_width, frame_height),
+            lens,
+            lens_index,
+            calibration_x,
+            calibration_y,
+        );
         if !source_x.is_finite() || !source_y.is_finite() {
             return None;
         }
@@ -453,7 +502,7 @@ fn project_and_sample(
         }
         previous_source = Some(source);
         capture_direction = readout?
-            .rotation_at_source(source, [frame.width, frame.height])
+            .rotation_at_source(source, [frame_width, frame_height])
             .rotate_vector(world_direction);
     }
     // Nonconvergent rays are not valid samples; both backends use this bound.
@@ -468,18 +517,18 @@ fn project_and_sample(
     };
     if source_x < 0.0
         || source_y < 0.0
-        || source_x > f64::from(frame.width - 1)
-        || source_y > f64::from(frame.height - 1)
+        || source_x > f64::from(frame_width - 1)
+        || source_y > f64::from(frame_height - 1)
     {
         return None;
     }
 
-    let sample = masked_bilinear_rgb(frame, source_x, source_y, fisheye_mask);
+    let sample = frame.sample_inside(source_x, source_y, fisheye_mask);
     let edge_distance = source_x
         .min(source_y)
-        .min(f64::from(frame.width - 1) - source_x)
-        .min(f64::from(frame.height - 1) - source_y);
-    let feather_pixels = f64::from(frame.width.min(frame.height)) * feather_fraction;
+        .min(f64::from(frame_width - 1) - source_x)
+        .min(f64::from(frame_height - 1) - source_y);
+    let feather_pixels = f64::from(frame_width.min(frame_height)) * feather_fraction;
     let (detail_weight, illumination_weight) = seam_weights.map_or_else(
         || {
             let weight = if feather_pixels <= f64::EPSILON {
@@ -523,30 +572,23 @@ fn estimate_color_adjustment(
         return ColorAdjustment::neutral(width, height);
     }
 
-    let mut first_pass = vec![ColorColumnStats::default(); width];
-    for row in (0..height).step_by(COLOR_ADJUSTMENT_SAMPLE_STRIDE) {
-        for (column, statistics) in first_pass.iter_mut().enumerate() {
-            let samples = project_pair_at(
-                lenses,
-                calibration,
-                width,
-                height,
-                column,
-                row,
-                feather_fraction,
-                fisheye_masks,
-                lens_geometry,
-                readout,
-            );
-            if let [Some(first), Some(second)] = samples {
-                if maximum_channel_difference(first.color, second.color)
-                    < COLOR_ADJUSTMENT_INITIAL_THRESHOLD
-                {
-                    add_color_pair(statistics, first.color, second.color);
-                }
-            }
-        }
-    }
+    let sample = |column, row| {
+        project_pair_at(
+            lenses,
+            calibration,
+            width,
+            height,
+            column,
+            row,
+            feather_fraction,
+            fisheye_masks,
+            lens_geometry,
+            readout,
+        )
+    };
+    let first_pass = collect_color_statistics(width, height, &sample, |_| {
+        COLOR_ADJUSTMENT_INITIAL_THRESHOLD
+    });
 
     let longitude_window = (width / COLOR_ADJUSTMENT_LONGITUDE_DIVISOR).max(1);
     let preliminary = windowed_color_means(&first_pass, longitude_window);
@@ -558,28 +600,7 @@ fn estimate_color_adjustment(
         })
         .collect();
 
-    let mut second_pass = vec![ColorColumnStats::default(); width];
-    for row in (0..height).step_by(COLOR_ADJUSTMENT_SAMPLE_STRIDE) {
-        for (column, statistics) in second_pass.iter_mut().enumerate() {
-            let samples = project_pair_at(
-                lenses,
-                calibration,
-                width,
-                height,
-                column,
-                row,
-                feather_fraction,
-                fisheye_masks,
-                lens_geometry,
-                readout,
-            );
-            if let [Some(first), Some(second)] = samples {
-                if maximum_channel_difference(first.color, second.color) < thresholds[column] {
-                    add_color_pair(statistics, first.color, second.color);
-                }
-            }
-        }
-    }
+    let second_pass = collect_color_statistics(width, height, &sample, |column| thresholds[column]);
 
     let means = smooth_color_means(
         &windowed_color_means(&second_pass, longitude_window),
@@ -607,6 +628,31 @@ fn estimate_color_adjustment(
         }
     }
     adjustment
+}
+
+fn collect_color_statistics(
+    width: usize,
+    height: usize,
+    sample: &(impl Fn(usize, usize) -> [Option<ProjectedSample>; 2] + Sync),
+    threshold: impl Fn(usize) -> f64 + Sync,
+) -> Vec<ColorColumnStats> {
+    let mut statistics = vec![ColorColumnStats::default(); width];
+    statistics
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(column, statistics)| {
+            let threshold = threshold(column);
+            // Each column is independent. Keep its original ascending row
+            // order so parallel execution cannot change floating-point sums.
+            for row in (0..height).step_by(COLOR_ADJUSTMENT_SAMPLE_STRIDE) {
+                if let [Some(first), Some(second)] = sample(column, row) {
+                    if maximum_channel_difference(first.color, second.color) < threshold {
+                        add_color_pair(statistics, first.color, second.color);
+                    }
+                }
+            }
+        });
+    statistics
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -862,22 +908,6 @@ fn overlap_alpha(angle: f64, belt: f64) -> f64 {
         };
     }
     (distance_from_seam / belt + 0.5).clamp(0.0, 1.0)
-}
-
-fn calibration_to_source(
-    frame: &LensFrame,
-    lens: &ParsedLens,
-    lens_index: usize,
-    calibration_x: f64,
-    calibration_y: f64,
-) -> (f64, f64) {
-    calibration_to_source_dimensions(
-        (frame.width(), frame.height()),
-        lens,
-        lens_index,
-        calibration_x,
-        calibration_y,
-    )
 }
 
 fn calibration_to_source_dimensions(
@@ -1147,6 +1177,107 @@ fn smoothstep(value: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::calibration::synthetic_dual_fisheye_calibration;
+
+    #[test]
+    fn parallel_color_statistics_match_serial_row_order_exactly() {
+        let sample = |column: usize, row: usize| {
+            let base = ((row * 37 + column * 13) % 240) as f64 / 2.7;
+            let difference = ((row * 5 + column * 9) % 100) as f64 / 1.3;
+            let colors = [
+                [base, base * 0.7, base * 0.3],
+                [base + difference, base * 0.7, base * 0.3 + difference * 0.4],
+            ];
+            std::array::from_fn(|lens| {
+                (!(row + column).is_multiple_of(11 + lens * 2)).then_some(ProjectedSample {
+                    color: colors[lens],
+                    source_x: 0.0,
+                    source_y: 0.0,
+                    detail_weight: 1.0,
+                    illumination_weight: 1.0,
+                })
+            })
+        };
+        for width in [1, 5, 41] {
+            for initial_pass in [true, false] {
+                let threshold = |column| {
+                    if initial_pass {
+                        255.0
+                    } else {
+                        (20 + column % 71) as f64
+                    }
+                };
+                let parallel = collect_color_statistics(width, 73, &sample, threshold);
+                let mut serial = vec![ColorColumnStats::default(); width];
+                // Preserve the previous row-major traversal as the reference.
+                for row in (0..73).step_by(COLOR_ADJUSTMENT_SAMPLE_STRIDE) {
+                    for (column, stats) in serial.iter_mut().enumerate() {
+                        let [Some(first), Some(second)] = sample(column, row) else {
+                            continue;
+                        };
+                        if (0..RGB_CHANNELS).any(|channel| {
+                            (first.color[channel] - second.color[channel]).abs()
+                                >= threshold(column)
+                        }) {
+                            continue;
+                        }
+                        for (lens, color) in [first.color, second.color].into_iter().enumerate() {
+                            for (channel, value) in color.into_iter().enumerate() {
+                                stats.sums[lens][channel] += value;
+                            }
+                        }
+                        stats.count += 1;
+                    }
+                }
+                assert!(serial.iter().any(|stats| stats.count > 0));
+                for (parallel, serial) in parallel.iter().zip(serial) {
+                    assert_eq!(parallel.count, serial.count);
+                    assert_eq!(parallel.sums, serial.sums);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn projection_rejects_invalid_coordinates_before_accessing_source_pixels() {
+        struct CheckedSource(std::cell::Cell<usize>);
+        impl ProjectionSource for CheckedSource {
+            fn dimensions(&self) -> (u32, u32) {
+                (16, 16)
+            }
+
+            fn sample_inside(&self, x: f64, y: f64, _: Option<&FisheyeMask>) -> [f64; 3] {
+                assert!(x.is_finite() && y.is_finite());
+                assert!((0.0..=15.0).contains(&x) && (0.0..=15.0).contains(&y));
+                self.0.set(self.0.get() + 1);
+                [17.0, 31.0, 127.0]
+            }
+        }
+
+        let source = CheckedSource(std::cell::Cell::new(0));
+        let mut lens = synthetic_dual_fisheye_calibration(16, 16).unwrap().lenses[0].clone();
+        let direction = lens.orientation.inverse().rotate_vector([0.0, 0.0, 1.0]);
+        for (x, y, valid) in [
+            (8.0, 8.0, true),
+            (0.0, 0.0, true),
+            (15.0, 15.0, true),
+            (-1.0, 8.0, false),
+            (16.0, 8.0, false),
+            (8.0, -1.0, false),
+            (8.0, 16.0, false),
+            (f64::NAN, 8.0, false),
+            (8.0, f64::INFINITY, false),
+        ] {
+            lens.cx = x;
+            lens.cy = y;
+            let previous_calls = source.0.get();
+            let sample = project_and_sample(&source, &lens, 0, direction, 0.0, None, None, None);
+            assert_eq!(source.0.get() - previous_calls, usize::from(valid));
+            assert_eq!(
+                sample.map(|sample| sample.color),
+                valid.then_some([17.0, 31.0, 127.0])
+            );
+        }
+    }
 
     #[test]
     fn native_polynomial_projection_matches_independent_degree_radius_coordinates() {

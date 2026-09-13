@@ -64,6 +64,27 @@ impl LegacySession {
         })
     }
 
+    /// Keeps the verified, strength-adjusted LUT and reuses scratch capacity.
+    /// Reserve every buffer before changing lengths or the active dimensions.
+    #[cfg(any(feature = "media", test))]
+    pub(super) fn resize(&mut self, width: u32, height: u32) -> Result<()> {
+        let small_len = (width as usize / 4) * (height as usize / 4);
+        reserve(&mut self.small, small_len)?;
+        reserve(&mut self.guide, small_len)?;
+        reserve(&mut self.field, small_len)?;
+        reserve(&mut self.scratch, small_len)?;
+        reserve(&mut self.filtered, small_len)?;
+        self.small.resize(small_len, [0; 3]);
+        self.guide.resize(small_len, 0.0);
+        self.field.resize(small_len, 0.0);
+        self.scratch.resize(small_len, 0.0);
+        self.filtered.resize(small_len, 0.0);
+        self.width = width as usize;
+        self.height = height as usize;
+        self.reset();
+        Ok(())
+    }
+
     pub(super) fn reset(&mut self) {
         self.gamma = None;
         self.atmosphere = None;
@@ -71,6 +92,24 @@ impl LegacySession {
     }
 
     pub(super) fn process_rgb8(&mut self, pixels: &mut [u8], pts_seconds: f64) -> Result<()> {
+        self.process_with_rate(pixels, pts_seconds, UPDATE_RATE)
+    }
+
+    pub(super) fn process_rgb8_continuous(
+        &mut self,
+        pixels: &mut [u8],
+        pts_seconds: f64,
+        elapsed_frames: f64,
+    ) -> Result<()> {
+        self.process_with_rate(pixels, pts_seconds, UPDATE_RATE.powf(elapsed_frames as f32))
+    }
+
+    fn process_with_rate(
+        &mut self,
+        pixels: &mut [u8],
+        pts_seconds: f64,
+        update_rate: f32,
+    ) -> Result<()> {
         if pixels.len() != self.width * self.height * 3 || !pts_seconds.is_finite() {
             return Err(invalid(
                 "legacy underwater frame dimensions or timestamp are invalid",
@@ -83,8 +122,8 @@ impl LegacySession {
             self.reset();
         }
         self.previous_pts = Some(pts_seconds);
-        // Native temporal smoothing is per processed frame, independent of FPS.
-        // Random seeks start a fresh state; callers reset at recording changes.
+        // The reference path supplies the fixed per-frame rate; continuous
+        // previews exponentiate it by elapsed source frames.
         if self.strength == 0.0 {
             return Ok(());
         }
@@ -102,16 +141,13 @@ impl LegacySession {
         for pixel in pixels.chunks_exact_mut(3) {
             pixel.copy_from_slice(&compensation.apply([pixel[0], pixel[1], pixel[2]]));
         }
-        brighten(pixels, self.strength, &mut self.gamma);
-        self.remove_haze(pixels)?;
-        for pixel in pixels.chunks_exact_mut(3) {
-            let output = self.lut.sample([pixel[2], pixel[1], pixel[0]]);
-            pixel.copy_from_slice(&[output[2], output[1], output[0]]);
-        }
+        brighten(pixels, self.strength, &mut self.gamma, update_rate);
+        self.remove_haze(pixels, update_rate)?;
+        self.lut.apply_bgr_table_to_rgb8(pixels);
         Ok(())
     }
 
-    fn remove_haze(&mut self, pixels: &mut [u8]) -> Result<()> {
+    fn remove_haze(&mut self, pixels: &mut [u8], update_rate: f32) -> Result<()> {
         let (width, height) = (self.width / 4, self.height / 4);
         resize_rgb(
             pixels,
@@ -139,7 +175,7 @@ impl LegacySession {
         let current = atmospheric_light(&self.small, &self.guide, &self.filtered, width, height);
         let atmosphere = match self.atmosphere {
             Some(previous) if previous != [0.0; 3] => std::array::from_fn(|channel| {
-                previous[channel].mul_add(UPDATE_RATE, current[channel] * (1.0 - UPDATE_RATE))
+                previous[channel].mul_add(update_rate, current[channel] * (1.0 - update_rate))
             }),
             _ => current,
         };
@@ -272,7 +308,7 @@ impl ChannelCompensation {
     }
 }
 
-fn brighten(pixels: &mut [u8], strength: f32, previous: &mut Option<f32>) {
+fn brighten(pixels: &mut [u8], strength: f32, previous: &mut Option<f32>, update_rate: f32) {
     let sum = pixels
         .chunks_exact(3)
         .map(|pixel| u64::from(gray([pixel[0], pixel[1], pixel[2]])))
@@ -285,7 +321,7 @@ fn brighten(pixels: &mut [u8], strength: f32, previous: &mut Option<f32>) {
     let current = target.ln() / mean.ln();
     let gamma = match *previous {
         Some(value) => {
-            current.mul_add(f64::from(1.0 - UPDATE_RATE), f64::from(value * UPDATE_RATE)) as f32
+            current.mul_add(f64::from(1.0 - update_rate), f64::from(value * update_rate)) as f32
         }
         None => current as f32,
     };
@@ -469,6 +505,13 @@ fn byte(value: f32) -> u8 {
     value.round_ties_even().clamp(0.0, 255.0) as u8
 }
 
+#[cfg(any(feature = "media", test))]
+fn reserve<T>(values: &mut Vec<T>, length: usize) -> Result<()> {
+    values
+        .try_reserve_exact(length.saturating_sub(values.len()))
+        .map_err(|_| invalid("cannot resize legacy underwater workspace"))
+}
+
 fn allocate<T: Clone>(length: usize, value: T) -> Result<Vec<T>> {
     let mut values = Vec::new();
     values
@@ -485,6 +528,49 @@ fn invalid(message: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resizing_legacy_keeps_the_verified_lut_and_scratch_capacity() {
+        use crate::assets::{AssetPolicy, BundledAssetProvider};
+        let asset = BundledAssetProvider::manifest()
+            .unwrap()
+            .load_verified(
+                &BundledAssetProvider,
+                "underwater-legacy-ilut",
+                AssetPolicy::Required,
+            )
+            .unwrap()
+            .unwrap();
+        let mut session = LegacySession::new(
+            128,
+            96,
+            30,
+            1,
+            0.8,
+            0.5,
+            IntegerLut::parse(&asset.bytes).unwrap(),
+        )
+        .unwrap();
+        let identities = |session: &LegacySession| {
+            [
+                session.lut.allocation_identity(),
+                session.small.as_ptr() as usize,
+                session.guide.as_ptr() as usize,
+                session.field.as_ptr() as usize,
+                session.scratch.as_ptr() as usize,
+                session.filtered.as_ptr() as usize,
+            ]
+        };
+        let original = identities(&session);
+        for (width, height) in [(64, 80), (128, 96)] {
+            session.resize(width, height).unwrap();
+            assert_eq!(identities(&session), original);
+            assert_eq!(
+                session.small.len(),
+                width as usize / 4 * (height as usize / 4)
+            );
+        }
+    }
 
     fn constant_lut(value: [u8; 3]) -> IntegerLut {
         let mut bytes = [16_u32, 256, 256]
@@ -579,21 +665,21 @@ mod tests {
     fn brightness_reaches_native_target_and_smooths_gamma_per_frame() {
         let mut previous = None;
         let mut gray100 = vec![100; 3 * 64];
-        brighten(&mut gray100, 1.0, &mut previous);
+        brighten(&mut gray100, 1.0, &mut previous, UPDATE_RATE);
         assert!(gray100.iter().all(|v| *v == 140)); // .55*255=140.25
         let first = previous.unwrap();
         let mut gray30 = vec![30; 3 * 64];
-        brighten(&mut gray30, 1.0, &mut previous);
+        brighten(&mut gray30, 1.0, &mut previous, UPDATE_RATE);
         let incoming = (45.0_f64 / 255.0).ln() / (30.0_f64 / 255.0).ln();
         let expected =
             incoming.mul_add(f64::from(1.0 - UPDATE_RATE), f64::from(first * UPDATE_RATE)) as f32;
         assert_eq!(previous.unwrap(), expected);
         assert!(previous.unwrap() > first);
         let mut bright = vec![200; 3 * 64];
-        brighten(&mut bright, 1.0, &mut None);
+        brighten(&mut bright, 1.0, &mut None, UPDATE_RATE);
         assert_eq!(bright, vec![200; 3 * 64]); // gamma>=1 is never darkened
         let mut colorful = [40, 60, 80].repeat(64);
-        brighten(&mut colorful, 1.0, &mut None);
+        brighten(&mut colorful, 1.0, &mut None, UPDATE_RATE);
         for pixel in colorful.chunks_exact(3) {
             assert_eq!(pixel[1] - pixel[0], 20);
             assert_eq!(pixel[2] - pixel[1], 20);
@@ -821,5 +907,19 @@ mod tests {
         assert!(current.process_rgb8(&mut pixels[..3], 0.0).is_err());
         assert_eq!(pixels, expected);
         assert_eq!(current.previous_pts, None);
+    }
+    #[test]
+    fn continuous_preview_smoothing_advances_across_dropped_source_frames() {
+        let initial = 0.5_f32;
+        let mut sequential = Some(initial);
+        for _ in 0..12 {
+            brighten(&mut [80; 3 * 64], 1.0, &mut sequential, UPDATE_RATE);
+        }
+        let mut skipped = Some(initial);
+        brighten(&mut [80; 3 * 64], 1.0, &mut skipped, UPDATE_RATE.powi(12));
+        assert!((sequential.unwrap() - skipped.unwrap()).abs() < 1e-6);
+        let mut one = Some(initial);
+        brighten(&mut [80; 3 * 64], 1.0, &mut one, UPDATE_RATE);
+        assert!((one.unwrap() - skipped.unwrap()).abs() > 0.01);
     }
 }

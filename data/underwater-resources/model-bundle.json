@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "bundle_id": "insta360-rs-data-underwater-resources",
-  "bundle_version": "2026-09-08.1",
+  "bundle_version": "2026-09-11.1",
   "assets": [
     {
       "id": "underwater-model198",

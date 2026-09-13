@@ -7,6 +7,22 @@
 #[cfg(feature = "underwater-ai")]
 mod ai;
 mod ilut;
+#[cfg(all(feature = "gpu", test))]
+pub(crate) use ilut::IntegerLut;
+#[cfg(all(
+    feature = "gpu",
+    feature = "underwater-ai",
+    any(feature = "media", test)
+))]
+mod gpu;
+#[cfg(any(feature = "gpu", feature = "underwater-ai"))]
+pub(crate) mod resize;
+#[cfg(all(
+    feature = "gpu",
+    feature = "underwater-ai",
+    any(feature = "media", test)
+))]
+pub(crate) use gpu::GpuUnderwaterFrame;
 mod legacy;
 #[cfg(feature = "underwater-ai")]
 mod model;
@@ -37,11 +53,15 @@ pub fn mnn_runtime_version() -> Result<&'static str> {
 /// does not resize or move pixels. Call [`Self::reset`] at recording boundaries
 /// and before unrelated selected images. Non-increasing timestamps also reset
 /// temporal state. The supplied frame rate is validated but correction smoothing
-/// follows processed frames, as in the reference CPU implementation.
+/// follows processed frames in `process_rgb8`, matching the reference CPU
+/// implementation. `process_rgb8_continuous` is a separate source-time preview
+/// policy for applications that drop presentation frames.
 pub struct UnderwaterColorSession {
     engine: Engine,
     frame_bytes: usize,
     previous_pts: Option<f64>,
+    frame_rate: f64,
+    continuous: Option<bool>,
 }
 
 enum Engine {
@@ -102,36 +122,133 @@ impl UnderwaterColorSession {
             engine,
             frame_bytes: area * 3,
             previous_pts: None,
+            frame_rate: f64::from(fps_numerator) / f64::from(fps_denominator),
+            continuous: None,
         })
+    }
+
+    /// Updates media preview dimensions while retaining verified assets/models.
+    /// Validation/allocation errors preserve the previous usable dimensions and
+    /// history. A successful change starts with fresh temporal state.
+    #[cfg(any(feature = "media", test))]
+    pub(crate) fn resize(&mut self, width: u32, height: u32) -> Result<()> {
+        let mode = match &self.engine {
+            Engine::Off => UnderwaterColorMode::Off,
+            Engine::Legacy(_) => UnderwaterColorMode::Legacy,
+            #[cfg(feature = "underwater-ai")]
+            Engine::Ai(_) => UnderwaterColorMode::Ai,
+        };
+        // The original frame rate and mode options remain unchanged and valid.
+        UnderwaterColorOptions {
+            mode,
+            ..Default::default()
+        }
+        .validate_dimensions(width, height, 1, 1)?;
+        match &mut self.engine {
+            Engine::Off => {}
+            Engine::Legacy(session) => session.resize(width, height)?,
+            #[cfg(feature = "underwater-ai")]
+            Engine::Ai(session) => session.resize(width, height),
+        }
+        self.frame_bytes = width as usize * height as usize * 3;
+        self.reset();
+        Ok(())
+    }
+
+    /// Stable test identity for the retained boxed processing engine.
+    #[cfg(test)]
+    pub(crate) fn engine_identity(&self) -> usize {
+        match &self.engine {
+            Engine::Off => 0,
+            Engine::Legacy(session) => std::ptr::from_ref(session.as_ref()) as usize,
+            #[cfg(feature = "underwater-ai")]
+            Engine::Ai(session) => std::ptr::from_ref(session.as_ref()) as usize,
+        }
     }
 
     /// Restores a packed RGB8 frame in place. Invalid lengths or non-finite
     /// timestamps are rejected before pixels or temporal state are changed.
     pub fn process_rgb8(&mut self, pixels: &mut [u8], pts_seconds: f64) -> Result<()> {
+        self.process_frame(pixels, pts_seconds, false)
+    }
+
+    /// Restores a preview frame using source elapsed time for smoothing and AI
+    /// inference cadence. Dropping presentation frames does not slow adaptation.
+    /// This is an explicit preview policy; `process_rgb8` retains the reference
+    /// per-processed-frame behavior used by stills and exports. Switching policy
+    /// or using a non-increasing PTS resets history. Reset explicitly after a seek.
+    pub fn process_rgb8_continuous(&mut self, pixels: &mut [u8], pts_seconds: f64) -> Result<()> {
+        self.process_frame(pixels, pts_seconds, true)
+    }
+
+    fn process_frame(
+        &mut self,
+        pixels: &mut [u8],
+        pts_seconds: f64,
+        continuous: bool,
+    ) -> Result<()> {
         if pixels.len() != self.frame_bytes || !pts_seconds.is_finite() {
             return Err(Error::InvalidMedia(
                 "underwater color frame length or timestamp is invalid".into(),
             ));
         }
+        let elapsed_frames = self.prepare_timing(pts_seconds, continuous)?;
+        match &mut self.engine {
+            Engine::Off => {}
+            Engine::Legacy(session) => {
+                if continuous {
+                    session.process_rgb8_continuous(pixels, pts_seconds, elapsed_frames)?;
+                } else {
+                    session.process_rgb8(pixels, pts_seconds)?;
+                }
+            }
+            #[cfg(feature = "underwater-ai")]
+            Engine::Ai(session) => {
+                if continuous {
+                    session.process_rgb8_continuous(pixels, elapsed_frames)?;
+                } else {
+                    session.process_rgb8(pixels)?;
+                }
+            }
+        }
+        self.previous_pts = Some(pts_seconds);
+        self.continuous = Some(continuous);
+        Ok(())
+    }
+
+    fn prepare_timing(&mut self, pts_seconds: f64, continuous: bool) -> Result<f64> {
+        if !pts_seconds.is_finite() {
+            return Err(Error::InvalidMedia(
+                "underwater timestamp is invalid".into(),
+            ));
+        }
         if self
             .previous_pts
             .is_some_and(|previous| pts_seconds <= previous)
+            || self
+                .continuous
+                .is_some_and(|previous| previous != continuous)
         {
             self.reset();
         }
-        match &mut self.engine {
-            Engine::Off => {}
-            Engine::Legacy(session) => session.process_rgb8(pixels, pts_seconds)?,
-            #[cfg(feature = "underwater-ai")]
-            Engine::Ai(session) => session.process_rgb8(pixels)?,
+        let elapsed_frames = if continuous {
+            self.previous_pts
+                .map_or(1.0, |previous| (pts_seconds - previous) * self.frame_rate)
+        } else {
+            1.0
+        };
+        if !elapsed_frames.is_finite() || elapsed_frames <= 0.0 {
+            return Err(Error::InvalidMedia(
+                "underwater color elapsed frame time is invalid".into(),
+            ));
         }
-        self.previous_pts = Some(pts_seconds);
-        Ok(())
+        Ok(elapsed_frames)
     }
 
     /// Clears temporal history while retaining prepared models and allocations.
     pub fn reset(&mut self) {
         self.previous_pts = None;
+        self.continuous = None;
         match &mut self.engine {
             Engine::Off => {}
             Engine::Legacy(session) => session.reset(),
@@ -243,6 +360,83 @@ mod tests {
         fn load(&self, _: &str) -> crate::assets::AssetResult<Option<Vec<u8>>> {
             Ok(None)
         }
+    }
+
+    #[test]
+    fn resizing_legacy_starts_fresh_and_invalid_dimensions_preserve_the_session() {
+        let options = UnderwaterColorOptions {
+            mode: UnderwaterColorMode::Legacy,
+            ..Default::default()
+        };
+        for continuous in [false, true] {
+            let mut session =
+                UnderwaterColorSession::prepare(options, 128, 96, 30, 1, &BundledAssetProvider)
+                    .unwrap();
+            let identity = session.engine_identity();
+            for (index, (width, height)) in [(128, 96), (64, 80), (128, 96)].into_iter().enumerate()
+            {
+                session.resize(width, height).unwrap();
+                assert_eq!(session.engine_identity(), identity);
+                let mut fresh = UnderwaterColorSession::prepare(
+                    options,
+                    width,
+                    height,
+                    30,
+                    1,
+                    &BundledAssetProvider,
+                )
+                .unwrap();
+                let pixels: Vec<u8> = (0..width * height)
+                    .flat_map(|i| {
+                        [
+                            30 + (i % 89) as u8,
+                            70 + (i % 103) as u8,
+                            90 + (i % 127) as u8,
+                        ]
+                    })
+                    .collect();
+                let mut actual = pixels.clone();
+                let mut expected = pixels.clone();
+                let pts = 1.0 + index as f64 * 2.0;
+                session.process_frame(&mut actual, pts, continuous).unwrap();
+                fresh.process_frame(&mut expected, pts, continuous).unwrap();
+                assert!(
+                    actual == expected,
+                    "resized first frame differs at transition {index}, continuous={continuous}"
+                );
+                let previous_pts = session.previous_pts;
+                let frame_bytes = session.frame_bytes;
+                for (bad_width, bad_height) in [(0, 64), (63, 64), (u32::MAX, u32::MAX)] {
+                    assert!(session.resize(bad_width, bad_height).is_err());
+                    assert_eq!(session.previous_pts, previous_pts);
+                    assert_eq!(session.frame_bytes, frame_bytes);
+                    assert_eq!(session.engine_identity(), identity);
+                }
+                // Failed resize must also leave subsequent temporal behavior intact.
+                let mut actual = pixels.clone();
+                let mut expected = pixels;
+                session
+                    .process_frame(&mut actual, pts + 0.2, continuous)
+                    .unwrap();
+                fresh
+                    .process_frame(&mut expected, pts + 0.2, continuous)
+                    .unwrap();
+                assert!(actual == expected, "invalid resize changed active history");
+            }
+        }
+        let mut off = UnderwaterColorSession::prepare(
+            UnderwaterColorOptions::default(),
+            2,
+            1,
+            30,
+            1,
+            &MissingAssets,
+        )
+        .unwrap();
+        off.resize(3, 1).unwrap();
+        let mut pixels = [7; 9];
+        off.process_rgb8(&mut pixels, 0.0).unwrap();
+        assert_eq!(pixels, [7; 9]);
     }
 
     #[test]
@@ -459,5 +653,45 @@ mod tests {
                 .unwrap();
             }
         }
+    }
+    #[test]
+    fn continuous_preview_resets_on_backward_pts_and_policy_changes() {
+        let options = UnderwaterColorOptions {
+            mode: UnderwaterColorMode::Legacy,
+            ..Default::default()
+        };
+        let mut current =
+            UnderwaterColorSession::prepare(options, 64, 64, 60, 1, &BundledAssetProvider).unwrap();
+        let mut fresh =
+            UnderwaterColorSession::prepare(options, 64, 64, 60, 1, &BundledAssetProvider).unwrap();
+        let first = [35, 85, 110].repeat(64 * 64);
+        let second = [80, 110, 140].repeat(64 * 64);
+        current
+            .process_rgb8_continuous(&mut first.clone(), 1.0)
+            .unwrap();
+        current
+            .process_rgb8_continuous(&mut second.clone(), 2.0)
+            .unwrap();
+        let mut actual = first.clone();
+        let mut expected = first.clone();
+        current.process_rgb8_continuous(&mut actual, 1.0).unwrap();
+        fresh.process_rgb8_continuous(&mut expected, 1.0).unwrap();
+        assert_eq!(actual, expected);
+        let mut actual = second.clone();
+        let mut expected = second;
+        current.process_rgb8(&mut actual, 3.0).unwrap();
+        fresh.reset();
+        fresh.process_rgb8(&mut expected, 3.0).unwrap();
+        assert_eq!(
+            actual, expected,
+            "reference processing starts fresh after preview policy"
+        );
+        let saved_pts = current.previous_pts;
+        let mut invalid = first.clone();
+        assert!(current
+            .process_rgb8_continuous(&mut invalid, f64::NAN)
+            .is_err());
+        assert_eq!(invalid, first);
+        assert_eq!(current.previous_pts, saved_pts);
     }
 }

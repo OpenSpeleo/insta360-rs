@@ -1,0 +1,13 @@
+[package]
+name = "insta360-rs-data-ai-stitch-video"
+version.workspace = true
+authors.workspace = true
+description = "Verified Insta360 Studio video AI stitching model resources"
+edition.workspace = true
+rust-version.workspace = true
+license-file = "LICENSE.md"
+repository.workspace = true
+readme = "README.md"
+keywords = ["insta360", "360-video", "assets"]
+categories = ["multimedia::video"]
+include = ["src/**", "assets/**", "/model-bundle.json", "/Cargo.toml", "/README.md", "/LICENSE.md", "/NOTICE.md", "!**/.DS_Store"]

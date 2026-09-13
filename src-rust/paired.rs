@@ -12,7 +12,7 @@ use crate::{Error, RecordingSequence, Result};
 mod layout;
 pub(crate) use layout::DecodedLayout;
 mod preview;
-pub use preview::{PairedPreviewReader, PreviewAcceleration};
+pub use preview::{PairedPreviewReader, PreviewAcceleration, PreviewDecodeStats, PreviewSelection};
 
 const MAX_QUEUED_FRAMES: usize = 16;
 const MAX_QUEUED_BYTES: usize = 256 * 1024 * 1024;

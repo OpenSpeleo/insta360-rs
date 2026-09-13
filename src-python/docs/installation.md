@@ -9,8 +9,8 @@
   toolchain, and libclang for FFmpeg bindgen.
 - FFmpeg development headers/libraries for `avcodec`, `avformat`, `avutil`, and
   `swscale`, discoverable by `pkg-config` or the ffmpeg-sys build environment.
-- CMake and the pinned independent MNN CPU prefix for `underwater-ai`, enabled
-  by the Python wheel configuration.
+- CMake and the pinned independent MNN CPU prefix for `underwater-ai` and
+  `ai-stitching`, enabled by the Python wheel configuration.
 - `ffmpeg` and `ffprobe` executables for the integration tests. Their fixture
   generator needs lavfi, MPEG-4 video, AAC, and MP4 support. Software HEVC
   export tests require a `libx265` encoder in the FFmpeg libraries linked to
@@ -42,12 +42,13 @@ virtual environment must be active for `maturin develop`. Rebuild after editing
 Rust; Python changes are immediately visible with a development install.
 
 The binding Cargo manifest depends on the Rust crate at `..` and enables its
-`media` and `gpu` features. Maturin also enables `underwater-ai`, which links
-the independently compiled MNN engine and includes its notices in release
-wheels. For a checkout without AI, explicitly override Maturin features or build
-a Rust media/GPU consumer without `underwater-ai`. Keep `src-python` adjacent to
-the core crate's `src-rust` directory when building a checkout. The package and
-import names remain `insta360-rs` and `insta360_rs` respectively.
+`media` and `gpu` features. Maturin also enables `underwater-ai` and
+`ai-stitching`, which link the independently compiled MNN engine and includes
+its notices in release wheels. For a checkout without AI, explicitly override
+Maturin features or build a Rust media/GPU consumer without either AI feature.
+Keep `src-python` adjacent to the core crate's `src-rust` directory when
+building a checkout. The package and import names remain `insta360-rs` and
+`insta360_rs` respectively.
 
 ## Build installable artifacts
 

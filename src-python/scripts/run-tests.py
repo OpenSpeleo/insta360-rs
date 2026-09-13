@@ -42,6 +42,10 @@ def main():
         and not capabilities.underwater_ai_compiled
     ):
         raise RuntimeError("Python suite requires the compiled underwater AI engine")
+    if os.environ.get("INSTA360_RS_REQUIRE_AI_STITCHING") == "1":
+        reason = insta360_rs.SeamMode.AI.unavailable_reason()
+        if reason is not None:
+            raise RuntimeError(f"Python suite requires AI stitching: {reason}")
     if not {"libx265", "libkvazaar"} & set(capabilities.hevc_encoders):
         raise RuntimeError(
             "Python video tests require software HEVC in the linked FFmpeg libraries "

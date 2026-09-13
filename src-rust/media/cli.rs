@@ -9,7 +9,7 @@ use crate::{
     probe, AudioPolicy, BackendReport, ColorConversion, EffectiveBackend, Environment,
     EquirectangularProjection, ExportResult, FrameSelection, Housing, ImageExportOptions, InputSet,
     LensAccessory, MediaAcceleration, MountingAccessory, ProcessingBackend,
-    RollingShutterCorrection, Stabilization, StitchConfig, UnderwaterColorMode,
+    RollingShutterCorrection, SeamMode, Stabilization, StitchConfig, UnderwaterColorMode,
     UnderwaterColorOptions, VideoExportOptions,
 };
 
@@ -115,6 +115,9 @@ struct StitchArguments {
     rolling_shutter: CliRollingShutter,
     #[arg(long, value_enum, default_value_t = CliBackend::Auto)]
     backend: CliBackend,
+    /// Optimize seam alignment; off retains the calibrated fixed geometry.
+    #[arg(long, value_enum, default_value_t = CliStitchingOptimization::Off)]
+    stitching_optimization: CliStitchingOptimization,
     /// Convert identified I-Log to Rec.709 automatically, preserve it, or request conversion explicitly.
     #[arg(long, value_enum, default_value_t = CliColorConversion::Auto)]
     color_conversion: CliColorConversion,
@@ -142,6 +145,15 @@ enum CliBackend {
     Auto,
     Cpu,
     Gpu,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliStitchingOptimization {
+    #[default]
+    Off,
+    Dynamic,
+    OpticalFlow,
+    Ai,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -195,6 +207,12 @@ impl StitchArguments {
                 CliBackend::Auto => ProcessingBackend::Auto,
                 CliBackend::Cpu => ProcessingBackend::Cpu,
                 CliBackend::Gpu => ProcessingBackend::Gpu,
+            },
+            seam_mode: match self.stitching_optimization {
+                CliStitchingOptimization::Off => SeamMode::Fixed,
+                CliStitchingOptimization::Dynamic => SeamMode::Dynamic,
+                CliStitchingOptimization::OpticalFlow => SeamMode::OpticalFlow,
+                CliStitchingOptimization::Ai => SeamMode::Ai,
             },
             color_conversion: match self.color_conversion {
                 CliColorConversion::Auto => ColorConversion::Auto,
@@ -517,6 +535,41 @@ mod tests {
         );
         assert!(matches!(stitch.backend, CliBackend::Cpu));
         assert_eq!(stitch.config().color_conversion, ColorConversion::Auto);
+    }
+
+    #[test]
+    fn both_export_commands_map_stitching_optimization_and_keep_fixed_default() {
+        for command in ["export-frames", "export-video"] {
+            for (value, expected) in [
+                (None, SeamMode::Fixed),
+                (Some("off"), SeamMode::Fixed),
+                (Some("dynamic"), SeamMode::Dynamic),
+                (Some("optical-flow"), SeamMode::OpticalFlow),
+                (Some("ai"), SeamMode::Ai),
+            ] {
+                let mut args = vec!["insta360-rs", command, "source.insv", "output"];
+                if let Some(value) = value {
+                    args.extend(["--stitching-optimization", value]);
+                }
+                let arguments = Arguments::try_parse_from(args).expect("valid optimization");
+                let stitch = match arguments.command {
+                    Command::ExportFrames { stitch, .. } | Command::ExportVideo { stitch, .. } => {
+                        stitch
+                    }
+                    _ => panic!("expected export command"),
+                };
+                assert_eq!(stitch.config().seam_mode, expected);
+            }
+            assert!(Arguments::try_parse_from([
+                "insta360-rs",
+                command,
+                "source.insv",
+                "output",
+                "--stitching-optimization",
+                "unknown",
+            ])
+            .is_err());
+        }
     }
 
     #[test]

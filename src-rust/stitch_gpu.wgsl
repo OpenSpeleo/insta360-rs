@@ -24,7 +24,7 @@ struct LensParams {
 
 struct PreparedMasks {
     offsets: vec4<u32>,
-    weights: array<f32>,
+    words: array<u32>,
 };
 
 struct ProjectedSample {
@@ -50,9 +50,32 @@ struct ProjectedSample {
 @group(0) @binding(12) var second_y_texture: texture_2d<f32>;
 @group(0) @binding(13) var second_u_texture: texture_2d<f32>;
 @group(0) @binding(14) var second_v_texture: texture_2d<f32>;
-@group(0) @binding(15) var<storage, read_write> yuv_output: array<u32>;
+@group(0) @binding(15) var<storage, read_write> packed_output: array<u32>;
 @group(0) @binding(16) var<storage, read> color_lut: array<vec4<f32>>;
 @group(0) @binding(17) var<storage, read> readout_poses: array<vec4<f32>>;
+@group(0) @binding(18) var<storage, read> rgb_upload: array<u32>;
+@group(0) @binding(19) var rgb_upload_texture: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(20) var<uniform> rgb_upload_strip: vec4<u32>;
+@group(0) @binding(21) var<storage, read> correction_map: array<vec4<f32>>;
+
+
+fn uploaded_rgb_byte(offset: u32) -> u32 {
+    return (rgb_upload[offset / 4u] >> ((offset % 4u) * 8u)) & 255u;
+}
+
+// Each invocation owns one texel. RGB color was already converted by the caller;
+// this pass only expands its existing bytes and supplies opaque alpha.
+@compute @workgroup_size(16, 8, 1)
+fn expand_rgb24(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = textureDimensions(rgb_upload_texture);
+    let row = rgb_upload_strip.x + id.y;
+    if id.x >= size.x || id.y >= rgb_upload_strip.y || row >= size.y {
+        return;
+    }
+    let offset = (id.y * size.x + id.x) * 3u;
+    let bytes = vec4<u32>(uploaded_rgb_byte(offset), uploaded_rgb_byte(offset + 1u), uploaded_rgb_byte(offset + 2u), 255u);
+    textureStore(rgb_upload_texture, vec2<u32>(id.x, row), vec4<f32>(bytes) / 255.0);
+}
 
 const PI: f32 = 3.14159265358979323846;
 const SHARPNESS: f32 = 5.2;
@@ -281,7 +304,139 @@ fn sample_yuv420(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
             textureSampleLevel(second_v_texture, source_sampler, chroma_coordinate, 0.0).r,
         );
     }
+    if lens.source.z >= 1.5 {
+        // NV12 stores U and V in the two channels of one chroma texel.
+        if lens_index == 0u {
+            yuv.z = textureSampleLevel(first_u_texture, source_sampler, chroma_coordinate, 0.0).g;
+        } else {
+            yuv.z = textureSampleLevel(second_u_texture, source_sampler, chroma_coordinate, 0.0).g;
+        }
+    }
+    if masks.offsets[lens_index] != 0xffffffffu {
+        let position = clamp(chroma_source, vec2<f32>(0.0), chroma_dimensions - vec2<f32>(1.0));
+        let low = vec2<u32>(floor(position));
+        let high = vec2<u32>(ceil(position));
+        let low_row = low.y * u32(chroma_dimensions.x);
+        let high_row = high.y * u32(chroma_dimensions.x);
+        let valid = vec4<bool>(
+            chroma_supported(lens_index, low_row + low.x),
+            chroma_supported(lens_index, low_row + high.x),
+            chroma_supported(lens_index, high_row + low.x),
+            chroma_supported(lens_index, high_row + high.x),
+        );
+        // Supported chroma cells include their complete 2x2 luma footprints.
+        // Their union also contains every luma interpolation tap, for either
+        // chroma siting. Keep hardware interpolation throughout that interior;
+        // only boundary pixels require manual support reconstruction below.
+        if all(valid) {
+            return yuv_to_rgb(yuv, metadata);
+        }
+        let luma_low = vec2<u32>(floor(source));
+        let luma_high = vec2<u32>(ceil(source));
+        let luma_fraction = source - floor(source);
+        let luma_points = array<vec2<u32>, 4>(luma_low, vec2<u32>(luma_high.x, luma_low.y),
+            vec2<u32>(luma_low.x, luma_high.y), luma_high);
+        let luma_weights = array<f32, 4>(
+            (1.0 - luma_fraction.x) * (1.0 - luma_fraction.y), luma_fraction.x * (1.0 - luma_fraction.y),
+            (1.0 - luma_fraction.x) * luma_fraction.y, luma_fraction.x * luma_fraction.y);
+        var luma = 0.0;
+        var luma_support = 0.0;
+        for (var i = 0u; i < 4u; i += 1u) {
+            if luma_weights[i] <= 0.0 || mask_pixel_weight(lens_index, luma_points[i]) <= 0.0 {
+                continue;
+            }
+            var value: f32;
+            if lens_index == 0u {
+                value = textureLoad(first_y_texture, vec2<i32>(luma_points[i]), 0).r;
+            } else {
+                value = textureLoad(second_y_texture, vec2<i32>(luma_points[i]), 0).r;
+            }
+            luma += value * luma_weights[i];
+            luma_support += luma_weights[i];
+        }
+        if luma_support > 0.0 {
+            yuv.x = luma / luma_support;
+        }
+        // Chroma samples have their own support. Checking luma tap positions
+        // after YUV conversion admits masked neighbors through subsampling.
+        let fraction = position - floor(position);
+        let points = array<vec2<u32>, 4>(low, vec2<u32>(high.x, low.y), vec2<u32>(low.x, high.y), high);
+        let weights = array<f32, 4>((1.0 - fraction.x) * (1.0 - fraction.y), fraction.x * (1.0 - fraction.y),
+            (1.0 - fraction.x) * fraction.y, fraction.x * fraction.y);
+        var value = vec2<f32>(0.0);
+        var support = 0.0;
+        for (var i = 0u; i < 4u; i += 1u) {
+            if !valid[i] || weights[i] <= 0.0 {
+                continue;
+            }
+            let p = vec2<i32>(points[i]);
+            var uv: vec2<f32>;
+            if lens_index == 0u {
+                uv = vec2<f32>(textureLoad(first_u_texture, p, 0).r, textureLoad(first_v_texture, p, 0).r);
+                if lens.source.z >= 1.5 {
+                    uv = textureLoad(first_u_texture, p, 0).rg;
+                }
+            } else {
+                uv = vec2<f32>(textureLoad(second_u_texture, p, 0).r, textureLoad(second_v_texture, p, 0).r);
+                if lens.source.z >= 1.5 {
+                    uv = textureLoad(second_u_texture, p, 0).rg;
+                }
+            }
+            value += uv * weights[i];
+            support += weights[i];
+        }
+        yuv.y = 128.0 / 255.0;
+        yuv.z = 128.0 / 255.0;
+        if support > 0.0 {
+            yuv.y = value.x / support;
+            yuv.z = value.y / support;
+        }
+    }
     return yuv_to_rgb(yuv, metadata);
+}
+
+fn corrected_direction(direction: vec3<f32>) -> vec3<f32> {
+    let parameters = correction_map[0];
+    if parameters.x < 1.0 {
+        return direction;
+    }
+    let basis = correction_map[1];
+    let local = rotate_vector(basis, direction);
+    let theta = atan2(length(local.xy), local.z);
+    let latitude = theta - PI * 0.5;
+    if abs(latitude) >= parameters.z {
+        return direction;
+    }
+    let phi = atan2(local.y, local.x);
+    let original = vec2<f32>(phi / (2.0 * PI) * parameters.x - 0.5,
+        (latitude / parameters.z + 1.0) * 0.5 * parameters.y - 0.5);
+    if original.y < 0.0 || original.y > parameters.y - 1.0 {
+        return direction;
+    }
+    let x = original.x - floor(original.x / parameters.x) * parameters.x;
+    let position = vec2<f32>(x, original.y);
+    // A tiny negative azimuth can round the remainder to the full width.
+    let low = vec2<u32>(u32(floor(position.x)) % u32(parameters.x), u32(floor(position.y)));
+    let high = vec2<u32>((low.x + 1u) % u32(parameters.x), min(low.y + 1u, u32(parameters.y) - 1u));
+    let fraction = position - floor(position);
+    let points = array<vec2<u32>, 4>(low, vec2<u32>(high.x, low.y), vec2<u32>(low.x, high.y), high);
+    let weights = array<f32, 4>((1.0 - fraction.x) * (1.0 - fraction.y), fraction.x * (1.0 - fraction.y),
+        (1.0 - fraction.x) * fraction.y, fraction.x * fraction.y);
+    // Final displacements already contain taper, confidence rejection and
+    // the shared positive-Jacobian safety bound. Interpolate toward zero at
+    // unsupported vertices without introducing a confidence-gate jump.
+    var flow = vec2<f32>(0.0);
+    for (var i = 0u; i < 4u; i += 1u) {
+        let value = correction_map[2u + points[i].y * u32(parameters.x) + points[i].x];
+        flow += value.xy * weights[i];
+    }
+    if all(flow == vec2<f32>(0.0)) {
+        return direction;
+    }
+    let p = phi + flow.x * 2.0 * PI / parameters.x;
+    let angle = theta + flow.y * 2.0 * parameters.z / parameters.y;
+    return rotate_vector(vec4<f32>(basis.x, -basis.yzw),
+        vec3<f32>(sin(angle) * cos(p), sin(angle) * sin(p), cos(angle)));
 }
 
 fn sample_source_unmasked(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
@@ -300,7 +455,12 @@ fn sample_source_unmasked(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
 // Retain partially supported bilinear footprints without admitting masked RGB
 // taps. Feather alpha remains a separate interpolated distance-field weight.
 fn sample_source(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
-    if masks.offsets[lens_index] == 0xffffffffu { return sample_source_unmasked(lens_index, source); }
+    if masks.offsets[lens_index] == 0xffffffffu {
+        return sample_source_unmasked(lens_index, source);
+    }
+    if lenses[lens_index].source.z >= 0.5 {
+        return sample_yuv420(lens_index, source);
+    }
     let low = floor(source);
     let high = ceil(source);
     let fraction = source - low;
@@ -319,8 +479,13 @@ fn sample_source(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(0.0);
 }
 
+fn chroma_supported(lens_index: u32, cell: u32) -> bool {
+    let word = masks.words[masks.offsets[lens_index + 2u] + cell / 32u];
+    return (word & (1u << (cell % 32u))) != 0u;
+}
+
 fn mask_pixel_weight(lens_index: u32, source: vec2<u32>) -> f32 {
-    return masks.weights[masks.offsets[lens_index] + source.y * u32(lenses[lens_index].source.x) + source.x];
+    return bitcast<f32>(masks.words[masks.offsets[lens_index] + source.y * u32(lenses[lens_index].source.x) + source.x]);
 }
 
 fn mask_weight(lens_index: u32, source: vec2<f32>) -> f32 {
@@ -741,6 +906,30 @@ fn pack_four(values: vec4<u32>) -> u32 {
     return values.x | (values.y << 8u) | (values.z << 16u) | (values.w << 24u);
 }
 
+// Preserve the stitcher's quantized RGB bytes exactly while discarding alpha.
+// Each invocation owns three complete words, so adjacent pixels never race.
+@compute @workgroup_size(16, 8, 1)
+fn pack_rgb24(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= frame.output_size.x {
+        return;
+    }
+    let pixel_count = frame.output_size.x * frame.output_size.y;
+    let block = id.y * frame.output_size.x + id.x;
+    let first = block * 4u;
+    if first >= pixel_count {
+        return;
+    }
+    var pixels = vec4<u32>(0u);
+    for (var index = 0u; index < 4u; index += 1u) {
+        if first + index < pixel_count {
+            pixels[index] = output_pixels[first + index];
+        }
+    }
+    packed_output[block * 3u] = (pixels.x & 0x00ffffffu) | ((pixels.y & 255u) << 24u);
+    packed_output[block * 3u + 1u] = ((pixels.y >> 8u) & 0x0000ffffu) | ((pixels.z & 0x0000ffffu) << 16u);
+    packed_output[block * 3u + 2u] = ((pixels.z >> 16u) & 255u) | ((pixels.w & 0x00ffffffu) << 8u);
+}
+
 @compute @workgroup_size(16, 8, 1)
 fn rgb_to_yuv420(@builtin(global_invocation_id) id: vec3<u32>) {
     let base_x = id.x * 8u;
@@ -762,10 +951,10 @@ fn rgb_to_yuv420(@builtin(global_invocation_id) id: vec3<u32>) {
             chroma_rgb[column / 2u] += color * 0.25;
         }
         let y_byte_offset = (base_y + row) * y_stride + base_x;
-        yuv_output[y_byte_offset / 4u] = pack_four(
+        packed_output[y_byte_offset / 4u] = pack_four(
             vec4<u32>(luma[0], luma[1], luma[2], luma[3]),
         );
-        yuv_output[(y_byte_offset + 4u) / 4u] = pack_four(
+        packed_output[(y_byte_offset + 4u) / 4u] = pack_four(
             vec4<u32>(luma[4], luma[5], luma[6], luma[7]),
         );
     }
@@ -778,8 +967,8 @@ fn rgb_to_yuv420(@builtin(global_invocation_id) id: vec3<u32>) {
         v_values[chroma] = converted.y;
     }
     let chroma_byte_offset = id.y * chroma_stride + id.x * 4u;
-    yuv_output[(u_offset + chroma_byte_offset) / 4u] = pack_four(u_values);
-    yuv_output[(v_offset + chroma_byte_offset) / 4u] = pack_four(v_values);
+    packed_output[(u_offset + chroma_byte_offset) / 4u] = pack_four(u_values);
+    packed_output[(v_offset + chroma_byte_offset) / 4u] = pack_four(v_values);
 }
 
 @compute @workgroup_size(16, 8, 1)
@@ -790,7 +979,7 @@ fn stitch(@builtin(global_invocation_id) id: vec3<u32>) {
     let direction = rotate_vector(frame.output_to_camera, panorama_direction(id.x, id.y));
     let position = camera_position(direction);
     let first = project_sample(0u, direction);
-    let second = project_sample(1u, direction);
+    let second = project_sample(1u, corrected_direction(direction));
     var color = vec3<f32>(0.0);
     if first.valid == 0u && second.valid == 0u {
         color = vec3<f32>(0.0);

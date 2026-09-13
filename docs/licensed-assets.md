@@ -32,7 +32,7 @@ angles. Recorded values take precedence whenever the media provides them.
 
 ## Bundle boundary
 
-Licensed files are checked in under `data/*/assets/`, embedded by five data
+Licensed files are checked in under `data/*/assets/`, embedded by six data
 crates, and served by `BundledAssetProvider`. Applications can also supply
 external bundles through `DirectoryAssetProvider` or `InMemoryAssetProvider`. A
 bundle manifest records:
@@ -79,7 +79,7 @@ versions are opaque, not a SemVer ordering contract.
 
 ## Direct bundled access
 
-`src-rust/assets/model-bundle.json` describes 51 stored payloads from 50
+`src-rust/assets/model-bundle.json` describes 59 stored payloads from 58
 original resources copied from MediaSDK 3.1.5, CameraSDK 2.1.8, iOS SDK 1.10.4,
 and Insta360 Studio 5.9.10. All whole-file payloads are copied byte-for-byte
 with identity normalization and equal source/stored hashes. Model 197 is split
@@ -153,6 +153,13 @@ forward/backward flow. The bundle includes all eight compiled-model constituents
 and records one ordered `AssetGroupDescriptor`.
 `ModelBundle::load_verified_group_for` returns the group only after every member
 passes integrity checks; partial models are never returned.
+
+The newer Studio 5.9.10 video group contains model 213 and its complete
+seven-file CoreML group, including two original empty placeholders. The optional
+`ai-stitching` feature executes the verified MNN model through the independent
+engine with cylindrical input preparation and shared CPU/GPU compositing. CoreML
+remains reference data. See [video AI stitching](ai-stitching-model.md) for
+exact resource identities, preprocessing, tests and qualification limits.
 
 AI seam flow is separate from optical calibration and masking. It cannot repair
 an incorrect lens projection. Because dynamic flow may change feature ownership

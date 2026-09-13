@@ -4,6 +4,8 @@ use insta360_rs::calibration::synthetic_dual_fisheye_calibration;
 use insta360_rs::{CpuStitcher, EquirectangularProjection, LensFrame, Orientation};
 
 mod common;
+#[path = "common/correspondence.rs"]
+mod correspondence;
 #[path = "common/rolling_shutter.rs"]
 mod rolling_shutter;
 
@@ -20,6 +22,196 @@ fn gpu_available_or_skip() -> bool {
 fn software_vulkan(stitcher: &insta360_rs::gpu::GpuStitcher) -> bool {
     let adapter = stitcher.adapter_info();
     adapter.backend == "Vulkan" && adapter.device_type == "Cpu"
+}
+
+#[test]
+fn prepared_corrections_match_cpu_and_gpu() {
+    use insta360_rs::stitch::StitchPlanner;
+    use insta360_rs::{FrameMotion, SeamMode};
+    if !gpu_available_or_skip() {
+        return;
+    }
+    let (lenses, calibration) = correspondence::chart(0.8);
+    let motion =
+        FrameMotion::global(Orientation::from_euler_degrees(12.0, 23.0, 17.0).unwrap()).unwrap();
+    let mut planner = StitchPlanner::new();
+    let gpu = insta360_rs::gpu::GpuStitcher::new().unwrap();
+    let cpu = CpuStitcher::new();
+    for mode in [
+        SeamMode::Dynamic,
+        SeamMode::OpticalFlow,
+        #[cfg(feature = "ai-stitching")]
+        SeamMode::Ai,
+    ] {
+        let plan = planner
+            .prepare(&lenses, &calibration, &motion, mode)
+            .unwrap();
+        assert!(plan.confidence_coverage() > 0.05);
+        for width in [256, 512] {
+            let projection = EquirectangularProjection {
+                width,
+                height: width / 2,
+            };
+            let a = cpu
+                .stitch_with_motion_and_plan(
+                    &lenses,
+                    &calibration,
+                    projection,
+                    &motion,
+                    Some(&plan),
+                )
+                .unwrap();
+            let b = gpu
+                .stitch_with_motion_and_plan(
+                    &lenses,
+                    &calibration,
+                    projection,
+                    &motion,
+                    Some(&plan),
+                )
+                .unwrap();
+            let differences: Vec<_> = a
+                .as_rgb8()
+                .iter()
+                .zip(b.as_rgb8())
+                .map(|(&a, &b)| a.abs_diff(b))
+                .collect();
+            let mean =
+                differences.iter().map(|&v| f64::from(v)).sum::<f64>() / differences.len() as f64;
+            assert!(mean < 0.2, "{mode:?} width{width}:mean{mean}");
+            assert!(
+                differences.iter().all(|&v| v <= 8),
+                "{mode:?}:maximum{}",
+                differences.iter().max().unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn excluded_chroma_texels_cannot_contaminate_housing_boundaries() {
+    use insta360_rs::gpu::{
+        GpuChromaLocation, GpuNv12Frame, GpuPlane, GpuYuv420Frame, GpuYuvMatrix, GpuYuvRange,
+    };
+    if !gpu_available_or_skip() {
+        return;
+    }
+    let size = 128;
+    let calibration = x5_v6_underwater_calibration(size, size);
+    let projection = EquirectangularProjection {
+        width: 256,
+        height: 128,
+    };
+    let neutral =
+        [LensFrame::new(size, size, vec![130; size as usize * size as usize * 3]).unwrap(); 1];
+    let diagnostics = insta360_rs::stitch::diagnostics::inspect(
+        &[neutral[0].clone(), neutral[0].clone()],
+        &calibration,
+        projection,
+    )
+    .unwrap();
+    let masks = &diagnostics.source_masks;
+    let y = vec![128; size as usize * size as usize];
+    let base = vec![128; y.len() / 4];
+    let poisoned: [Vec<u8>; 2] = std::array::from_fn(|index| {
+        let mut values = base.clone();
+        for row in 0..size as usize / 2 {
+            for col in 0..size as usize / 2 {
+                if (row * 2..row * 2 + 2).all(|yy| {
+                    (col * 2..col * 2 + 2)
+                        .all(|xx| masks[index].as_rgb8()[(yy * size as usize + xx) * 3] == 0)
+                }) {
+                    values[row * size as usize / 2 + col] = 255;
+                }
+            }
+        }
+        assert!(values.contains(&255));
+        values
+    });
+    let renderer = insta360_rs::gpu::GpuStitcher::new().unwrap();
+    for location in [GpuChromaLocation::Left, GpuChromaLocation::Center] {
+        let lens = |u| GpuYuv420Frame {
+            width: size,
+            height: size,
+            y: GpuPlane {
+                data: &y,
+                stride: size as usize,
+            },
+            u: GpuPlane {
+                data: u,
+                stride: size as usize / 2,
+            },
+            v: GpuPlane {
+                data: &base,
+                stride: size as usize / 2,
+            },
+            range: GpuYuvRange::Limited,
+            matrix: GpuYuvMatrix::Bt709,
+            chroma_location: location,
+        };
+        let baseline = renderer
+            .stitch_yuv420_with_orientation(
+                &[lens(&base); 2],
+                &calibration,
+                projection,
+                Orientation::IDENTITY,
+            )
+            .unwrap();
+        let altered = renderer
+            .stitch_yuv420_with_orientation(
+                &[lens(&poisoned[0]), lens(&poisoned[1])],
+                &calibration,
+                projection,
+                Orientation::IDENTITY,
+            )
+            .unwrap();
+        assert_eq!(
+            baseline, altered,
+            "masked planar chroma leaked for{location:?}"
+        );
+        let uv: [Vec<u8>; 2] =
+            std::array::from_fn(|i| poisoned[i].iter().flat_map(|&u| [u, 128]).collect());
+        let lenses = std::array::from_fn(|i| GpuNv12Frame {
+            width: size,
+            height: size,
+            y: GpuPlane {
+                data: &y,
+                stride: size as usize,
+            },
+            uv: GpuPlane {
+                data: &uv[i],
+                stride: size as usize,
+            },
+            range: GpuYuvRange::Limited,
+            matrix: GpuYuvMatrix::Bt709,
+            chroma_location: location,
+        });
+        let altered = renderer
+            .stitch_nv12_with_motion(
+                &lenses,
+                &calibration,
+                projection,
+                &insta360_rs::FrameMotion::global(Orientation::IDENTITY).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            baseline, altered,
+            "masked NV12 chroma leaked for{location:?}"
+        );
+        let red = vec![200; base.len()];
+        let positive = renderer
+            .stitch_yuv420_with_orientation(
+                &[lens(&red); 2],
+                &calibration,
+                projection,
+                Orientation::IDENTITY,
+            )
+            .unwrap();
+        assert_ne!(
+            baseline, positive,
+            "positive control must change scene chroma"
+        );
+    }
 }
 
 #[test]
@@ -355,6 +547,32 @@ fn gpu_rolling_shutter_yuv_input_and_encoder_output_use_the_same_sensor_motion()
             &chart.motion,
         )
         .expect("YUV input motion");
+    let uv = vec![128; size * size / 2];
+    let nv12_lenses = yuv_lenses.map(|frame| insta360_rs::gpu::GpuNv12Frame {
+        width: frame.width,
+        height: frame.height,
+        y: frame.y,
+        uv: GpuPlane {
+            data: &uv,
+            stride: size,
+        },
+        range: frame.range,
+        matrix: frame.matrix,
+        chroma_location: frame.chroma_location,
+    });
+    let nv12 = gpu
+        .stitch_nv12_with_motion(
+            &nv12_lenses,
+            &chart.calibration,
+            chart.projection,
+            &chart.motion,
+        )
+        .unwrap();
+    assert_eq!(
+        nv12.as_rgb8(),
+        yuv.as_rgb8(),
+        "NV12 changed sensor readout correction"
+    );
     let differences = sorted_channel_differences(rgb.as_rgb8(), yuv.as_rgb8());
     assert!(*differences.last().expect("pixels") <= 1);
     let independent_gray: Vec<_> = chart
@@ -1190,4 +1408,150 @@ fn gpu_color_smoothing_wraps_windows_wider_than_the_panorama() {
         .max()
         .expect("pixels");
     assert!(maximum <= 1, "GPU color smoothing differed by {maximum} DN");
+}
+
+#[test]
+fn nv12_upload_preserves_padded_planes_color_metadata_and_cached_pixels() {
+    use insta360_rs::gpu::{
+        GpuChromaLocation, GpuNv12Frame, GpuPlane, GpuYuv420Frame, GpuYuvMatrix, GpuYuvRange,
+    };
+    use insta360_rs::motion::FrameMotion;
+    if !gpu_available_or_skip() {
+        return;
+    }
+    let (width, height) = (65_usize, 63_usize);
+    let (y_stride, chroma_stride, uv_stride) = (73, 39, 72);
+    let mut y = vec![251; y_stride * height];
+    let mut u = vec![252; chroma_stride * height.div_ceil(2)];
+    let mut v = vec![253; chroma_stride * height.div_ceil(2)];
+    let mut uv = vec![254; uv_stride * height.div_ceil(2)];
+    for row in 0..height {
+        for column in 0..width {
+            y[row * y_stride + column] = 32 + ((row * 7 + column * 3) % 180) as u8;
+        }
+    }
+    for row in 0..height.div_ceil(2) {
+        for column in 0..width.div_ceil(2) {
+            let a = 45 + ((row * 3 + column * 5) % 160) as u8;
+            let b = 210 - ((row * 7 + column * 2) % 155) as u8;
+            u[row * chroma_stride + column] = a;
+            v[row * chroma_stride + column] = b;
+            uv[row * uv_stride + 2 * column..row * uv_stride + 2 * column + 2]
+                .copy_from_slice(&[a, b]);
+        }
+    }
+    let original = (y.clone(), uv.clone());
+    let calibration = synthetic_dual_fisheye_calibration(width as u32, height as u32).unwrap();
+    let projection = EquirectangularProjection {
+        width: 128,
+        height: 64,
+    };
+    let motion =
+        FrameMotion::global(Orientation::from_euler_degrees(13.0, -21.0, 37.0).unwrap()).unwrap();
+    let mut gpu = insta360_rs::gpu::GpuStitcher::new().unwrap();
+    for (range, matrix, chroma_location) in [
+        (
+            GpuYuvRange::Limited,
+            GpuYuvMatrix::Bt601,
+            GpuChromaLocation::Left,
+        ),
+        (
+            GpuYuvRange::Full,
+            GpuYuvMatrix::Bt709,
+            GpuChromaLocation::Center,
+        ),
+        (
+            GpuYuvRange::Limited,
+            GpuYuvMatrix::Bt2020,
+            GpuChromaLocation::Center,
+        ),
+        (
+            GpuYuvRange::Limited,
+            GpuYuvMatrix::Bt709,
+            GpuChromaLocation::Left,
+        ),
+    ] {
+        let planar = GpuYuv420Frame {
+            width: width as u32,
+            height: height as u32,
+            y: GpuPlane {
+                data: &y,
+                stride: y_stride,
+            },
+            u: GpuPlane {
+                data: &u,
+                stride: chroma_stride,
+            },
+            v: GpuPlane {
+                data: &v,
+                stride: chroma_stride,
+            },
+            range,
+            matrix,
+            chroma_location,
+        };
+        let nv12 = GpuNv12Frame {
+            width: width as u32,
+            height: height as u32,
+            y: planar.y,
+            uv: GpuPlane {
+                data: &uv,
+                stride: uv_stride,
+            },
+            range,
+            matrix,
+            chroma_location,
+        };
+        let expected = gpu
+            .stitch_yuv420_with_motion(&[planar; 2], &calibration, projection, &motion)
+            .unwrap();
+        for _ in 0..2 {
+            let actual = gpu
+                .stitch_nv12_with_motion(&[nv12; 2], &calibration, projection, &motion)
+                .unwrap();
+            assert_eq!(
+                actual.as_rgb8(),
+                expected.as_rgb8(),
+                "NV12 color or cached pixels changed"
+            );
+        }
+        let expected_yuv = gpu
+            .stitch_yuv420_to_yuv420_with_motion(&[planar; 2], &calibration, projection, &motion)
+            .unwrap();
+        let actual_yuv = gpu
+            .stitch_nv12_to_yuv420_with_motion(&[nv12; 2], &calibration, projection, &motion)
+            .unwrap();
+        for (actual, expected) in actual_yuv.planes().into_iter().zip(expected_yuv.planes()) {
+            assert_eq!(
+                actual.data, expected.data,
+                "NV12 encoder output color changed"
+            );
+        }
+        let invalid = GpuNv12Frame {
+            uv: GpuPlane {
+                data: &uv,
+                stride: uv_stride - 1,
+            },
+            ..nv12
+        };
+        assert!(matches!(
+            gpu.stitch_nv12_with_motion(&[invalid; 2], &calibration, projection, &motion),
+            Err(insta360_rs::Error::InvalidMedia(_))
+        ));
+        let truncated = GpuNv12Frame {
+            uv: GpuPlane {
+                data: &uv[..uv_stride],
+                stride: uv_stride,
+            },
+            ..nv12
+        };
+        assert!(matches!(
+            gpu.stitch_nv12_with_motion(&[truncated; 2], &calibration, projection, &motion),
+            Err(insta360_rs::Error::InvalidMedia(_))
+        ));
+        gpu.set_color_lut(Some(std::sync::Arc::new(
+            insta360_rs::color::CubeLut::load_bundled("studio-i-log-x5-rec709").unwrap(),
+        )));
+    }
+    assert_eq!((y, uv), original, "borrowed decoded source changed");
 }

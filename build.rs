@@ -1,14 +1,14 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=MNN_ROOT");
-    println!("cargo:rerun-if-changed=src-rust/underwater/mnn_shim.cpp");
-    #[cfg(feature = "underwater-ai")]
+    println!("cargo:rerun-if-changed=src-rust/mnn_shim.cpp");
+    #[cfg(any(feature = "underwater-ai", feature = "ai-stitching"))]
     build_mnn();
 }
 
-#[cfg(feature = "underwater-ai")]
+#[cfg(any(feature = "underwater-ai", feature = "ai-stitching"))]
 fn build_mnn() {
     let root = std::path::PathBuf::from(std::env::var_os("MNN_ROOT").expect(
-        "underwater-ai requires MNN_ROOT from python3 scripts/ci/build-mnn.py --output <directory>",
+        "AI model features require MNN_ROOT from python3 scripts/ci/build-mnn.py --output <directory>",
     ));
     let marker = std::fs::read_to_string(root.join("insta360-mnn-version.txt"))
         .expect("MNN_ROOT is missing its verified source-build marker");
@@ -26,14 +26,14 @@ fn build_mnn() {
         .cpp(true)
         .std("c++17")
         .include(root.join("include"))
-        .file("src-rust/underwater/mnn_shim.cpp")
+        .file("src-rust/mnn_shim.cpp")
         .flag_if_supported("-fvisibility=hidden");
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         // The shim catches C++ exceptions before returning through its C ABI.
         // Match MNN_WIN_RUNTIME_MT=OFF in the pinned source builder.
         compiler.flag("/EHsc").static_crt(false);
     }
-    compiler.compile("insta360_underwater_mnn");
+    compiler.compile("insta360_mnn");
     println!(
         "cargo:rustc-link-search=native={}",
         root.join("lib").display()

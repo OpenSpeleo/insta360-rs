@@ -3,6 +3,10 @@
 See [CI](CI.md) for the automated test matrix and commands for running it
 locally.
 
+The [September stitching qualification](stitching-qualification.md) records the
+current full-suite results, corrective regressions and remaining platform and
+real-media limits.
+
 CI runs the all-feature Rust suite and the full Python 3.14 installed-wheel
 suite once on each supported platform. Linux retains compile checks for isolated
 features, the specific disabled-AI failure tests, extracted-archive verification
@@ -17,7 +21,7 @@ Unit and property tests use generated ISO-BMFF boxes, trailer records,
 calibration strings, gyro sequences, and dual-fisheye calibration charts. They
 use generated recordings and the embedded resources. Bundled-asset tests verify
 the licensed payloads checked in under `data/*/assets/`, including consistent
-manifests and unique paths across five data crates.
+manifests and unique paths across six data crates.
 
 ## Licensed integration corpus
 
@@ -25,6 +29,21 @@ Large recordings are supplied out of tree through `INSTA360_RS_FIXTURE_DIR`. The
 initial corpus contains the supplied X5 dive-case recording. Release
 qualification also requires another X5 unit, air and water profiles, 8- and
 10-bit media, corrupt/truncated inputs, and a legacy paired recording.
+
+`INSTA360_RS_X5_SAMPLE` identifies the original
+`VID_20181001_225939_00_002.insv` corpus recording. Its metadata regression has
+recording-specific expected timestamps; an arbitrary X5 recording is not a
+substitute. The GPU midpoint test uses that same source.
+
+For another recording, `INSTA360_RS_PREVIEW_SAMPLE` selects the source for
+native-preview comparisons. The selected-pair admission test accepts
+`INSTA360_RS_PREVIEW_SAMPLE_START` in seconds. Run
+`configured_real_x5_selected_preview_matches_repeated_native_decoding` to check
+the August tunnel recording at 230 seconds. The separate general seek test uses
+fixed timestamps through 1199 seconds and therefore needs a sufficiently long
+recording. These environment-gated tests return early when their source is not
+configured; an ordinary green suite alone does not establish real-media
+coverage.
 
 ## Required checks
 
@@ -82,13 +101,39 @@ qualification also requires another X5 unit, air and water profiles, 8- and
   telemetry or reset camera clocks. See
   [sequence stitching](sequence-stitching.md).
 
+Restoration resize tests compare A→B→A first-frame output with independently
+prepared sessions, verify invalid dimensions preserve the usable session and
+history, and check unchanged MNN handles, tensor allocations and Legacy LUT
+storage. Media preparation also verifies that same-size frames keep temporal
+history while dimension changes reuse the existing engine.
+
+The continuous native-color failure regression warms two distinct lens
+histories, rejects an unsupported HDR transfer on lens B after lens A has been
+processed, and compares the next valid pair against a fresh processor. A
+separate uninterrupted reference confirms that both retained histories would
+otherwise affect the output. This verifies partial-pair rollback as well as
+successful-frame temporal reuse.
+
 ## GPU qualification status
 
 Current focused tests cover adapter discovery, synthetic RGB CPU/GPU parity,
 same-adapter repeatability, neutral planar YUV420P upload, and encoder-layout
-YUV420P output. A successful test on one Metal adapter proves only that the
-portable vertical slice can execute there; it does not establish cross-platform
-real-X5 qualification or an end-to-end speedup.
+YUV420P output. NV12 tests compare against the planar GPU path with padded and
+odd-sized planes, color matrices/ranges, chroma placement, LUTs and sensor
+motion; malformed UV strides and truncated planes are rejected. A media test
+asserts that NV12 retains the source identity and never initializes an RGB
+converter. GPU unit tests compare packed RGB24 readback against independently
+stripped synthetic RGBA bytes, including every partial-block length, arbitrary
+alpha, multiple dispatch rows and repeated writes to reused buffers. The frame
+cache test verifies output and readback buffer reuse as well as pixel stability.
+RGB upload tests read the actual RGBA8 storage texture and compare every byte,
+including all channel values, odd tails and repeated one/two-row strips. This
+exercises queued buffer/uniform reuse before earlier dispatches finish. A P010
+media reference verifies that high-bit-depth frames still use the established
+RGB conversion before GPU upload and keep their original samples and PTS. A
+successful test on one Metal adapter proves only that the portable vertical
+slice can execute there; it does not establish cross-platform real-X5
+qualification or an end-to-end speedup.
 
 `ProcessingBackend::Auto` now chooses GPU first. Focused fault-injection tests
 cover whole-operation CPU restart for typed GPU failures, strict explicit
@@ -108,12 +153,15 @@ current functional tests make no speed claim.
 
 Bundled-asset tests load every embedded payload through the verified provider,
 check whole-file digests, contiguous original model parts and their reassembled
-source digest, and the complete eight-member CoreML and nine-member underwater
-groups, and parse every bundled SVM. Provider tests cover invalid paths and
-missing resources. These checks use embedded resources and do not execute vendor
-code. Model possession is not an inference qualification: accessory
-preprocessing, AI seam tensors, and restoration stages require their own
-labeled/golden corpus.
+source digest, the complete CoreML and underwater groups, and parse every
+bundled SVM. The new video group includes model 213 and seven original CoreML
+files. Provider tests cover invalid paths and missing resources. These checks
+use embedded resources and do not execute vendor code. Model possession is not
+an inference qualification: accessory preprocessing, AI seam tensors, and
+restoration stages require their own labeled/golden corpus.
+[Video AI model tests](ai-stitching-model.md#verification) compare every output
+tensor value against a standalone MNN reference and verify cylindrical geometry,
+accepted corrections and CPU/GPU rendered parity.
 
 Atomic-output tests treat `.insta360-rs-part` as an internal incomplete file,
 not a playable preview. Video success requires encoder flush, MP4 trailer write,
@@ -173,7 +221,7 @@ and CPU/GPU pixel comparison do not establish vendor quality parity. The
 generated-camera tests and recorded optical reports remain the reproducible
 regression contracts.
 
-## Housing implementation verification
+## Historical housing implementation verification
 
 Local verification on macOS ARM64 with Metal, Rust 1.97.1, FFmpeg 8.1.2 and the
 pinned MNN CPU build covered the following configurations. Counts represent test

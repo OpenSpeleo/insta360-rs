@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,13 +24,14 @@ use crate::{
 use super::stabilization::FileStabilizer;
 use super::{temporary_output_path, ExportContext, ExportEvent, ExportPhase, ExportProgress};
 use crate::motion::FrameMotion;
+use crate::stitch::{PreparedStitchPlan, StitchPlanner, StitchSource};
 use crate::stream::{allocate_video_frame, scale_video_frame};
 
 #[path = "render.rs"]
 mod render;
 pub use render::{
     inspect_frame_dimensions, FrameCalibrationInfo, FrameDimensions, FrameRenderInfo,
-    NativeColorProcessor, RecordingFrameRenderer, RenderedFrame,
+    FrameStitchPlan, NativeColorProcessor, RecordingFrameRenderer, RenderedFrame,
 };
 
 const VIDEO_TRACKS: usize = 2;
@@ -581,7 +583,10 @@ struct StitchSession {
     report: BackendReport,
     converters: [RgbFrameConverter; VIDEO_TRACKS],
     color_lut: Option<Arc<CubeLut>>,
-    force_rgb: bool,
+    seam_mode: crate::SeamMode,
+    planner: StitchPlanner,
+    current_plan: Option<Arc<PreparedStitchPlan>>,
+    retained_plan: Option<Arc<PreparedStitchPlan>>,
 }
 
 enum SessionRenderer {
@@ -662,12 +667,17 @@ impl StitchSession {
                     Some(failure) => BackendReport::cpu_fallback(requested, failure),
                     None => BackendReport::cpu(requested),
                 };
+                let stitcher = CpuStitcher::new();
+                let planner = StitchPlanner::with_masks(stitcher.mask_cache());
                 Ok(Self {
-                    renderer: SessionRenderer::Cpu(CpuStitcher::new()),
+                    renderer: SessionRenderer::Cpu(stitcher),
                     report,
                     converters: std::array::from_fn(|_| RgbFrameConverter::default()),
                     color_lut: None,
-                    force_rgb: false,
+                    seam_mode: crate::SeamMode::Fixed,
+                    planner,
+                    current_plan: None,
+                    retained_plan: None,
                 })
             }
             BackendAttempt::Gpu => Self::open_gpu(requested),
@@ -678,18 +688,32 @@ impl StitchSession {
     fn open_gpu(requested: ProcessingBackend) -> std::result::Result<Self, Box<GpuFailure>> {
         let stitcher = crate::gpu::GpuStitcher::new().map_err(gpu_failure_from_error)?;
         let report = BackendReport::gpu(requested, stitcher.adapter_info().clone());
+        let planner = StitchPlanner::with_masks(stitcher.mask_cache());
         Ok(Self {
             renderer: SessionRenderer::Gpu(Box::new(stitcher)),
             report,
             converters: std::array::from_fn(|_| RgbFrameConverter::default()),
             color_lut: None,
-            force_rgb: false,
+            seam_mode: crate::SeamMode::Fixed,
+            planner,
+            current_plan: None,
+            retained_plan: None,
         })
     }
 
     #[cfg(not(feature = "gpu"))]
     fn open_gpu(_requested: ProcessingBackend) -> std::result::Result<Self, Box<GpuFailure>> {
         Err(gpu_session_unavailable())
+    }
+
+    fn retry_on_cpu(&mut self, failure: GpuFailure) {
+        let masks = match &self.renderer {
+            SessionRenderer::Cpu(stitcher) => stitcher.mask_cache(),
+            #[cfg(feature = "gpu")]
+            SessionRenderer::Gpu(stitcher) => stitcher.mask_cache(),
+        };
+        self.renderer = SessionRenderer::Cpu(CpuStitcher::with_masks(masks));
+        self.report = BackendReport::cpu_fallback(self.report.requested, failure);
     }
 
     fn set_color_lut(&mut self, lut: Option<Arc<CubeLut>>) {
@@ -700,50 +724,134 @@ impl StitchSession {
         self.color_lut = lut;
     }
 
+    fn set_seam_mode(&mut self, mode: crate::SeamMode) -> Result<()> {
+        mode.validate_capabilities()?;
+        self.seam_mode = mode;
+        Ok(())
+    }
+
+    fn prepare_stitch_plan(
+        &mut self,
+        pair: &SynchronizedPair<'_>,
+        calibration: &ResolvedCalibration,
+        motion: &FrameMotion,
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        if self.seam_mode == crate::SeamMode::Fixed {
+            self.current_plan = None;
+        } else if let Some(plan) = &self.retained_plan {
+            self.current_plan = Some(Arc::clone(plan));
+        } else {
+            let sources = [
+                pair.frames[0].stitch_source()?,
+                pair.frames[1].stitch_source()?,
+            ];
+            self.current_plan = Some(if let [Some(first), Some(second)] = sources {
+                self.planner.prepare_sources_controlled(
+                    &[first, second],
+                    calibration,
+                    motion,
+                    self.seam_mode,
+                    cancel,
+                )?
+            } else {
+                // Mixed native/RGB inputs need the same chroma-support repair
+                // as rendering before the solver observes converted pixels.
+                let lenses = convert_masked_rgb(
+                    &mut self.converters,
+                    &mut self.planner,
+                    &pair.frames,
+                    calibration,
+                )?;
+                self.planner.prepare_sources_controlled(
+                    &[StitchSource::Rgb(&lenses[0]), StitchSource::Rgb(&lenses[1])],
+                    calibration,
+                    motion,
+                    self.seam_mode,
+                    cancel,
+                )?
+            });
+        }
+        Ok(())
+    }
+
     fn stitch(
         &mut self,
         pair: SynchronizedPair<'_>,
         calibration: &ResolvedCalibration,
         projection: EquirectangularProjection,
         motion: &FrameMotion,
+        cancel: &AtomicBool,
+        #[allow(unused_mut)] mut color: Option<underwater_color::FrameRestoration<'_>>,
     ) -> Result<PanoramaFrame> {
         for frame in &pair.frames {
             validate_transfer(frame.format.color.transfer)?;
         }
-        debug_assert_eq!(
-            self.report.selected,
-            match &self.renderer {
-                SessionRenderer::Cpu(_) => EffectiveBackend::Cpu,
-                #[cfg(feature = "gpu")]
-                SessionRenderer::Gpu(_) => EffectiveBackend::Gpu,
-            }
-        );
-        match &self.renderer {
+        self.prepare_stitch_plan(&pair, calibration, motion, cancel)?;
+        let panorama = match &self.renderer {
             SessionRenderer::Cpu(stitcher) => {
-                let [first, second] = pair.frames;
-                let lenses = [
-                    self.converters[0].convert(&first)?,
-                    self.converters[1].convert(&second)?,
-                ];
-                let panorama =
-                    stitcher.stitch_with_motion(&lenses, calibration, projection, motion)?;
+                let lenses = convert_masked_rgb(
+                    &mut self.converters,
+                    &mut self.planner,
+                    &pair.frames,
+                    calibration,
+                )?;
+                let panorama = stitcher.stitch_with_motion_and_plan(
+                    &lenses,
+                    calibration,
+                    projection,
+                    motion,
+                    self.current_plan.as_deref(),
+                )?;
                 if let Some(lut) = &self.color_lut {
                     let mut rgb = panorama.into_rgb8();
                     lut.apply_rgb8(&mut rgb)?;
-                    PanoramaFrame::new(projection.width, projection.height, rgb)
+                    PanoramaFrame::new(projection.width, projection.height, rgb)?
                 } else {
-                    Ok(panorama)
+                    panorama
                 }
             }
             #[cfg(feature = "gpu")]
-            SessionRenderer::Gpu(stitcher) => stitch_decoded_gpu(
-                stitcher,
-                &mut self.converters,
-                pair,
-                calibration,
-                projection,
-                motion,
-            ),
+            SessionRenderer::Gpu(stitcher) => {
+                #[cfg(feature = "underwater-ai")]
+                if let Some(restoration) = &mut color {
+                    if let Some(mut frame) = restoration.gpu_frame(projection)? {
+                        let output = stitch_decoded_gpu_output(
+                            stitcher,
+                            &mut self.converters,
+                            pair,
+                            calibration,
+                            projection,
+                            motion,
+                            self.current_plan.as_deref(),
+                            &mut self.planner,
+                            crate::gpu::GpuOutputRequest {
+                                kind: crate::gpu::GpuOutputKind::Rgb,
+                                underwater: Some(&mut frame),
+                            },
+                        )?;
+                        return match output {
+                            StitchedVideoFrame::Rgb(frame) => Ok(frame),
+                            StitchedVideoFrame::Yuv420(_) => unreachable!("requested RGB output"),
+                        };
+                    }
+                }
+                stitch_decoded_gpu_planned(
+                    stitcher,
+                    &mut self.converters,
+                    pair,
+                    calibration,
+                    projection,
+                    motion,
+                    self.current_plan.as_deref(),
+                    &mut self.planner,
+                )?
+            }
+        };
+        render::check_cancel(cancel)?;
+        match color {
+            Some(restoration) => restoration.process(panorama),
+            None => Ok(panorama),
         }
     }
 
@@ -753,27 +861,62 @@ impl StitchSession {
         calibration: &ResolvedCalibration,
         projection: EquirectangularProjection,
         motion: &FrameMotion,
+        cancel: &AtomicBool,
+        #[allow(unused_mut)] mut color: Option<underwater_color::FrameRestoration<'_>>,
     ) -> Result<StitchedVideoFrame> {
         for frame in &pair.frames {
             validate_transfer(frame.format.color.transfer)?;
         }
-        if self.force_rgb {
+        if matches!(&self.renderer, SessionRenderer::Cpu(_)) {
             return self
-                .stitch(pair, calibration, projection, motion)
+                .stitch(pair, calibration, projection, motion, cancel, color)
                 .map(StitchedVideoFrame::Rgb);
         }
+        if color
+            .as_ref()
+            .is_some_and(underwater_color::FrameRestoration::enabled)
+        {
+            #[cfg(all(feature = "gpu", feature = "underwater-ai"))]
+            if let Some(restoration) = &mut color {
+                if let Some(mut frame) = restoration.gpu_frame(projection)? {
+                    self.prepare_stitch_plan(&pair, calibration, motion, cancel)?;
+                    let SessionRenderer::Gpu(stitcher) = &self.renderer else {
+                        unreachable!("CPU handled above");
+                    };
+                    return stitch_decoded_gpu_output(
+                        stitcher,
+                        &mut self.converters,
+                        pair,
+                        calibration,
+                        projection,
+                        motion,
+                        self.current_plan.as_deref(),
+                        &mut self.planner,
+                        crate::gpu::GpuOutputRequest {
+                            kind: crate::gpu::GpuOutputKind::Yuv420,
+                            underwater: Some(&mut frame),
+                        },
+                    );
+                }
+            }
+            // Legacy restoration retains its CPU algorithm and RGB encoder path.
+            return self
+                .stitch(pair, calibration, projection, motion, cancel, color)
+                .map(StitchedVideoFrame::Rgb);
+        }
+        self.prepare_stitch_plan(&pair, calibration, motion, cancel)?;
         match &self.renderer {
-            SessionRenderer::Cpu(_) => self
-                .stitch(pair, calibration, projection, motion)
-                .map(StitchedVideoFrame::Rgb),
+            SessionRenderer::Cpu(_) => unreachable!("CPU handled above"),
             #[cfg(feature = "gpu")]
-            SessionRenderer::Gpu(stitcher) => stitch_decoded_gpu_video(
+            SessionRenderer::Gpu(stitcher) => stitch_decoded_gpu_video_planned(
                 stitcher,
                 &mut self.converters,
                 pair,
                 calibration,
                 projection,
                 motion,
+                self.current_plan.as_deref(),
+                &mut self.planner,
             ),
         }
     }
@@ -789,7 +932,25 @@ impl StitchSession {
     }
 }
 
-#[cfg(feature = "gpu")]
+fn convert_masked_rgb(
+    converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
+    planner: &mut StitchPlanner,
+    frames: &[DecodedVideoFrame<'_>; VIDEO_TRACKS],
+    calibration: &ResolvedCalibration,
+) -> Result<[LensFrame; VIDEO_TRACKS]> {
+    let mut lenses = [
+        converters[0].convert(&frames[0])?,
+        converters[1].convert(&frames[1])?,
+    ];
+    for (index, frame) in frames.iter().enumerate() {
+        if let Some(source) = frame.stitch_source()? {
+            planner.repair_rgb_support(&mut lenses[index], source, calibration, index)?;
+        }
+    }
+    Ok(lenses)
+}
+
+#[cfg(all(feature = "gpu", test))]
 fn stitch_decoded_gpu(
     stitcher: &crate::gpu::GpuStitcher,
     converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
@@ -798,24 +959,47 @@ fn stitch_decoded_gpu(
     projection: EquirectangularProjection,
     motion: &FrameMotion,
 ) -> Result<PanoramaFrame> {
-    let [first, second] = pair.frames;
-    if let (Some(first_yuv), Some(second_yuv)) = (first.gpu_yuv420()?, second.gpu_yuv420()?) {
-        return stitcher.stitch_yuv420_with_motion(
-            &[first_yuv, second_yuv],
-            calibration,
-            projection,
-            motion,
-        );
-    }
-
-    let lenses = [
-        converters[0].convert(&first)?,
-        converters[1].convert(&second)?,
-    ];
-    stitcher.stitch_with_motion(&lenses, calibration, projection, motion)
+    stitch_decoded_gpu_planned(
+        stitcher,
+        converters,
+        pair,
+        calibration,
+        projection,
+        motion,
+        None,
+        &mut StitchPlanner::default(),
+    )
 }
 
 #[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+fn stitch_decoded_gpu_planned(
+    stitcher: &crate::gpu::GpuStitcher,
+    converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
+    pair: SynchronizedPair<'_>,
+    calibration: &ResolvedCalibration,
+    projection: EquirectangularProjection,
+    motion: &FrameMotion,
+    plan: Option<&PreparedStitchPlan>,
+    planner: &mut StitchPlanner,
+) -> Result<PanoramaFrame> {
+    match stitch_decoded_gpu_output(
+        stitcher,
+        converters,
+        pair,
+        calibration,
+        projection,
+        motion,
+        plan,
+        planner,
+        crate::gpu::GpuOutputKind::Rgb.into(),
+    )? {
+        StitchedVideoFrame::Rgb(frame) => Ok(frame),
+        StitchedVideoFrame::Yuv420(_) => unreachable!("requested RGB output"),
+    }
+}
+
+#[cfg(all(feature = "gpu", test))]
 fn stitch_decoded_gpu_video(
     stitcher: &crate::gpu::GpuStitcher,
     converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
@@ -824,25 +1008,93 @@ fn stitch_decoded_gpu_video(
     projection: EquirectangularProjection,
     motion: &FrameMotion,
 ) -> Result<StitchedVideoFrame> {
-    let [first, second] = pair.frames;
-    if let (Some(first_yuv), Some(second_yuv)) = (first.gpu_yuv420()?, second.gpu_yuv420()?) {
-        return stitcher
-            .stitch_yuv420_to_yuv420_with_motion(
-                &[first_yuv, second_yuv],
-                calibration,
-                projection,
-                motion,
-            )
-            .map(StitchedVideoFrame::Yuv420);
-    }
+    stitch_decoded_gpu_video_planned(
+        stitcher,
+        converters,
+        pair,
+        calibration,
+        projection,
+        motion,
+        None,
+        &mut StitchPlanner::default(),
+    )
+}
 
-    let lenses = [
-        converters[0].convert(&first)?,
-        converters[1].convert(&second)?,
-    ];
-    stitcher
-        .stitch_with_motion(&lenses, calibration, projection, motion)
-        .map(StitchedVideoFrame::Rgb)
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+fn stitch_decoded_gpu_video_planned(
+    stitcher: &crate::gpu::GpuStitcher,
+    converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
+    pair: SynchronizedPair<'_>,
+    calibration: &ResolvedCalibration,
+    projection: EquirectangularProjection,
+    motion: &FrameMotion,
+    plan: Option<&PreparedStitchPlan>,
+    planner: &mut StitchPlanner,
+) -> Result<StitchedVideoFrame> {
+    stitch_decoded_gpu_output(
+        stitcher,
+        converters,
+        pair,
+        calibration,
+        projection,
+        motion,
+        plan,
+        planner,
+        crate::gpu::GpuOutputKind::Yuv420.into(),
+    )
+}
+
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+fn stitch_decoded_gpu_output(
+    stitcher: &crate::gpu::GpuStitcher,
+    converters: &mut [RgbFrameConverter; VIDEO_TRACKS],
+    pair: SynchronizedPair<'_>,
+    calibration: &ResolvedCalibration,
+    projection: EquirectangularProjection,
+    motion: &FrameMotion,
+    plan: Option<&PreparedStitchPlan>,
+    planner: &mut StitchPlanner,
+    mut output: crate::gpu::GpuOutputRequest<'_>,
+) -> Result<StitchedVideoFrame> {
+    use crate::gpu::{GpuOutputKind, GpuRenderedFrame, GpuSourceFrames};
+    let [first, second] = pair.frames;
+    let rendered = if let (Some(a), Some(b)) = (first.gpu_yuv420()?, second.gpu_yuv420()?) {
+        stitcher.stitch_sources(
+            GpuSourceFrames::Yuv420(&[a, b]),
+            calibration,
+            projection,
+            motion,
+            output,
+            plan,
+        )?
+    } else if let (Some(a), Some(b)) = (first.gpu_nv12()?, second.gpu_nv12()?) {
+        stitcher.stitch_sources(
+            GpuSourceFrames::Nv12(&[a, b]),
+            calibration,
+            projection,
+            motion,
+            output,
+            plan,
+        )?
+    } else {
+        let lenses = convert_masked_rgb(converters, planner, &[first, second], calibration)?;
+        // Preserve the existing RGB encoder path for converted/mixed source layouts.
+        output.kind = GpuOutputKind::Rgb;
+        stitcher.stitch_sources(
+            GpuSourceFrames::Rgb(&lenses),
+            calibration,
+            projection,
+            motion,
+            output,
+            plan,
+        )?
+    };
+    Ok(match rendered {
+        GpuRenderedFrame::Rgb(frame) => StitchedVideoFrame::Rgb(frame),
+        GpuRenderedFrame::Yuv420(frame) => StitchedVideoFrame::Yuv420(frame),
+    })
 }
 
 #[cfg(not(feature = "gpu"))]
@@ -1103,13 +1355,63 @@ impl<'a> DecodedVideoFrame<'a> {
         Ok(())
     }
 
-    #[cfg(feature = "gpu")]
-    fn gpu_yuv420(&self) -> Result<Option<crate::gpu::GpuYuv420Frame<'_>>> {
-        use crate::gpu::{GpuChromaLocation, GpuPlane, GpuYuv420Frame, GpuYuvMatrix, GpuYuvRange};
+    fn stitch_source(&self) -> Result<Option<StitchSource<'_>>> {
+        if let Some(frame) = self.gpu_yuv420()? {
+            return Ok(Some(StitchSource::Yuv420(frame)));
+        }
+        if let Some(frame) = self.gpu_nv12()? {
+            return Ok(Some(StitchSource::Nv12(frame)));
+        }
+        use crate::stitch::{Plane, Yuv42016Frame};
+        use ffmpeg::format::Pixel;
+        let (bit_depth, lsb_shift, big_endian, interleaved_chroma) = match self.format.pixel_format
+        {
+            Pixel::P010LE => (10, 6, false, true),
+            Pixel::P010BE => (10, 6, true, true),
+            Pixel::YUV420P10LE => (10, 0, false, false),
+            Pixel::YUV420P10BE => (10, 0, true, false),
+            Pixel::YUV420P12LE => (12, 0, false, false),
+            Pixel::YUV420P12BE => (12, 0, true, false),
+            Pixel::YUV420P16LE => (16, 0, false, false),
+            Pixel::YUV420P16BE => (16, 0, true, false),
+            _ => return Ok(None),
+        };
+        let required = if interleaved_chroma { 2 } else { 3 };
+        if self.format.planes.len() < required {
+            return Err(Error::InvalidMedia(
+                "decoded high-bit-depth YUV420 frame has missing planes".into(),
+            ));
+        }
+        let Some((range, matrix, chroma_location)) = self.gpu_yuv_metadata() else {
+            return Ok(None);
+        };
+        let plane = |index: usize| Plane {
+            data: self.frame.data(index),
+            stride: self.format.planes[index].stride,
+        };
+        Ok(Some(StitchSource::Yuv42016(Yuv42016Frame {
+            width: self.format.width,
+            height: self.format.height,
+            y: plane(0),
+            u: plane(1),
+            v: plane(if interleaved_chroma { 1 } else { 2 }),
+            bit_depth,
+            lsb_shift,
+            big_endian,
+            interleaved_chroma,
+            range,
+            matrix,
+            chroma_location,
+        })))
+    }
 
+    fn gpu_yuv420(&self) -> Result<Option<crate::stitch::Yuv420Frame<'_>>> {
+        use crate::stitch::{Plane as GpuPlane, Yuv420Frame as GpuYuv420Frame};
         self.validate_layout()?;
-        let is_full_range_format = self.format.pixel_format == ffmpeg::format::Pixel::YUVJ420P;
-        if self.format.pixel_format != ffmpeg::format::Pixel::YUV420P && !is_full_range_format {
+        if !matches!(
+            self.format.pixel_format,
+            ffmpeg::format::Pixel::YUV420P | ffmpeg::format::Pixel::YUVJ420P
+        ) {
             return Ok(None);
         }
         if self.format.planes.len() < 3 {
@@ -1117,30 +1419,8 @@ impl<'a> DecodedVideoFrame<'a> {
                 "decoded planar YUV420 frame has fewer than three planes".into(),
             ));
         }
-        let range = match self.format.color.range {
-            ffmpeg::util::color::Range::JPEG => GpuYuvRange::Full,
-            ffmpeg::util::color::Range::MPEG => GpuYuvRange::Limited,
-            ffmpeg::util::color::Range::Unspecified if is_full_range_format => GpuYuvRange::Full,
-            ffmpeg::util::color::Range::Unspecified => GpuYuvRange::Limited,
-        };
-        let matrix = match self.format.color.matrix {
-            ffmpeg::util::color::Space::BT709 | ffmpeg::util::color::Space::Unspecified => {
-                GpuYuvMatrix::Bt709
-            }
-            ffmpeg::util::color::Space::BT470BG | ffmpeg::util::color::Space::SMPTE170M => {
-                GpuYuvMatrix::Bt601
-            }
-            ffmpeg::util::color::Space::BT2020NCL => GpuYuvMatrix::Bt2020,
-            _ => return Ok(None),
-        };
-        let chroma_location = match self.format.color.chroma_location {
-            ffmpeg::util::chroma::Location::Center => GpuChromaLocation::Center,
-            ffmpeg::util::chroma::Location::Left => GpuChromaLocation::Left,
-            ffmpeg::util::chroma::Location::Unspecified if is_full_range_format => {
-                GpuChromaLocation::Center
-            }
-            ffmpeg::util::chroma::Location::Unspecified => GpuChromaLocation::Left,
-            _ => return Ok(None),
+        let Some((range, matrix, chroma_location)) = self.gpu_yuv_metadata() else {
+            return Ok(None);
         };
         Ok(Some(GpuYuv420Frame {
             width: self.format.width,
@@ -1161,6 +1441,78 @@ impl<'a> DecodedVideoFrame<'a> {
             matrix,
             chroma_location,
         }))
+    }
+
+    fn gpu_nv12(&self) -> Result<Option<crate::stitch::Nv12Frame<'_>>> {
+        use crate::stitch::{Nv12Frame as GpuNv12Frame, Plane as GpuPlane};
+        self.validate_layout()?;
+        // P010 and other high-bit-depth formats retain the established precision-
+        // aware conversion fallback; they must never be interpreted as 8-bit NV12.
+        if self.format.pixel_format != ffmpeg::format::Pixel::NV12 {
+            return Ok(None);
+        }
+        if self.format.planes.len() < 2 {
+            return Err(Error::InvalidMedia(
+                "decoded NV12 frame has fewer than two planes".into(),
+            ));
+        }
+        let Some((range, matrix, chroma_location)) = self.gpu_yuv_metadata() else {
+            return Ok(None);
+        };
+        Ok(Some(GpuNv12Frame {
+            width: self.format.width,
+            height: self.format.height,
+            y: GpuPlane {
+                data: self.frame.data(0),
+                stride: self.format.planes[0].stride,
+            },
+            uv: GpuPlane {
+                data: self.frame.data(1),
+                stride: self.format.planes[1].stride,
+            },
+            range,
+            matrix,
+            chroma_location,
+        }))
+    }
+
+    fn gpu_yuv_metadata(
+        &self,
+    ) -> Option<(
+        crate::stitch::YuvRange,
+        crate::stitch::YuvMatrix,
+        crate::stitch::ChromaLocation,
+    )> {
+        use crate::stitch::{
+            ChromaLocation as GpuChromaLocation, YuvMatrix as GpuYuvMatrix, YuvRange as GpuYuvRange,
+        };
+        let is_full_range_format = self.format.pixel_format == ffmpeg::format::Pixel::YUVJ420P;
+        let range = match self.format.color.range {
+            ffmpeg::util::color::Range::JPEG => GpuYuvRange::Full,
+            ffmpeg::util::color::Range::MPEG => GpuYuvRange::Limited,
+            ffmpeg::util::color::Range::Unspecified if is_full_range_format => GpuYuvRange::Full,
+            ffmpeg::util::color::Range::Unspecified => GpuYuvRange::Limited,
+        };
+        let matrix = match self.format.color.matrix {
+            ffmpeg::util::color::Space::BT709 | ffmpeg::util::color::Space::Unspecified => {
+                GpuYuvMatrix::Bt709
+            }
+            ffmpeg::util::color::Space::BT470BG | ffmpeg::util::color::Space::SMPTE170M => {
+                GpuYuvMatrix::Bt601
+            }
+            ffmpeg::util::color::Space::BT2020NCL => GpuYuvMatrix::Bt2020,
+            _ => return None,
+        };
+        let chroma_location = match self.format.color.chroma_location {
+            ffmpeg::util::chroma::Location::Center => GpuChromaLocation::Center,
+            ffmpeg::util::chroma::Location::Left => GpuChromaLocation::Left,
+            ffmpeg::util::chroma::Location::Unspecified if is_full_range_format => {
+                GpuChromaLocation::Center
+            }
+            ffmpeg::util::chroma::Location::Unspecified => GpuChromaLocation::Left,
+            _ => return None,
+        };
+        Some((range, matrix, chroma_location))
     }
 }
 
@@ -2135,6 +2487,220 @@ mod tests {
     }
 
     #[test]
+    fn mixed_format_seam_analysis_ignores_excluded_housing_chroma() {
+        use crate::{CameraModel, ResolvedLensGeometry, SeamMode};
+        ffmpeg::init().unwrap();
+        let size = 128_u32;
+        // The registered X5 117 mask over an independently specified xi=2
+        // camera makes excluded chroma adjacent to usable overlap samples.
+        let mut calibration =
+            crate::calibration::synthetic_dual_fisheye_calibration(size, size).unwrap();
+        calibration.camera_model = Some(CameraModel::X5);
+        calibration.lens_geometry = [Some(ResolvedLensGeometry {
+            full_fov_degrees: 188.0,
+            blend_angle_degrees: 184.0,
+            blend_angle_recorded: false,
+        }); 2];
+        for lens in &mut calibration.lenses {
+            lens.lens_type = 117;
+            lens.xi = Some(2.0);
+            lens.fx = f64::from(size) * 0.86;
+            lens.fy = lens.fx;
+        }
+        let cpu = CpuStitcher::new();
+        let masks = cpu
+            .mask_cache()
+            .prepare([(size, size); 2], &calibration)
+            .unwrap();
+        let mask = masks[0].as_ref().expect("registered housing mask");
+        let levels: [Vec<u8>; 2] = std::array::from_fn(|index| {
+            let lens = &calibration.lenses[index];
+            (0..size * size)
+                .map(|i| {
+                    let nx = (f64::from(i % size) - f64::from(size) * 0.5) / lens.fx;
+                    let ny = -(f64::from(i / size) - f64::from(size) * 0.5) / lens.fy;
+                    let radius_squared = nx * nx + ny * ny;
+                    // Invert u=X/(Z+xi), v=Y/(Z+xi), X²+Y²+Z²=1.
+                    let discriminant = 1.0 - 3.0 * radius_squared;
+                    if discriminant < 0.0 {
+                        return 0;
+                    }
+                    let z = (-2.0 * radius_squared + discriminant.sqrt()) / (1.0 + radius_squared);
+                    let body = lens.orientation.inverse().rotate_vector([
+                        nx * (z + 2.0),
+                        ny * (z + 2.0),
+                        z,
+                    ]);
+                    let phi = body[1].atan2(body[0])
+                        - if index == 1 {
+                            0.8_f64.to_radians()
+                        } else {
+                            0.0
+                        };
+                    let theta = body[0].hypot(body[1]).atan2(body[2]);
+                    let value = 0.5
+                        + 0.14 * (17.0 * phi).sin()
+                        + 0.13 * (43.0 * phi + 19.0 * theta).cos()
+                        + 0.1 * (14.0 * theta).sin();
+                    (value * 255.0).round().clamp(0.0, 255.0) as u8
+                })
+                .collect()
+        });
+        let yuv = |poison| {
+            let mut frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::YUV420P, size, size);
+            frame.set_color_range(ffmpeg::util::color::Range::JPEG);
+            frame.set_color_space(ffmpeg::util::color::Space::BT709);
+            // SAFETY: this test owns the live AVFrame; only its chroma metadata
+            // changes, because ffmpeg-next exposes no setter for this field.
+            unsafe {
+                (*frame.as_mut_ptr()).chroma_location =
+                    ffmpeg::util::chroma::Location::Center.into();
+            }
+            let stride = frame.stride(0);
+            for y in 0..size as usize {
+                frame.data_mut(0)[y * stride..y * stride + size as usize]
+                    .copy_from_slice(&levels[0][y * size as usize..(y + 1) * size as usize]);
+            }
+            let mut changed = 0;
+            for plane in [1, 2] {
+                frame.data_mut(plane).fill(128);
+                let stride = frame.stride(plane);
+                for y in 0..size as usize / 2 {
+                    for x in 0..size as usize / 2 {
+                        // A chroma cell is unsupported when any of its four
+                        // luma pixels is excluded. Poison boundary-straddling
+                        // cells too, leaving fully supported chroma untouched.
+                        if (y * 2..y * 2 + 2).any(|yy| {
+                            (x * 2..x * 2 + 2)
+                                .any(|xx| mask.weights[yy * size as usize + xx] == 0.0)
+                        }) {
+                            frame.data_mut(plane)[y * stride + x] = poison;
+                            changed += 1;
+                        }
+                    }
+                }
+            }
+            assert!(changed > 0, "fixture must contain excluded chroma");
+            frame
+        };
+        let clean = yuv(128);
+        let poisoned = yuv(255);
+        let mut rgb = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGB24, size, size);
+        let stride = rgb.stride(0);
+        for y in 0..size as usize {
+            for x in 0..size as usize {
+                rgb.data_mut(0)[y * stride + x * 3..y * stride + x * 3 + 3]
+                    .fill(levels[1][y * size as usize + x]);
+            }
+        }
+        assert!(DecodedVideoFrame::borrow(&clean)
+            .stitch_source()
+            .unwrap()
+            .is_some());
+        assert!(DecodedVideoFrame::borrow(&rgb)
+            .stitch_source()
+            .unwrap()
+            .is_none());
+        let motion = FrameMotion::global(Orientation::IDENTITY).unwrap();
+        let projection = EquirectangularProjection {
+            width: 512,
+            height: 256,
+        };
+        let cancel = AtomicBool::new(false);
+        let render = |first: &ffmpeg::frame::Video| {
+            let mut session =
+                StitchSession::try_open(BackendAttempt::Cpu, ProcessingBackend::Cpu, None).unwrap();
+            session.set_seam_mode(SeamMode::Dynamic).unwrap();
+            let frame = session
+                .stitch(
+                    SynchronizedPair {
+                        frames: [
+                            DecodedVideoFrame::borrow(first),
+                            DecodedVideoFrame::borrow(&rgb),
+                        ],
+                    },
+                    &calibration,
+                    projection,
+                    &motion,
+                    &cancel,
+                    None,
+                )
+                .unwrap();
+            (frame, session.current_plan.unwrap())
+        };
+        let (expected, plan) = render(&clean);
+        assert!(
+            plan.confidence_coverage() > 0.01,
+            "test requires accepted correspondences"
+        );
+        let (actual, _) = render(&poisoned);
+        let output_differences = actual
+            .as_rgb8()
+            .iter()
+            .zip(expected.as_rgb8())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(
+            output_differences, 0,
+            "excluded chroma changed mixed-format output"
+        );
+
+        // Test contamination at the analysis-input boundary. Confidence filtering
+        // may correctly reject an artifact; do not require the solver to amplify
+        // excluded edge colors into a visible geometric error.
+        let converted = |first| {
+            RgbFrameConverter::default()
+                .convert(&DecodedVideoFrame::borrow(first))
+                .unwrap()
+        };
+        let covered_differences = |first: &LensFrame, second: &LensFrame| {
+            first
+                .as_rgb8()
+                .chunks_exact(3)
+                .zip(second.as_rgb8().chunks_exact(3))
+                .enumerate()
+                .filter(|(i, (a, b))| mask.weights[*i] > 0.0 && a != b)
+                .count()
+        };
+        assert!(
+            covered_differences(&converted(&clean), &converted(&poisoned)) > 0,
+            "plain RGB conversion must expose excluded chroma inside source support"
+        );
+        let repaired = |first| {
+            convert_masked_rgb(
+                &mut std::array::from_fn(|_| RgbFrameConverter::default()),
+                &mut StitchPlanner::new(),
+                &[
+                    DecodedVideoFrame::borrow(first),
+                    DecodedVideoFrame::borrow(&rgb),
+                ],
+                &calibration,
+            )
+            .unwrap()
+        };
+        let clean_inputs = repaired(&clean);
+        let poisoned_inputs = repaired(&poisoned);
+        assert_eq!(
+            covered_differences(&clean_inputs[0], &poisoned_inputs[0]),
+            0,
+            "analysis and rendering must observe no excluded chroma"
+        );
+
+        // A supported chroma perturbation must survive repair. This rules out
+        // an implementation that passes by discarding chroma or replacing input.
+        let mut supported = yuv(128);
+        let center = size as usize / 2;
+        assert!((center..center + 2)
+            .all(|y| { (center..center + 2).all(|x| mask.weights[y * size as usize + x] > 0.99) }));
+        let stride = supported.stride(1);
+        supported.data_mut(1)[center / 2 * stride + center / 2] = 255;
+        assert!(
+            covered_differences(&clean_inputs[0], &repaired(&supported)[0]) > 0,
+            "supported chroma must remain observable after repair"
+        );
+    }
+
+    #[test]
     fn metadata_color_validation_handles_sdr_and_ilog_without_resources() {
         let mut metadata = InsvMetadata {
             camera_name: Some("Insta360 X5".into()),
@@ -2268,18 +2834,534 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn p010_gpu_media_preserves_precision_conversion_before_rgb_upload() {
+        ffmpeg::init().unwrap();
+        if crate::gpu::available_adapters().is_empty() {
+            assert!(
+                std::env::var_os("INSTA360_RS_REQUIRE_GPU").is_none(),
+                "required GPU unavailable"
+            );
+            return;
+        }
+        let mut frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::P010LE, 32, 32);
+        frame.set_color_space(ffmpeg::util::color::Space::BT709);
+        frame.set_color_range(ffmpeg::util::color::Range::MPEG);
+        frame.set_pts(Some(57));
+        for plane in 0..2 {
+            for (index, sample) in frame.data_mut(plane).chunks_exact_mut(2).enumerate() {
+                let value: u16 = if plane == 0 {
+                    64 + (index % 877) as u16
+                } else {
+                    384 + (index % 257) as u16
+                };
+                sample.copy_from_slice(&(value << 6).to_le_bytes());
+            }
+        }
+        let original = [frame.data(0).to_vec(), frame.data(1).to_vec()];
+        let decoded = DecodedVideoFrame::borrow(&frame);
+        assert!(decoded.gpu_nv12().unwrap().is_none());
+        assert!(decoded.gpu_yuv420().unwrap().is_none());
+        let lenses =
+            std::array::from_fn(|_| RgbFrameConverter::default().convert(&decoded).unwrap());
+        let gpu = crate::gpu::GpuStitcher::new().unwrap();
+        let calibration = crate::calibration::synthetic_dual_fisheye_calibration(32, 32).unwrap();
+        let projection = EquirectangularProjection {
+            width: 64,
+            height: 32,
+        };
+        let motion =
+            FrameMotion::global(Orientation::from_euler_degrees(9.0, 17.0, -3.0).unwrap()).unwrap();
+        let expected = gpu
+            .stitch_with_motion(&lenses, &calibration, projection, &motion)
+            .unwrap();
+        let pair = || SynchronizedPair {
+            frames: [
+                DecodedVideoFrame::borrow(&frame),
+                DecodedVideoFrame::borrow(&frame),
+            ],
+        };
+        let mut converters = std::array::from_fn(|_| RgbFrameConverter::default());
+        let actual = stitch_decoded_gpu(
+            &gpu,
+            &mut converters,
+            pair(),
+            &calibration,
+            projection,
+            &motion,
+        )
+        .unwrap();
+        assert_eq!(actual.as_rgb8(), expected.as_rgb8());
+        assert!(
+            converters
+                .iter()
+                .all(|converter| converter.scaler.is_some()),
+            "P010 must retain the precision-aware RGB conversion"
+        );
+        let video = stitch_decoded_gpu_video(
+            &gpu,
+            &mut converters,
+            pair(),
+            &calibration,
+            projection,
+            &motion,
+        )
+        .unwrap();
+        let StitchedVideoFrame::Rgb(video) = video else {
+            panic!("P010 retains RGB export fallback");
+        };
+        assert_eq!(video.as_rgb8(), expected.as_rgb8());
+        assert_eq!(frame.pts(), Some(57));
+        assert_eq!(frame.format(), ffmpeg::format::Pixel::P010LE);
+        assert!(
+            [frame.data(0).to_vec(), frame.data(1).to_vec()] == original,
+            "original P010 samples changed"
+        );
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn nv12_gpu_media_borrows_original_planes_without_rgb_conversion() {
+        ffmpeg::init().unwrap();
+        let mut frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::NV12, 32, 32);
+        frame.set_color_space(ffmpeg::util::color::Space::BT709);
+        frame.set_color_range(ffmpeg::util::color::Range::MPEG);
+        frame.set_pts(Some(42));
+        frame.data_mut(0).fill(112);
+        frame.data_mut(1).fill(128);
+        let original = [frame.data(0).to_vec(), frame.data(1).to_vec()];
+        let decoded = DecodedVideoFrame::borrow(&frame);
+        let nv12 = decoded.gpu_nv12().unwrap().unwrap();
+        assert_eq!(nv12.y.data.as_ptr(), frame.data(0).as_ptr());
+        assert_eq!(nv12.uv.data.as_ptr(), frame.data(1).as_ptr());
+        assert_eq!(nv12.uv.stride, frame.stride(1));
+        assert!(decoded.gpu_yuv420().unwrap().is_none());
+        let high_depth = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::P010LE, 32, 32);
+        assert!(DecodedVideoFrame::borrow(&high_depth)
+            .gpu_nv12()
+            .unwrap()
+            .is_none());
+        if crate::gpu::available_adapters().is_empty() {
+            assert!(
+                std::env::var_os("INSTA360_RS_REQUIRE_GPU").is_none(),
+                "required GPU unavailable"
+            );
+            return;
+        }
+        let gpu = crate::gpu::GpuStitcher::new().unwrap();
+        let mut converters = std::array::from_fn(|_| RgbFrameConverter::default());
+        let calibration = crate::calibration::synthetic_dual_fisheye_calibration(32, 32).unwrap();
+        let projection = EquirectangularProjection {
+            width: 64,
+            height: 32,
+        };
+        let motion = FrameMotion::global(Orientation::IDENTITY).unwrap();
+        let pair = || SynchronizedPair {
+            frames: [
+                DecodedVideoFrame::borrow(&frame),
+                DecodedVideoFrame::borrow(&frame),
+            ],
+        };
+        let panorama = stitch_decoded_gpu(
+            &gpu,
+            &mut converters,
+            pair(),
+            &calibration,
+            projection,
+            &motion,
+        )
+        .unwrap();
+        assert_eq!((panorama.width(), panorama.height()), (64, 32));
+        let video = stitch_decoded_gpu_video(
+            &gpu,
+            &mut converters,
+            pair(),
+            &calibration,
+            projection,
+            &motion,
+        )
+        .unwrap();
+        assert!(video.is_gpu_yuv420());
+        assert!(
+            converters
+                .iter()
+                .all(|converter| converter.scaler.is_none()),
+            "NV12 must bypass source-resolution RGB conversion"
+        );
+        assert_eq!(frame.pts(), Some(42));
+        assert_eq!(frame.format(), ffmpeg::format::Pixel::NV12);
+        assert_eq!(
+            [frame.data(0).to_vec(), frame.data(1).to_vec()],
+            original,
+            "borrowed original changed"
+        );
+    }
+
     fn color_test_pair() -> SynchronizedPair<'static> {
+        restoration_rgb_pair([64, 96, 128])
+    }
+
+    fn restoration_rgb_pair(color: [u8; 3]) -> SynchronizedPair<'static> {
         SynchronizedPair {
             frames: std::array::from_fn(|_| {
                 let mut frame = ffmpeg::frame::Video::new(ffmpeg::format::Pixel::RGB24, 32, 32);
                 let stride = frame.stride(0);
                 for row in frame.data_mut(0).chunks_exact_mut(stride).take(32) {
                     for pixel in row[..32 * 3].chunks_exact_mut(3) {
-                        pixel.copy_from_slice(&[64, 96, 128]);
+                        pixel.copy_from_slice(&color);
                     }
                 }
                 DecodedVideoFrame::new(frame)
             }),
+        }
+    }
+
+    #[cfg(feature = "gpu")]
+    fn restoration_gpu_available() -> bool {
+        if !crate::gpu::available_adapters().is_empty() {
+            return true;
+        }
+        assert!(
+            std::env::var_os("INSTA360_RS_REQUIRE_GPU").is_none(),
+            "required GPU unavailable"
+        );
+        false
+    }
+
+    #[test]
+    fn restoration_bridge_applies_legacy_once_after_color_conversion() {
+        ffmpeg::init().unwrap();
+        let calibration = crate::calibration::synthetic_dual_fisheye_calibration(32, 32).unwrap();
+        let projection = EquirectangularProjection {
+            width: 128,
+            height: 64,
+        };
+        let motion = FrameMotion::global(Orientation::IDENTITY).unwrap();
+        let cancel = AtomicBool::new(false);
+        let options = crate::UnderwaterColorOptions {
+            mode: crate::UnderwaterColorMode::Legacy,
+            ..Default::default()
+        };
+        let metadata = InsvMetadata {
+            camera_name: Some("Insta360 X5".into()),
+            recorded_color_mode: Some(RecordedColorMode::ILog),
+            ..Default::default()
+        };
+        let lut = resolve_color_lut(&metadata, ColorConversion::Auto).unwrap();
+        for attempt in [BackendAttempt::Cpu, BackendAttempt::Gpu] {
+            if attempt == BackendAttempt::Gpu {
+                #[cfg(feature = "gpu")]
+                if !restoration_gpu_available() {
+                    continue;
+                }
+                #[cfg(not(feature = "gpu"))]
+                continue;
+            }
+            let mut session =
+                StitchSession::try_open(attempt, ProcessingBackend::Auto, None).unwrap();
+            session.set_color_lut(lut.clone());
+            let mut actual =
+                underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
+            let mut reference = crate::underwater::UnderwaterColorSession::prepare(
+                options,
+                projection.width,
+                projection.height,
+                30,
+                1,
+                &crate::assets::BundledAssetProvider,
+            )
+            .unwrap();
+            for (index, (video, continuous, color)) in [
+                (false, false, [64, 96, 128]),
+                (true, false, [45, 120, 180]),
+                (false, true, [80, 110, 140]),
+                (true, true, [35, 85, 110]),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let pts = 1_000_000 + index as i64 * 170_000;
+                let unprocessed = session
+                    .stitch(
+                        restoration_rgb_pair(color),
+                        &calibration,
+                        projection,
+                        &motion,
+                        &cancel,
+                        None,
+                    )
+                    .unwrap();
+                let mut expected = unprocessed.as_rgb8().to_vec();
+                if continuous {
+                    reference
+                        .process_rgb8_continuous(&mut expected, pts as f64 / 1_000_000.0)
+                        .unwrap();
+                } else {
+                    reference
+                        .process_rgb8(&mut expected, pts as f64 / 1_000_000.0)
+                        .unwrap();
+                }
+                assert_ne!(
+                    expected,
+                    unprocessed.as_rgb8(),
+                    "fixture must exercise restoration"
+                );
+                let frame = if video {
+                    match session
+                        .stitch_video(
+                            restoration_rgb_pair(color),
+                            &calibration,
+                            projection,
+                            &motion,
+                            &cancel,
+                            Some(actual.frame(pts, continuous)),
+                        )
+                        .unwrap()
+                    {
+                        StitchedVideoFrame::Rgb(frame) => frame,
+                        #[cfg(feature = "gpu")]
+                        StitchedVideoFrame::Yuv420(_) => {
+                            panic!("Legacy retains CPU restoration and RGB encoding")
+                        }
+                    }
+                } else {
+                    session
+                        .stitch(
+                            restoration_rgb_pair(color),
+                            &calibration,
+                            projection,
+                            &motion,
+                            &cancel,
+                            Some(actual.frame(pts, continuous)),
+                        )
+                        .unwrap()
+                };
+                assert_eq!(
+                    frame.as_rgb8(),
+                    expected,
+                    "restoration order/cadence at frame {index}"
+                );
+            }
+        }
+    }
+
+    #[cfg(all(feature = "gpu", feature = "underwater-ai"))]
+    fn restoration_yuv_pair(mixed: bool, luma: u8) -> SynchronizedPair<'static> {
+        SynchronizedPair {
+            frames: std::array::from_fn(|index| {
+                let format = if mixed && index == 1 {
+                    ffmpeg::format::Pixel::YUV420P
+                } else {
+                    ffmpeg::format::Pixel::NV12
+                };
+                let mut frame = ffmpeg::frame::Video::new(format, 32, 32);
+                frame.set_color_space(ffmpeg::util::color::Space::BT709);
+                frame.set_color_range(ffmpeg::util::color::Range::MPEG);
+                frame.data_mut(0).fill(luma);
+                if format == ffmpeg::format::Pixel::NV12 {
+                    for uv in frame.data_mut(1).chunks_exact_mut(2) {
+                        uv.copy_from_slice(&[148, 102]);
+                    }
+                } else {
+                    frame.data_mut(1).fill(148);
+                    frame.data_mut(2).fill(102);
+                }
+                DecodedVideoFrame::new(frame)
+            }),
+        }
+    }
+
+    #[cfg(all(feature = "gpu", feature = "underwater-ai"))]
+    #[test]
+    fn restoration_bridge_zero_strength_preserves_gpu_bytes_and_yuv_borrowing() {
+        ffmpeg::init().unwrap();
+        if !restoration_gpu_available() {
+            return;
+        }
+        let mut session =
+            StitchSession::try_open(BackendAttempt::Gpu, ProcessingBackend::Gpu, None).unwrap();
+        let calibration = crate::calibration::synthetic_dual_fisheye_calibration(32, 32).unwrap();
+        let projection = EquirectangularProjection {
+            width: 64,
+            height: 32,
+        };
+        let motion = FrameMotion::global(Orientation::IDENTITY).unwrap();
+        let cancel = AtomicBool::new(false);
+        let options = crate::UnderwaterColorOptions {
+            mode: crate::UnderwaterColorMode::Ai,
+            strength: Some(0.0),
+            ..Default::default()
+        };
+        let mut color = underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
+        for (index, luma) in [95, 141].into_iter().enumerate() {
+            let expected = session
+                .stitch(
+                    restoration_yuv_pair(false, luma),
+                    &calibration,
+                    projection,
+                    &motion,
+                    &cancel,
+                    None,
+                )
+                .unwrap();
+            let image = session
+                .stitch(
+                    restoration_yuv_pair(false, luma),
+                    &calibration,
+                    projection,
+                    &motion,
+                    &cancel,
+                    Some(color.frame(index as i64 * 33_333, true)),
+                )
+                .unwrap();
+            let video = session
+                .stitch_video(
+                    restoration_yuv_pair(false, luma),
+                    &calibration,
+                    projection,
+                    &motion,
+                    &cancel,
+                    Some(color.frame(index as i64 * 33_333, false)),
+                )
+                .unwrap();
+            let StitchedVideoFrame::Rgb(video) = video else {
+                panic!("zero strength retains the historical RGB restoration fallback");
+            };
+            assert_eq!(image.as_rgb8(), expected.as_rgb8());
+            assert_eq!(video.as_rgb8(), expected.as_rgb8());
+            assert!(session
+                .converters
+                .iter()
+                .all(|converter| converter.scaler.is_none()));
+        }
+    }
+
+    #[cfg(all(feature = "gpu", feature = "underwater-ai"))]
+    #[test]
+    fn restoration_bridge_ai_video_reuses_corrected_rgb_for_yuv_and_mixed_layouts() {
+        ffmpeg::init().unwrap();
+        if !restoration_gpu_available() {
+            return;
+        }
+        let calibration = crate::calibration::synthetic_dual_fisheye_calibration(32, 32).unwrap();
+        let projection = EquirectangularProjection {
+            width: 64,
+            height: 32,
+        };
+        let motion = FrameMotion::global(Orientation::IDENTITY).unwrap();
+        let cancel = AtomicBool::new(false);
+        let options = crate::UnderwaterColorOptions {
+            mode: crate::UnderwaterColorMode::Ai,
+            ..Default::default()
+        };
+        for mixed in [false, true] {
+            let mut session =
+                StitchSession::try_open(BackendAttempt::Gpu, ProcessingBackend::Gpu, None).unwrap();
+            let mut image_color =
+                underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
+            let mut video_color =
+                underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
+            // Exercise export's processed-frame clock and preview's source-time clock.
+            let continuous = mixed;
+            for (index, luma) in [95, 141, 110].into_iter().enumerate() {
+                let pts = 1_000_000 + index as i64 * 170_000;
+                let unprocessed = session
+                    .stitch(
+                        restoration_yuv_pair(mixed, luma),
+                        &calibration,
+                        projection,
+                        &motion,
+                        &cancel,
+                        None,
+                    )
+                    .unwrap();
+                let image = session
+                    .stitch(
+                        restoration_yuv_pair(mixed, luma),
+                        &calibration,
+                        projection,
+                        &motion,
+                        &cancel,
+                        Some(image_color.frame(pts, continuous)),
+                    )
+                    .unwrap();
+                assert_ne!(
+                    image.as_rgb8(),
+                    unprocessed.as_rgb8(),
+                    "AI must change the fixture colors"
+                );
+                let video = session
+                    .stitch_video(
+                        restoration_yuv_pair(mixed, luma),
+                        &calibration,
+                        projection,
+                        &motion,
+                        &cancel,
+                        Some(video_color.frame(pts, continuous)),
+                    )
+                    .unwrap();
+                if mixed {
+                    let StitchedVideoFrame::Rgb(video) = video else {
+                        panic!("mixed layouts retain RGB encoding");
+                    };
+                    assert_eq!(video.as_rgb8(), image.as_rgb8());
+                    assert!(session
+                        .converters
+                        .iter()
+                        .all(|converter| converter.scaler.is_some()));
+                } else {
+                    let StitchedVideoFrame::Yuv420(video) = video else {
+                        panic!("native NV12 keeps direct YUV encoding with AI restoration");
+                    };
+                    let planes = video.planes();
+                    let pixel = |x: usize, y: usize| {
+                        let i = (y * projection.width as usize + x) * 3;
+                        [0, 1, 2].map(|channel| f64::from(image.as_rgb8()[i + channel]) / 255.0)
+                    };
+                    for y in 0..projection.height as usize {
+                        for x in 0..projection.width as usize {
+                            let [r, g, b] = pixel(x, y);
+                            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            let expected = (16.0 + 219.0 * luma).round() as u8;
+                            assert!(
+                                planes[0].data[y * planes[0].stride + x].abs_diff(expected) <= 1
+                            );
+                        }
+                    }
+                    for y in 0..projection.height as usize / 2 {
+                        for x in 0..projection.width as usize / 2 {
+                            let mut mean = [0.0; 3];
+                            for oy in 0..2 {
+                                for ox in 0..2 {
+                                    for (mean, value) in
+                                        mean.iter_mut().zip(pixel(2 * x + ox, 2 * y + oy))
+                                    {
+                                        *mean += value * 0.25;
+                                    }
+                                }
+                            }
+                            let [r, g, b] = mean;
+                            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            for (plane, component) in
+                                [(1, (b - luma) / 1.8556), (2, (r - luma) / 1.5748)]
+                            {
+                                let expected =
+                                    (128.0 + 224.0 * component).round().clamp(0.0, 255.0) as u8;
+                                assert!(
+                                    planes[plane].data[y * planes[plane].stride + x]
+                                        .abs_diff(expected)
+                                        <= 1
+                                );
+                            }
+                        }
+                    }
+                    assert!(session
+                        .converters
+                        .iter()
+                        .all(|converter| converter.scaler.is_none()));
+                }
+            }
         }
     }
 
@@ -2299,6 +3381,8 @@ mod tests {
                 &calibration,
                 projection,
                 &FrameMotion::global(Orientation::IDENTITY).unwrap(),
+                &AtomicBool::new(false),
+                None,
             )
             .unwrap();
         let metadata = InsvMetadata {
@@ -2321,6 +3405,8 @@ mod tests {
                 &calibration,
                 projection,
                 &FrameMotion::global(Orientation::IDENTITY).unwrap(),
+                &AtomicBool::new(false),
+                None,
             )
             .unwrap();
         assert_eq!(image.as_rgb8(), expected);
@@ -2330,6 +3416,8 @@ mod tests {
                 &calibration,
                 projection,
                 &FrameMotion::global(Orientation::IDENTITY).unwrap(),
+                &AtomicBool::new(false),
+                None,
             )
             .unwrap();
         match video {

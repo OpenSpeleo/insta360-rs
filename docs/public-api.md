@@ -38,6 +38,15 @@ the default build through `BundledAssetProvider`. The `gpu` feature adds adapter
 discovery and an explicit portable `GpuStitcher` implemented with safe `wgpu`
 compute on the platform backend.
 
+`gpu::GpuNv12Frame` borrows 8-bit Y and interleaved U/V planes with explicit
+strides, matrix, range and chroma location.
+`GpuStitcher::stitch_nv12_with_motion` and `stitch_nv12_to_yuv420_with_motion`
+upload those planes directly, preserving the same calibration, masks, LUT and
+motion policy as planar YUV420. The media renderer selects this path for FFmpeg
+NV12 frames and leaves the borrowed original unchanged. P010 and unsupported
+color layouts retain the existing conversion fallback; they are never
+reinterpreted as 8-bit NV12.
+
 `StitchConfig::backend` controls image reconstruction:
 
 - `ProcessingBackend::Cpu` uses the deterministic reference renderer.
@@ -46,6 +55,22 @@ compute on the platform backend.
   CPU only when initialization or processing returns a typed GPU failure.
   Attempt-owned image outputs or the video temporary file are removed before
   retry; non-GPU errors are returned without fallback.
+
+`StitchConfig::seam_mode` selects `SeamMode::{Fixed,Dynamic,OpticalFlow,Ai}`.
+`Fixed` is the default; it retains calibrated projection, housing exclusion and
+the fixed seam. The other modes request adaptive alignment within the overlap,
+independently of `ProcessingBackend`, optical accessories, motion and underwater
+color. `SeamMode::unavailable_reason()` provides a cheap build/qualification
+reason without loading a model or initializing a device. Source and runtime
+validation still occurs during preparation; an explicit unavailable algorithm
+does not silently fall back to Fixed. These names do not promise identical
+Insta360 Studio results.
+
+CLI exports use `--stitching-optimization off|dynamic|optical-flow|ai` (default
+`off`). Python exposes `SeamMode.FIXED`, `DYNAMIC`, `OPTICAL_FLOW`, and `AI`
+through `StitchConfig(seam_mode=...)`; each member provides
+`unavailable_reason()`. Construction preserves an unavailable typed choice for
+inspection; export validates its execution prerequisites.
 
 `StitchConfig::rolling_shutter` selects
 `RollingShutterCorrection::{Auto,Off,Required}` (default `Auto`, also when
@@ -74,9 +99,53 @@ rebases the first encoded frame to timestamp zero.
 For interactive fisheye preview, `paired::PairedPreviewReader::frame_at` returns
 the first exact native A/B pair at or after a recording time. It accepts
 `PreviewAcceleration::Auto` or `Software`, runs each lens on its own bounded
-worker, and reuses random-seek resources. Continuous processing uses
-`paired::PairedReader` instead. See
+worker, and reuses decoder resources. `next_pair` continues with exact source
+samples without seeking, drains B-frames and crosses chapters. `seek_pair`
+returns `None` after the last sample, distinguishing EOF from decode errors.
+Packed sources retain one decoder. Export may use the single-demux
+`paired::PairedReader`; interactive continuous playback can keep the same
+`PairedPreviewReader` used for seeking. See
 [recording sequences](recording-sequences.md).
+
+Continuous hosts may call `prefetch_next(cancel)` before rendering their current
+pair. It starts one decode and host transfer on each existing lens worker, so
+preparing the next CPU-readable pair overlaps processing the retained pair.
+Repeated calls are idempotent; `next_pair` consumes the pending pair with the
+same exact PTS checks. Seeks, cancelled reads and reader destruction drain both
+replies. Packed inputs keep their synchronous single-decoder path. Prefetch
+never changes retained source pixels or supplies an application playback clock.
+
+For playback cadence or clock catch-up, `next_selected_pair(selection, cancel)`
+accepts `paired::PreviewSelection`. Its nonzero `advance` counts actual next
+pairs, then its optional `not_before: Duration` advances to the first pair at or
+after that recording time. An available final candidate survives EOF; an initial
+EOF returns `None`. This is the same selection as repeated `next_pair` calls,
+including errors for skipped pairs with missing or mismatched lenses. Lens
+synchronization uses exact native PTS; `not_before` uses the pair's microsecond
+display timestamp. Every returned pair remains CPU-readable.
+
+Selection preserves decoding dependencies but avoids hardware-to-host transfers
+for additional discarded candidates. The one eager prefetched pair may already
+have been copied. `decode_stats()` returns cumulative `PreviewDecodeStats`
+without changing selection or adding per-frame logging:
+
+| Counter                      | Meaning                                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `validated_pairs`            | Exact pairs accepted before selection, including skipped candidates.                                        |
+| `materialized_pairs`         | Selected pairs returned with CPU-readable pixels.                                                           |
+| `speculative_pairs`          | Completed eager-prefetch pairs consumed or drained, including discarded pairs.                              |
+| `hardware_transfer_attempts` | Hardware frame transfers attempted on either lens worker, including speculative copies and failed attempts. |
+
+Codec preroll is excluded. Prefetch counters become visible only after worker
+replies are consumed or drained; discarding prefetch does not validate its pair.
+Seeks retain cumulative counters. Software and packed paths have zero hardware
+transfers, so `PreviewAcceleration::Auto` alone does not prove hardware use.
+
+`RecordingFrameRenderer::render_continuous` uses a shared CPU pool capped at
+four Rayon workers for seam preparation. Ordinary `render`, `render_strict`,
+standalone `StitchPlanner` calls and file exports retain their usual scheduling.
+This changes the interactive work budget only; prepared geometry and exact-pair
+Save behavior are unchanged. No pool is initialized for Fixed stitching.
 
 ## Reusable exact-frame processing
 
@@ -331,3 +400,44 @@ requires `underwater-ai` and `MNN_ROOT` during build. Off is the default and
 does not load assets. Invalid frame lengths/timestamps fail before mutating
 pixels or state. See [housings](housings.md) for limits, defaults and source
 evidence.
+
+## Continuous preview rendering
+
+`NativeColorProcessor::process_continuous(pair, width, cancel)` and
+`RecordingFrameRenderer::render_continuous(pair, projection, cancel)` process
+borrowed exact pairs for a continuous preview. They neither decode nor seek.
+Each native lens retains an independent restoration session; the second lens
+session is allocated only when continuous processing is used. Panorama
+processing retains its own history alongside reusable projection resources.
+
+Call `reset_continuous()` before a seek or other source discontinuity. Both
+renderers automatically reset for non-increasing PTS, chapter or output-size
+changes, and failed/cancelled continuous frames. Reset retains loaded models and
+working buffers. Typed Auto GPU fallback resets the unpublished frame's color
+state before CPU retry. The existing `process`, `render` and `render_strict`
+methods continue to produce independent still images; file export's existing
+reference processing policy is unchanged.
+
+Output dimensions are per-call inputs to these retained renderers. Adaptive
+preview resizing keeps verified restoration assets, AI model sessions and fixed
+inference tensors; Legacy resizes its image scratch while retaining the LUT.
+Dimensions are validated before changing the active session, and the first
+resized frame starts with fresh temporal state. Hosts should keep a renderer
+when only preview size changes and recreate it when processing options change.
+
+The new `UnderwaterColorSession::process_rgb8_continuous` uses source PTS and
+frame rate to advance temporal smoothing and AI inference intervals across
+frames omitted from preview presentation. Legacy smoothing exponentiates its
+per-source-frame decay by elapsed frames. AI retains its 10-source-frame LUT and
+60-source-frame feature intervals, performs at most one update per presented
+frame, and adjusts LUT smoothing for elapsed source time. The existing
+`process_rgb8` keeps per-processed-frame reference behavior. Changing policy or
+resetting the session clears history. Reduced-resolution preview and dropped
+frames can still produce different color from full-resolution export.
+
+Tests compare native output with independent lens sessions, panorama output with
+a separate restoration session, retained history with independent stills,
+reset/policy behavior, skipped-frame smoothing and AI update cadence. Existing
+reference-image and file-export tests remain required. These checks establish
+temporal ownership and timing contracts; they do not establish 4K60 throughput,
+physical-GPU performance or real-camera visual qualification.

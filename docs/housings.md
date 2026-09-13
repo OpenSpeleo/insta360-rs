@@ -76,6 +76,29 @@ is not converted twice. Per-unit principal points, extrinsics and non-radial
 distortion remain unchanged. The target mirror parameter and radial fit come
 from the first lens; each lens retains its own measured source scale.
 
+Both standard and Pro conversion select their physical polynomial by lens ID,
+using each lens's measured bare calibration to recover its physical-to-pixel
+scale. A named metadata descriptor is not a replacement for that lookup. In
+Studio 5.9.10 ARM64, `getV6DistortAndFocalFromLens` at `0x101838264` calls
+`getCoeff` at `0x101166e24` through `0x101838340`. Its dispatch table at
+`0x1036ff1ac` selects standard water 117 at `0x101167a3c`. That branch reads
+`[0, 0.03072, 2.395e-5, 6.076e-8, -2.092e-9]`, identical to iOS SDK 1.10.4. The
+source 113 lookup matches the recorded bare coefficients. There is no
+metadata-descriptor override in that path.
+
+The standard X5 recording metadata fixture
+[`x5-standard-underwater-20260823.json`](../tests/fixtures/x5-standard-underwater-20260823.json)
+retains the exact V6 calibration, relevant original profile bytes, sensor crop,
+source identity and sparse physical-rim annotations at 231.014117 seconds. Its
+embedded `InvisibleDiveWater` polynomial evaluates to 2.92759078 at 90°, whereas
+native 117 evaluates to 2.86583292. Using the descriptor moved the projected
+boundary outward enough to include visible housing. With the native curve,
+source pixel (650, 2500) changes from full support to zero in both 2880-square
+lens masks; independently selected scene points remain supported. The regression
+also checks a 65-decimal independent reference fit, preservation of measured
+residual distortion/extrinsics and sphere coverage. Sparse source annotations do
+not certify the entire contour or equivalence to Studio export.
+
 Standard housing Objective-C defaults provide full FOV 190/200 and blend 186.
 For Pro, the inspected iOS template pipeline initializes overlap to 10 degrees;
 `getLeftSphereAlpha` divides it into two 5-degree seam half-widths, represented
@@ -161,11 +184,13 @@ rejected. Legacy defaults to strength 0.8/balance 0.5; AI defaults to strength
 1/style 0. Strength zero preserves input bytes.
 
 The FFmpeg export layer applies restoration to the stitched RGB8 panorama after
-any requested I-Log conversion. GPU stitching remains available, but enabled
-restoration uses RGB readback and CPU processing instead of direct YUV output.
-Restoration never changes projected coordinates, source selection or seam
-ownership. Color changes can still affect photometric matching, so the
-underwater photogrammetry preset leaves restoration off.
+any requested I-Log conversion. Legacy restoration uses RGB readback and CPU
+processing. AI restoration on the GPU applies its integer LUT before output
+conversion, retaining direct YUV output; scheduled model updates read back only
+the analysis image for CPU inference. CPU rendering uses the corresponding CPU
+restoration path. Restoration never changes projected coordinates, source
+selection or seam ownership. Color changes can still affect photometric
+matching, so the underwater photogrammetry preset leaves restoration off.
 
 The core `underwater::UnderwaterColorSession` API has no FFmpeg dependency.
 Prepare it once with options, dimensions, a positive rational frame rate and an
@@ -258,12 +283,81 @@ non-finite outputs become typed errors. Models are exclusively owned by one job,
 can move between threads, and cannot run concurrently through shared access. No
 Rust buffer pointer is retained by native code.
 
+AquaVision models 197 and 198 execute with one CPU thread in their owning
+session; seam model 213 also retains one thread. Models and tensors are reused,
+and high-precision inference is unchanged. The GPU renderer accelerates pixel
+processing separately. This policy avoids synchronization through MNN's shared
+spin/yield worker pool. Multithreaded sessions showed severe latency spikes
+under contention on the tested host; this does not establish that one thread is
+fastest on every machine or isolate the operating system's scheduling
+contribution.
+
+Fresh-process release measurements on the contended macOS ARM64 host gave
+one-thread medians of 4.68 ms for feature extraction and 13.36 ms for preset
+inference at 1280×640, with a 35.87 ms maximum preset sample. Two-thread feature
+extraction had a 1766 ms median at that size. Four-thread preset inference at
+2560×1280 had a 306.85 ms median and an 825.46 ms maximum. These phase timings
+justify prioritizing predictable update latency on this host; they are not
+application FPS measurements or an isolated-host performance guarantee.
+
+The diagnostic phase benchmark retains explicit one-, two- and four-thread
+budgets and constructs each model only once outside timed inference. Each budget
+must run in a fresh process with `INSTA360_BENCH_CPU_THREADS`: MNN's
+[process-global CPU worker pool](https://github.com/alibaba/MNN/blob/d407447ed56c4121a11ccbd266dc184ca1ead0c2/source/backend/cpu/ThreadPool.cpp)
+keeps the size of its first multithreaded session and clamps later larger
+requests. The benchmark reports and asserts the runtime's effective thread
+counts for both models. Sequential same-process labels are insufficient;
+end-to-end latency must also be checked before changing the production budget.
+
+MNN can select different FP32 convolution algorithms for different thread
+budgets, so high precision does not guarantee identical floating-point results.
+Small changes at byte-rounding thresholds can change a quantized LUT entry. One-
+versus four-thread regression tests preserve the complete tensor tolerance
+(`0.0005 + abs(reference) * 0.0005`), exact style selection and inference
+cadence, and a maximum difference of one byte per LUT or restored RGB channel
+across all four styles and both temporal schedules. Integer tetrahedral
+interpolation does not amplify the maximum vertex difference. This numerical
+contract is separate from byte-exact CPU/GPU pixel processing when both use the
+same prepared LUT. The numerical session comparison and complete model reference
+test each run as an exact ignored-test selector in a fresh process during
+shipping checks. They create the maximum four-thread session first and assert
+effective thread counts; running them amid unrelated session-creation tests
+could reuse a smaller pool.
+
 Tests cover original/decoded identities, malformed resources, channel order, all
 six tetrahedral branches, independent scalar arithmetic and MNN tensor reference
 values, all four styles, temporal updates/reset, invalid public options and
 stable AI buffer allocations across repeated frames. These tests establish those
 contracts. Full numerical parity with Studio exports, real underwater recordings
 and physical GPU paths has not been demonstrated.
+
+### GPU pixel processing and CPU fallback
+
+With `media,gpu,underwater-ai`, the media renderer uses the same prepared neural
+session for GPU and CPU restoration. GPU stitching retains its quantized RGB
+pixels, applies the exact integer tetrahedral LUT, and then packs RGB or
+converts to encoder-ready BT.709 YUV. Only model-update frames read back the
+exact 224×224 analysis image (150,528 bytes). MNN inference and LUT preparation
+remain on CPU; selecting a GPU renderer does not imply neural GPU execution.
+
+The GPU resize uses the same CPU-generated 11-bit axis weights as the reference
+resize. Its integer shader preserves tetrahedral branch ties, signed division
+toward zero, channel order and output quantization. Frame dimensions, LUT
+buffers, bindings and unchanged LUT contents are reused. A borrowed restoration
+transaction commits after successful output readback; abandoning a frame resets
+its history without reopening models. This supports an unpublished Auto-backend
+CPU retry.
+
+The CPU path dispatches once per image to specialized step-4 or step-16 LUT
+kernels, uses bounded Rayon blocks, and caches the identity grid's Lab
+luminance. Small images avoid parallel dispatch overhead. Legacy restoration
+keeps its algorithm and CPU RGB path. Neither backend changes inference cadence,
+smoothing, model precision or selected style/strength for performance.
+
+GPU byte comparisons, temporal transaction tests and media RGB/YUV integration
+tests qualify these implementation contracts separately from visual Studio
+parity. Benchmark model phases and pixel application separately, then measure
+advancing frames through the consuming application's decode/display pipeline.
 
 ### Classifier evidence
 

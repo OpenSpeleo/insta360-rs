@@ -180,7 +180,7 @@ def check_sdist(path, destination):
     manifests = list(root.rglob("src-rust/assets/model-bundle.json"))
     require(len(manifests) == 1, "Source distribution must have one asset manifest")
     manifest = manifests[0]
-    # Payloads live in five transitive data crates. Verify the complete bundle
+    # Payloads live in six transitive data crates. Verify the complete bundle
     # without depending on Maturin's directory layout for path dependencies.
     data_manifests = [
         (path, json.loads(path.read_text()))
@@ -190,6 +190,7 @@ def check_sdist(path, destination):
     payload_roots = []
     for name in (
         "insta360-rs-data-core",
+        "insta360-rs-data-ai-stitch-video",
         "insta360-rs-data-enhancement",
         "insta360-rs-data-underwater-model-a",
         "insta360-rs-data-underwater-model-b",

@@ -386,8 +386,34 @@ impl Default for BackendReport {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SeamMode {
+    /// Calibrated fixed geometry without adaptive seam optimization.
     #[default]
     Fixed,
+    /// Sparse feature tracking refines alignment within the calibrated overlap.
+    Dynamic,
+    /// Dense optical flow refines alignment within the calibrated overlap.
+    OpticalFlow,
+    /// Verified camera-model inference refines alignment within the overlap.
+    Ai,
+}
+
+impl SeamMode {
+    /// Returns a build/qualification limitation without opening a model or device.
+    /// Source geometry and runtime resources are checked by renderer preparation.
+    pub fn unavailable_reason(self) -> Option<&'static str> {
+        match self {
+            Self::Fixed | Self::Dynamic | Self::OpticalFlow => None,
+            Self::Ai => crate::seam_ai::unavailable_reason(),
+        }
+    }
+
+    /// Rejects unavailable algorithms before media preparation or output creation.
+    pub fn validate_capabilities(self) -> crate::Result<()> {
+        match self.unavailable_reason() {
+            Some(reason) => Err(crate::Error::MissingCapability(reason.into())),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

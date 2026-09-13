@@ -113,6 +113,15 @@ A preview request after a chapter's last presented frame advances to the first
 available pair in following chapters. Both lenses must reach EOF together;
 unmatched frames and decode errors remain failures.
 
+`next_selected_pair` applies an actual-pair advance count and optional playback
+clock after validating each candidate. It preserves the final candidate at EOF
+and still rejects invalid skipped pairs. Additional discarded hardware frames
+stay in native memory; public results are downloaded on the original lens
+workers. The ordinary `next_pair` and bounded `prefetch_next` paths retain eager
+host transfer for overlap with current-frame rendering. See the
+[public selection and diagnostics contract](public-api.md) for clock precision
+and cumulative counter semantics.
+
 Tests generate independent ISO-BMFF/ExtraInfo fixtures for metadata discovery
 and small MPEG-4 dual-track recordings with delayed frames for decode, chapter
 joins, seek, and cancellation. Native rational tests include distinct timestamps

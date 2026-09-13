@@ -837,8 +837,9 @@ Recognized names include `bare`, `BareUnderwater`, `ProtectorA`, `ProtectorS`,
 does not prove that the accessory was installed; explicit recorded capture state
 or a deliberate caller selection determines the requested setup.
 
-The project can convert X5 V6 calibration to bare air, dive-case water, or
-dive-case air when both required polynomial profiles are available. Other
+The project can convert supported X5 V6 calibration to bare air, dive-case
+water, or dive-case air using registered native lens-ID curves. Named metadata
+profiles are preserved for inspection and do not override those curves. Other
 configurations require an already suitable calibration or an explicit
 unsupported result. A parsed profile is not sufficient evidence that every
 conversion is implemented.
@@ -1102,7 +1103,7 @@ and end-to-end media export are separate support levels.
 | Complete BMFF demuxing                         | Delegated to the media decoding path; the bounded inspector is not a sample-table validator                                                                     |
 | Calibration parsing                            | Two-lens V1, V2, V3, V6                                                                                                                                         |
 | CPU/GPU projection                             | V1, V2, V3, V6 subject to registered lens geometry and valid model normalization                                                                                |
-| Accessory conversion                           | Verified V6 routes for X5, X4, X4 Air supplier lenses and X6; embedded profiles are required for the X5 standard route; see [housing contracts](housings.md)    |
+| Accessory conversion                           | Verified V6 routes for X5, X4, X4 Air supplier lenses and X6; X5 standard and Pro routes use native lens-ID curves; see [housing contracts](housings.md)        |
 | Primary gyro                                   | Common and packed raw V3 samples; explicit raw flag required                                                                                                    |
 | Exposure                                       | Flat V3 primary and secondary payload decoders                                                                                                                  |
 | Frame PTS, GPS, secondary IMU, other telemetry | Raw record access; no complete typed processing path                                                                                                            |

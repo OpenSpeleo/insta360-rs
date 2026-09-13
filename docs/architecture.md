@@ -33,8 +33,9 @@ INSV → bounded container parser → camera registry + calibration/profile reso
 - `optics` keeps housing, environment, lens accessory and mount independent,
   with requested/detected/effective reports.
 - `underwater` owns reusable scalar Legacy and optional independent MNN AI
-  sessions. Restoration changes RGB values after stitching without moving
-  pixels.
+  sessions. Media preview resizing retains verified assets and fixed AI models,
+  adjusts image-dependent scratch and resets temporal history. Restoration
+  changes RGB values after stitching without moving pixels.
 - `color` verifies and parses bundled 3D CUBEs and applies trilinear RGB color
   transforms. `media` selects the X5 I-Log table from recording metadata and
   configures the CPU or GPU export session.
@@ -65,7 +66,7 @@ INSV → bounded container parser → camera registry + calibration/profile reso
 The main media layers return the crate's typed `Error`; optional assets use the
 more specific `AssetError`. Vendor binaries are static evidence or external test
 oracles and are never loaded by the production library. Licensed data assets are
-embedded by the five data crates and served through `BundledAssetProvider`;
+embedded by the six data crates and served through `BundledAssetProvider`;
 applications can also provide external bundles.
 
 ## Calibration policy
@@ -124,13 +125,22 @@ Linux through `wgpu`. It retains a device, queue, compiled pipelines, textures,
 buffers, and bindings across equal-size frames. Its current data flow is:
 
 ```text
-software FFmpeg decode to retained AVFrames
-  -> direct YUV420P plane upload, or CPU RGB conversion for another format
+FFmpeg decode to retained AVFrames (software export / optional hardware preview)
+  -> direct YUV420P or NV12 plane upload, or CPU RGB conversion for another format
   -> GPU radiometric passes + projection/mask/seam/two-band blend
-  -> RGB readback for stills
+  -> GPU RGB24 byte packing + bulk RGB readback for stills/preview
      or GPU RGB-to-YUV420 + YUV readback/copy into an FFmpeg frame for video
   -> software or hardware HEVC encoder selected by MediaAcceleration
 ```
+
+Packed RGB source images use bulk storage-buffer uploads and a GPU expansion
+pass into the existing RGBA8 sampling textures. Row strips bound the upload
+buffer size without imposing a new full-image storage limit. Direct YUV/NV12
+uploads and the media layer's fallback color/precision conversion are unchanged.
+
+RGB packing discards alpha from the already-quantized pixel words using only
+integer operations. It preserves exact RGB8 values and the existing panorama and
+restoration interfaces without introducing a media dependency into `gpu`.
 
 GPU submission and readback are synchronous and use one reusable resource set,
 so decode, compute, readback, and encode do not yet overlap. Export decoding

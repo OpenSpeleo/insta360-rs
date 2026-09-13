@@ -54,12 +54,19 @@ Keep the normal path small:
   re-encoding. Cuts keep complete packets; a silent source stays silent. See
   [sequence stitching](sequence-stitching.md) for boundary rules.
 
-Seam mode remains fixed in 0.1. The X5 fixed mode automatically uses calibrated
-optical validity, a sharp high-frequency seam, and adaptive low-frequency color
-compensation. Dynamic/AI stitching and automatic accessory classification have
-asset-loading policies but are not reported as available settings until their
-preprocessing, inference, and temporal geometry are qualified for
-photogrammetry.
+`StitchConfig::seam_mode` offers `Fixed` (default), `Dynamic`, `OpticalFlow`,
+and `Ai`. Fixed uses calibrated optical validity, the fixed high-frequency seam,
+and low-frequency color compensation. Adaptive modes adjust local overlap
+alignment independently of housing, processor selection and underwater color.
+`SeamMode::unavailable_reason()` reports build/qualification restrictions before
+model or device initialization; renderer preparation validates actual inputs and
+runtime prerequisites. Unsupported explicit choices fail without substituting a
+different algorithm. Algorithm names do not establish Studio pixel parity or
+photogrammetry suitability. Keep Fixed for geometry-sensitive reconstruction.
+
+CLI: `--stitching-optimization off|dynamic|optical-flow|ai`. Python:
+`StitchConfig(seam_mode=SeamMode.FIXED)` or `DYNAMIC`, `OPTICAL_FLOW`, `AI`;
+`SeamMode.AI.unavailable_reason()` reports its build support.
 
 ## Underwater photogrammetry preset
 

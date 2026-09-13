@@ -5,6 +5,9 @@
 //! channel as the fastest dimension; they are not interchangeable with CUBE LUTs.
 
 use crate::{Error, Result};
+use rayon::prelude::*;
+
+const BLOCK_BYTES: usize = 4096 * 3;
 
 #[derive(Clone, Debug)]
 pub(crate) struct IntegerLut {
@@ -14,6 +17,76 @@ pub(crate) struct IntegerLut {
 }
 
 impl IntegerLut {
+    #[cfg(all(
+        feature = "underwater-ai",
+        any(test, all(feature = "gpu", feature = "media"))
+    ))]
+    pub(super) fn entries(&self) -> &[[u8; 3]] {
+        &self.table
+    }
+
+    /// Applies an RGB table to packed RGB pixels without allocating a frame.
+    #[cfg(any(feature = "underwater-ai", test))]
+    pub(crate) fn apply_rgb8(&self, pixels: &mut [u8]) {
+        self.apply::<false>(pixels);
+    }
+
+    /// Legacy ILUT coordinates and results are BGR; public pixels stay RGB.
+    pub(crate) fn apply_bgr_table_to_rgb8(&self, pixels: &mut [u8]) {
+        self.apply::<true>(pixels);
+    }
+
+    fn apply<const REVERSE: bool>(&self, pixels: &mut [u8]) {
+        // Dispatch once per frame. Both shipped grids have power-of-two steps;
+        // their terminal vertices also make per-corner clamping unnecessary.
+        match self.step {
+            4 => apply_pixels::<REVERSE>(pixels, |rgb| self.sample_power_of_two::<2, 65>(rgb)),
+            16 => apply_pixels::<REVERSE>(pixels, |rgb| self.sample_power_of_two::<4, 17>(rgb)),
+            _ => apply_pixels::<REVERSE>(pixels, |rgb| self.sample(rgb)),
+        }
+    }
+
+    #[inline]
+    fn sample_power_of_two<const SHIFT: u32, const EDGE: usize>(&self, input: [u8; 3]) -> [u8; 3] {
+        let [x, y, z] = input.map(|value| usize::from(value) >> SHIFT);
+        let [dx, dy, dz] = input.map(|value| i32::from(value) & ((1 << SHIFT) - 1));
+        let origin = (x * EDGE + y) * EDGE + z;
+        let sx = EDGE * EDGE;
+        let sy = EDGE;
+        let (first_offset, second_offset, fractions) = if dx > dy {
+            if dy > dz {
+                (sx, sx + sy, [dx, dy, dz])
+            } else if dx > dz {
+                (sx, sx + 1, [dx, dz, dy])
+            } else {
+                (1, sx + 1, [dz, dx, dy])
+            }
+        } else if dx > dz {
+            (sy, sx + sy, [dy, dx, dz])
+        } else if dy > dz {
+            (sy, sy + 1, [dy, dz, dx])
+        } else {
+            (1, sy + 1, [dz, dy, dx])
+        };
+        let a = self.table[origin];
+        let b = self.table[origin + first_offset];
+        let c = self.table[origin + second_offset];
+        let d = self.table[origin + sx + sy + 1];
+        std::array::from_fn(|channel| {
+            let delta = (i32::from(b[channel]) - i32::from(a[channel])) * fractions[0]
+                + (i32::from(c[channel]) - i32::from(b[channel])) * fractions[1]
+                + (i32::from(d[channel]) - i32::from(c[channel])) * fractions[2];
+            // Constant signed division is optimized without changing truncation
+            // toward zero. A plain arithmetic shift would round negatives down.
+            (i32::from(a[channel]) + delta / (1_i32 << SHIFT)).clamp(0, 255) as u8
+        })
+    }
+
+    /// Stable test identity for the retained verified lookup allocation.
+    #[cfg(test)]
+    pub(super) fn allocation_identity(&self) -> usize {
+        self.table.as_ptr() as usize
+    }
     pub(crate) fn blended(&self, strength: f32) -> Self {
         let mut table = Vec::with_capacity(self.table.len());
         for x in 0..self.edge {
@@ -132,6 +205,32 @@ impl IntegerLut {
     }
 }
 
+fn apply_pixels<const REVERSE: bool>(
+    pixels: &mut [u8],
+    sample: impl Fn([u8; 3]) -> [u8; 3] + Sync,
+) {
+    let apply_block = |block: &mut [u8]| {
+        for pixel in block.chunks_exact_mut(3) {
+            let input = if REVERSE {
+                [pixel[2], pixel[1], pixel[0]]
+            } else {
+                [pixel[0], pixel[1], pixel[2]]
+            };
+            let result = sample(input);
+            if REVERSE {
+                pixel.copy_from_slice(&[result[2], result[1], result[0]]);
+            } else {
+                pixel.copy_from_slice(&result);
+            }
+        }
+    };
+    if pixels.len() < BLOCK_BYTES * 2 {
+        apply_block(pixels);
+    } else {
+        pixels.par_chunks_mut(BLOCK_BYTES).for_each(apply_block);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +249,197 @@ mod tests {
             }
         }
         bytes
+    }
+
+    fn nonlinear_table(step: u32) -> IntegerLut {
+        IntegerLut::parse(&fixture(step, |x, y, z| {
+            [
+                ((x * 73 + y * 151 + z * 29) ^ (x * y * 11)) as u8,
+                ((x * 113 + y * 17 + z * 197) ^ (y * z * 7)) as u8,
+                ((x * 23 + y * 199 + z * 61) ^ (x * z * 13)) as u8,
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn optimized_grids_match_scalar_all_fractions_edges_and_channel_orders() {
+        for step in [4, 16] {
+            let lut = nonlinear_table(step);
+            let last_base = 256 / step - 1;
+            for base in [[0, 0, 0], [1, last_base, 2], [last_base; 3]] {
+                let mut inputs = Vec::new();
+                for dx in 0..step {
+                    for dy in 0..step {
+                        for dz in 0..step {
+                            inputs.extend(
+                                [
+                                    base[0] * step + dx,
+                                    base[1] * step + dy,
+                                    base[2] * step + dz,
+                                ]
+                                .map(|v| v as u8),
+                            );
+                        }
+                    }
+                }
+                for reverse in [false, true] {
+                    let mut actual = inputs.clone();
+                    if reverse {
+                        lut.apply_bgr_table_to_rgb8(&mut actual);
+                    } else {
+                        lut.apply_rgb8(&mut actual);
+                    }
+                    for (input, output) in inputs.chunks_exact(3).zip(actual.chunks_exact(3)) {
+                        let rgb = [input[0], input[1], input[2]];
+                        let expected = if reverse {
+                            let [b, g, r] = lut.sample([rgb[2], rgb[1], rgb[0]]);
+                            [r, g, b]
+                        } else {
+                            lut.sample(rgb)
+                        };
+                        assert_eq!(output, expected, "step{step} input{rgb:?} reverse{reverse}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_vertex_changes_do_not_amplify_in_integer_interpolation() {
+        // Each tetrahedron has nonnegative integer weights totaling the step.
+        // The sampler is monotone in every vertex and commutes with a uniform
+        // integer offset, even with signed truncation. Thus a per-vertex bound
+        // also bounds every sampled channel; exercise ties and negative slopes.
+        for step in [4, 16] {
+            let original = nonlinear_table(step);
+            let mut changed = original.clone();
+            for (index, entry) in changed.table.iter_mut().enumerate() {
+                for (channel, value) in entry.iter_mut().enumerate() {
+                    *value = if (index + channel) % 2 == 0 {
+                        value.saturating_add(1)
+                    } else {
+                        value.saturating_sub(1)
+                    };
+                }
+            }
+            let last_base = 256 / step - 1;
+            let mut different = 0;
+            for base in [[0, 0, 0], [1, last_base, 2], [last_base; 3]] {
+                let mut first = Vec::new();
+                for dx in 0..step {
+                    for dy in 0..step {
+                        for dz in 0..step {
+                            first.extend(
+                                [
+                                    base[0] * step + dx,
+                                    base[1] * step + dy,
+                                    base[2] * step + dz,
+                                ]
+                                .map(|value| value as u8),
+                            );
+                        }
+                    }
+                }
+                let mut second = first.clone();
+                original.apply_rgb8(&mut first);
+                changed.apply_rgb8(&mut second);
+                for (index, (&first, &second)) in first.iter().zip(&second).enumerate() {
+                    let delta = first.abs_diff(second);
+                    assert!(
+                        delta <= 1,
+                        "step {step}, base {base:?}, channel {index}: {delta}"
+                    );
+                    different += usize::from(delta != 0);
+                }
+            }
+            assert!(
+                different > 0,
+                "step {step}: fixture must alter sampled colors"
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_application_matches_scalar_across_block_tails_and_generic_steps() {
+        for step in [4, 16, 10, 128] {
+            let lut = nonlinear_table(step);
+            for count in [0, 1, 4095, 4096, 4097, 8192, 12301] {
+                let input: Vec<u8> = (0..count)
+                    .flat_map(|i| [i as u8, (i * 71 + 43) as u8, (i * 13 + 97) as u8])
+                    .collect();
+                let mut actual = input.clone();
+                lut.apply_rgb8(&mut actual);
+                for (rgb, output) in input.chunks_exact(3).zip(actual.chunks_exact(3)) {
+                    assert_eq!(
+                        output,
+                        lut.sample([rgb[0], rgb[1], rgb[2]]),
+                        "step{step}, count{count}, input{rgb:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "exhaustive 24-bit color-domain qualification; run explicitly in release mode"]
+    fn exhaustive_optimized_grids_match_scalar_byte_domain() {
+        for step in [4, 16] {
+            let lut = nonlinear_table(step);
+            for r in 0..=255_u8 {
+                let input: Vec<u8> = (0..=255_u8)
+                    .flat_map(|g| (0..=255_u8).flat_map(move |b| [r, g, b]))
+                    .collect();
+                let mut actual = input.clone();
+                lut.apply_rgb8(&mut actual);
+                for (rgb, output) in input.chunks_exact(3).zip(actual.chunks_exact(3)) {
+                    assert_eq!(
+                        output,
+                        lut.sample([rgb[0], rgb[1], rgb[2]]),
+                        "step{step}, input{rgb:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "performance diagnostic; run serially in release mode with --nocapture"]
+    fn benchmark_integer_lut_application() {
+        use std::{hint::black_box, time::Instant};
+        for step in [4, 16] {
+            let lut = nonlinear_table(step);
+            for (width, height) in [(1280, 640), (2560, 1280)] {
+                let input: Vec<u8> = (0..width * height)
+                    .flat_map(|i| [i as u8, (i * 71 + 43) as u8, (i * 13 + 97) as u8])
+                    .collect();
+                let mut pixels = input.clone();
+                for optimized in [false, true] {
+                    let mut times = Vec::new();
+                    for round in 0..13 {
+                        pixels.copy_from_slice(&input);
+                        let start = Instant::now();
+                        if optimized {
+                            lut.apply_rgb8(&mut pixels);
+                        } else {
+                            // The previous AquaVision loop, including its Rayon granularity.
+                            pixels.par_chunks_exact_mut(3).for_each(|rgb| {
+                                rgb.copy_from_slice(&lut.sample([rgb[0], rgb[1], rgb[2]]));
+                            });
+                        }
+                        black_box(&pixels);
+                        if round >= 3 {
+                            times.push(start.elapsed().as_secs_f64() * 1000.0);
+                        }
+                    }
+                    times.sort_by(f64::total_cmp);
+                    println!(
+                        "{}",
+                        serde_json::json!({"benchmark":"integer_lut", "step":step,"width":width,"height":height,"optimized":optimized,"median_ms":times[times.len()/2],"samples_ms":times})
+                    );
+                }
+            }
+        }
     }
 
     #[test]

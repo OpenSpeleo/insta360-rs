@@ -1,5 +1,37 @@
 # Performance
 
+## Processing performance boundaries
+
+GPU projection, seam analysis and underwater restoration are separate stages.
+The renderer applies the AquaVision integer LUT on GPU and reads back only a
+224×224 analysis image when its CPU neural session needs an update. The final
+RGB/YUV output is still read back; native decoder-surface import is not implied.
+See
+[restoration architecture](housings.md#gpu-pixel-processing-and-cpu-fallback).
+
+Seam analysis shares image pyramids, caches integer reference gradients,
+combines chroma support/interpolation, and prepares grayscale/validity in one
+pass. Parallel aggregation owns separate output rows and preserves each pixel's
+scalar accumulation order. Dense gradient caches add bounded memory, while
+removal of full projected-sample intermediate arrays reduces the larger
+temporary allocation. Dense Jacobi neighbors use an exact integer lookup,
+preserving the original confidence multiplication/division and signed-zero
+normalization. Image indexing avoids modulo for interior columns while retaining
+azimuth wrapping. Full scalar reference regressions cover the five refinement
+passes and boundary cases.
+
+The ignored `benchmark_aquavision_phases` and
+`benchmark_integer_lut_application` tests report model/preprocessing/LUT costs
+and compare CPU thread budgets. Each neural budget must run in a fresh process
+with its effective MNN count checked; the process-global pool cannot grow after
+initialization. The ignored `benchmark_dense_integer_neighbors` alternates the
+scalar and integer samplers over the same field without asserting a timing
+bound. Use the consuming project's normal native bootstrap and explicit
+dev/release benchmark profile. Run native measurements serially, record
+competing work, retain source/output dimensions, and measure feature
+combinations on advancing frames. A same-pair stitch loop does not establish
+interactive playback FPS or actual webview presentation.
+
 ## Historical version 0.1.0 benchmarks (2026-09-09)
 
 These measurements predate the corrected Pro lens ID, sensor-crop mapping and
@@ -58,12 +90,42 @@ contribute.
 
 The opt-in `wgpu` renderer now moves radiometric estimation, projection,
 sampling, mask/seam evaluation, two-band blending, and video RGB-to-YUV420
-conversion to GPU compute. It uploads decoded YUV420P directly; unsupported
-decoded formats first pass through CPU `swscale` to RGB. Frame-size-dependent
-GPU resources are cached and reused. Reapplying the same shared color LUT or
-leaving it disabled preserves that cache. Hosts should retain preview renderers
-across view changes rather than reconstructing their mask, motion and color
-state for each frame.
+conversion to GPU compute. It uploads decoded YUV420P and 8-bit NV12 directly;
+NV12 uses R8 luma and RG8 interleaved chroma textures with decoded row strides.
+This avoids full-resolution RGB conversion and scalar RGB-to-RGBA packing for
+hardware-decoded preview frames. Source surfaces still transfer to CPU memory
+before upload; this is not native GPU surface sharing. P010 and unsupported
+decoded/color layouts retain the existing CPU `swscale` RGB fallback.
+
+Packed RGB inputs, including the result of that fallback, upload as unchanged
+RGB24 bytes into reusable storage buffers. A GPU pass expands them into sampled
+RGBA8 textures with opaque alpha. There is no full-source CPU pixel-packing
+loop: CPU work copies contiguous bytes and pads at most three trailing bytes.
+Uploads use row strips bounded by the device storage limit; each strip is
+submitted before the next write reuses its buffer. The final stitch waits by
+queue order, without CPU waits between strips. Pending wgpu staging copies can
+span several strips within the current frame; the final frame wait prevents them
+from accumulating across frames. This preserves P010 conversion semantics; it
+does not add direct high-bit-depth texture support.
+
+RGB still/preview readback uses a GPU byte-packing pass: four quantized RGBA
+pixels become three RGB24 words, followed by one bulk CPU copy. This removes
+per-pixel Rust packing from the readback path, including unoptimized development
+builds, without changing color rounding or restoration input. The final partial
+block is padded only inside the GPU buffer; public RGB8 has no padding. The
+packed output/readback buffers are shared by the selected RGB or YUV output
+mode, and frame-size-dependent GPU resources are cached and reused. Reapplying
+the same shared color LUT or leaving it disabled preserves that cache. Hosts
+should retain preview renderers across view changes rather than reconstructing
+their mask, motion and color state for each frame.
+
+Adaptive preview sizes also reuse restoration preparation. AI models consume
+fixed 224×224 and 256×256 tensors independently of preview dimensions, so a
+resize updates source dimensions and history while retaining model sessions,
+verified style data, LUT storage and all inference allocations. Legacy keeps its
+verified, strength-adjusted LUT and reuses scratch capacity for resized images.
+This avoids model/asset preparation during each adaptive tier transition. It
+does not remove inference or per-pixel restoration work from displayed frames.
 
 Source housing masks are prepared at decoded lens resolution even for a small
 panorama preview. The fixed-point distance transform uses separate forward and
@@ -227,11 +289,53 @@ Capacity-one channels and one returned native frame per lens bound application
 queues. Codec reference surfaces remain subject to the decoded-pixel bound. No
 proxy pictures or intermediate video files are generated.
 
+Opt-in `prefetch_next` overlaps one A/B decode and hardware-to-host transfer
+with the caller's current-frame render using these same workers. It retains at
+most one additional source pair, about 42.2 MiB for two 3840×3840 NV12 images,
+excluding codec reference surfaces and native padding. Hosts should request
+lookahead only during continuous playback; explicit seek and step work drains
+it. Packed inputs remain serial. The possible throughput improvement depends on
+decode/render resource contention and must be measured on the complete host
+pipeline.
+
 `PreviewAcceleration::Auto` selects supported FFmpeg hardware decoding and falls
 back to software when device/format setup or codec decoding is unavailable;
-`Software` provides a reference mode. Only requested hardware pictures transfer
-to CPU memory. Consumers own both native frame handles and should retain them
-for exact current-pair exports instead of re-seeking from rounded display time.
+`Software` provides a reference mode. Hardware transfer failures retry the
+selected frame in software using its exact native PTS, presentation origin and
+time base, then resume with its successor. Consumers own both native frame
+handles and should retain them for exact current-pair exports instead of
+re-seeking from rounded display time.
+
+Playback hosts that discard source frames for cadence or clock catch-up should
+use `next_selected_pair(PreviewSelection, cancel)`. All candidates are decoded
+with their codec references and validated as exact A/B pairs. Only the selected
+candidate needs a new host transfer; one eager prefetched candidate may already
+have been copied. This preserves ordinary next-frame decode/transfer overlap
+while removing transfers for additional discarded candidates. The selection
+retains a current candidate while obtaining the next pair, uses the existing two
+lens workers, and introduces no coordinator thread or unbounded queue. Packed
+inputs stay on their existing software path.
+
+`decode_stats()` reports validated candidates, returned CPU-readable pairs,
+consumed/drained speculative pairs, and hardware transfer attempts. It excludes
+codec preroll and defers prefetch accounting until replies are consumed or
+drained. Compare counter deltas with acknowledged host output and stage timing;
+fewer transfers do not imply fewer decoded frames or a guaranteed playback FPS.
+Selection tests compare native identities and active pixel bytes with repeated
+`next_pair` calls across gaps, B-frames, nonzero origins, reversed chapters and
+EOF, and reject mismatched candidates even when they would be discarded.
+
+Continuous preview seam preparation uses one lazily initialized, shared Rayon
+pool capped at four workers (or the available CPU count, if smaller). Its named
+workers run nested projection and correspondence tasks within that same pool.
+This bounds interactive CPU competition with decode, GPU submission and other
+applications without changing image sizes, solver thresholds or iteration
+counts. Standalone preparation, still rendering and file export retain the
+caller's normal Rayon scheduling; Fixed stitching initializes no preview pool.
+Failure to create the preview pool returns a capability error. The policy is
+selected per render, so returning from a continuous preview to a still does not
+retain the preview CPU budget. Tests compare every correction-vector bit and
+rendered byte across both scheduling policies, including AI when enabled.
 
 Random seeks preserve an extra indexed GOP for reordered streams. Streams that
 declare no B pictures use the preceding indexed keyframe directly. Non-reference
@@ -263,3 +367,12 @@ identities at five seeks, deinterleaving NV12 and excluding unspecified row
 padding. `Auto` can fall back to software, so a passing test establishes parity
 for the selected path; hardware qualification additionally requires independent
 evidence that a hardware decoder was used.
+
+The same fixture variable enables
+`configured_real_x5_selected_preview_matches_repeated_native_decoding`, which
+compares selection against repeated native reads and prints both readers'
+counters with `--nocapture`. Set `INSTA360_RS_PREVIEW_SAMPLE_START` to a
+recording time in seconds (default `0`) to qualify a particular scene. Both
+readers seek to that exact starting pair before applying the same selection
+sequence. Use this test's exact name as the test filter for shorter recordings;
+the separate five-seek parity test above includes a seek at 1199 seconds.

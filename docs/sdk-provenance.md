@@ -10,8 +10,8 @@ constants, and static-analysis evidence are outside this inventory.
 
 ## Copied resources
 
-The five data crates include **51 stored payloads from 50 original files,
-totaling 46,131,982 bytes** (about 44 MiB). The complete per-file inventory is
+The six data crates include **59 stored payloads from 58 original files,
+totaling 51,289,811 bytes** (about 49 MiB). The complete per-file inventory is
 [`src-rust/assets/model-bundle.json`](../src-rust/assets/model-bundle.json),
 including logical provider path, role, source release, original source path,
 byte length, and source/stored SHA-256 digests. Vendor source paths are relative
@@ -29,6 +29,7 @@ identify the application bundle.
 | Insta360 Studio 5.9.10 | `data/sharpen_param.json`                                                                                                               |     1 |
 | Insta360 Studio 5.9.10 | Two underwater neural models (one split into two original-byte parts), legacy ILUT, vector database, style manifest and four style PNGs |     9 |
 | Insta360 Studio 5.9.10 | `data/0e38bc62.xml` and `data/616ea2f7.xml` accessory models                                                                            |     2 |
+| Insta360 Studio 5.9.10 | Video AI stitching model 213 and its complete seven-file CoreML group                                                                   |     8 |
 
 Studio resources were copied from `Insta360 Studio.app/Contents/`. The three LUT
 filenames are `AcePro2_I-Log_To_Rec.709_V1.0.cube`, `Luna_I-Log_to_Rec709.cube`,
@@ -55,10 +56,19 @@ Every copied payload was compared against its original source bytes. Bundled
 provider tests verify all manifest lengths and hashes, parse the SVM XMLs, and
 require complete eight-member seam and nine-member underwater AI groups. Each
 data crate includes its own subset of this manifest and its `assets/**`
-directory. Tests require the five subset inventories to match the library
-manifest exactly. `BundledAssetProvider` serves their embedded bytes directly at
-runtime. See [packaging](packaging.md) for the split.
+directory. The newer video seam group contains model 213 and all seven CoreML
+members, including original empty placeholders. Tests require the six subset
+inventories to match the library manifest exactly. `BundledAssetProvider` serves
+their embedded bytes directly at runtime. See [packaging](packaging.md) for the
+split.
 
 The original resources retain their vendor licensing. The project's Apache-2.0
 license covers project-authored code and does not relicense these copied assets.
 See [`NOTICE.md`](../NOTICE.md).
+
+The [video model audit](ai-stitching-model.md) records the exact source
+filenames, decoded-model identity, independently executed tensor references, and
+native preprocessing evidence. Model 214 remains a still-image reference
+candidate; video-frame extraction uses model 213. The pre-existing 51 payloads
+were rechecked against source bytes without discrepancy; no standalone missing
+housing-mask file was identified.

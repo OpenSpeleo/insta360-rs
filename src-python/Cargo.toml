@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 
 [features]
 underwater-ai = ["insta360-rs/underwater-ai"]
+ai-stitching = ["insta360-rs/ai-stitching"]
 # Enable only for wheels; Rust unit-test executables need libpython linkage.
 extension-module = ["pyo3/extension-module"]
 

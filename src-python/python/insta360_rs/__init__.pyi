@@ -123,6 +123,13 @@ class ExportPhase:
     FINALIZING: ClassVar[ExportPhase]
     UNKNOWN: ClassVar[ExportPhase]
 
+class SeamMode:
+    FIXED: ClassVar[SeamMode]
+    DYNAMIC: ClassVar[SeamMode]
+    OPTICAL_FLOW: ClassVar[SeamMode]
+    AI: ClassVar[SeamMode]
+    def unavailable_reason(self) -> str | None: ...
+
 class StitchConfig:
     housing: Housing
     environment: Environment
@@ -132,6 +139,7 @@ class StitchConfig:
     stabilization: Stabilization
     rolling_shutter: RollingShutterCorrection
     backend: ProcessingBackend
+    seam_mode: SeamMode
     color_conversion: ColorConversion
     width: int | None
     height: int | None
@@ -147,6 +155,7 @@ class StitchConfig:
         stabilization: Stabilization | None = ...,
         rolling_shutter: RollingShutterCorrection | None = ...,
         backend: ProcessingBackend | None = ...,
+        seam_mode: SeamMode | None = ...,
         color_conversion: ColorConversion | None = ...,
         width: int | None = ...,
         height: int | None = ...,
@@ -159,6 +168,7 @@ class StitchConfig:
         underwater_color: UnderwaterColorOptions | None = ...,
         rolling_shutter: RollingShutterCorrection | None = ...,
         backend: ProcessingBackend | None = ...,
+        seam_mode: SeamMode | None = ...,
         color_conversion: ColorConversion | None = ...,
         width: int | None = ...,
         height: int | None = ...,

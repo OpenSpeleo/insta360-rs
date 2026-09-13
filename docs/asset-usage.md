@@ -6,8 +6,8 @@ I-Log-to-Rec.709 CUBE. It now changes image and video exports on CPU and GPU.
 The other two CUBEs also have a working RGB/GPU consumer for callers processing
 those camera images; they are not selected for X5 recordings.
 
-All 51 stored payloads remain available through the same provider and asset IDs.
-The five [data crates](packaging.md) preserve original vendor bytes; model
+All 59 stored payloads remain available through the same provider and asset IDs.
+The six [data crates](packaging.md) preserve original vendor bytes; model
 availability still does not imply a working inference pipeline.
 
 ## Implemented color conversion
@@ -76,17 +76,18 @@ advertise additional inference capabilities.
 
 ## Assessment of bundled payloads
 
-| Payloads                                                             | Count | Runtime decision                                                                                                                                                                        |
-| -------------------------------------------------------------------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| X5 I-Log CUBE                                                        |     1 | Selected by the high-level image/video exporter; CPU and GPU execution implemented.                                                                                                     |
-| Ace Pro 2 and Luna I-Log CUBEs                                       |     2 | Supported by the explicit RGB/GPU LUT APIs; those cameras are outside the current high-level panorama renderer.                                                                         |
-| CameraSDK camera configurations                                      |    10 | Capture modes and setting dependencies, not optical calibration. Do not restrict panorama output dimensions or replace recorded offsets with these values.                              |
-| Accessory/cooling-shell SVMs                                         |    12 | Numeric parsing and linear evaluation work. Automatic detection still needs matching camera-specific remapping, BGR-to-gray/HOG features, thresholds, and multi-patch voting.           |
-| Model catalog                                                        |     1 | Model/algorithm discovery data; does not execute a transform. Its encoded catalog identifies ColorPlus model variants.                                                                  |
-| AI stitch, ColorPlus, defringe, deflicker, JPEG denoise `.ins` files |     6 | Wrapped learned-model resources; require model decoding, inference, and the matching image/temporal pipeline.                                                                           |
-| AI seam CoreML/Espresso constituents                                 |     8 | Complete model data, but no portable graph executor, seam-strip extraction, flow scaling, or compositing implementation.                                                                |
-| Underwater restoration resources                                     |    10 | Original Legacy ILUT and complete nine-member AI group; explicit restoration through scalar CPU and optional independent MNN.                                                           |
-| Studio sharpening JSON                                               |     1 | X5 perspective-output tuning at heights 1080/2160 and FOVs 20/40/60/75 degrees. Strength becomes zero at 75 degrees; applying it to 360-degree output would add no intended sharpening. |
+| Payloads                                                             | Count | Runtime decision                                                                                                                                                                                                            |
+| -------------------------------------------------------------------- | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| X5 I-Log CUBE                                                        |     1 | Selected by the high-level image/video exporter; CPU and GPU execution implemented.                                                                                                                                         |
+| Ace Pro 2 and Luna I-Log CUBEs                                       |     2 | Supported by the explicit RGB/GPU LUT APIs; those cameras are outside the current high-level panorama renderer.                                                                                                             |
+| CameraSDK camera configurations                                      |    10 | Capture modes and setting dependencies, not optical calibration. Do not restrict panorama output dimensions or replace recorded offsets with these values.                                                                  |
+| Accessory/cooling-shell SVMs                                         |    12 | Numeric parsing and linear evaluation work. Automatic detection still needs matching camera-specific remapping, BGR-to-gray/HOG features, thresholds, and multi-patch voting.                                               |
+| Model catalog                                                        |     1 | Model/algorithm discovery data; does not execute a transform. Its encoded catalog identifies ColorPlus model variants.                                                                                                      |
+| AI stitch, ColorPlus, defringe, deflicker, JPEG denoise `.ins` files |     6 | Wrapped learned-model resources; require model decoding, inference, and the matching image/temporal pipeline.                                                                                                               |
+| AI seam CoreML/Espresso constituents                                 |     8 | Complete model data, but no portable graph executor, seam-strip extraction, flow scaling, or compositing implementation.                                                                                                    |
+| Studio video model 213 plus complete CoreML group                    |     8 | Original data with a verified independent MNN tensor adapter; cylindrical belt preparation and bidirectional confidence checks are described in [video AI stitching](ai-stitching-model.md). CoreML remains reference data. |
+| Underwater restoration resources                                     |    10 | Original Legacy ILUT and complete nine-member AI group; explicit restoration through scalar CPU and optional independent MNN.                                                                                               |
+| Studio sharpening JSON                                               |     1 | X5 perspective-output tuning at heights 1080/2160 and FOVs 20/40/60/75 degrees. Strength becomes zero at 75 degrees; applying it to 360-degree output would add no intended sharpening.                                     |
 
 The SVM reader accepts the bundled schema's direct support-vector/alpha order.
 It rejects indexed classifier decision functions, whose vector indirection is

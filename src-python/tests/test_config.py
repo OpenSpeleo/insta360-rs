@@ -13,6 +13,7 @@ ENUM_MEMBERS = {
     "Stabilization": "OFF FLOW_STATE DIRECTION_LOCK",
     "RollingShutterCorrection": "AUTO OFF REQUIRED",
     "ProcessingBackend": "AUTO CPU GPU",
+    "SeamMode": "FIXED DYNAMIC OPTICAL_FLOW AI",
     "ColorConversion": "AUTO PRESERVE I_LOG_TO_REC709",
     "EffectiveBackend": "CPU GPU UNKNOWN",
     "ImageFormat": "PNG JPEG",
@@ -51,6 +52,7 @@ class ConfigTests(unittest.TestCase):
                 stabilization=None,
                 rolling_shutter=None,
                 backend=None,
+                seam_mode=None,
                 color_conversion=None,
                 width=None,
                 height=None,
@@ -64,6 +66,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.stabilization, api.Stabilization.DIRECTION_LOCK)
             self.assertEqual(config.rolling_shutter, api.RollingShutterCorrection.AUTO)
             self.assertEqual(config.backend, api.ProcessingBackend.AUTO)
+            self.assertEqual(config.seam_mode, api.SeamMode.FIXED)
             self.assertEqual(config.color_conversion, api.ColorConversion.AUTO)
             self.assertIsNone(config.width)
             self.assertIsNone(config.height)
@@ -78,6 +81,7 @@ class ConfigTests(unittest.TestCase):
             "stabilization": "Stabilization",
             "rolling_shutter": "RollingShutterCorrection",
             "backend": "ProcessingBackend",
+            "seam_mode": "SeamMode",
             "color_conversion": "ColorConversion",
         }
         for field, enum_name in fields.items():
@@ -132,6 +136,7 @@ class ConfigTests(unittest.TestCase):
             "stabilization",
             "rolling_shutter",
             "backend",
+            "seam_mode",
             "color_conversion",
         ):
             for value in ("AUTO", 0, api.AudioPolicy.COPY):
@@ -149,6 +154,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_underwater_preset_defaults(self):
         config = api.StitchConfig.underwater_photogrammetry()
+        self.assertEqual(config.seam_mode, api.SeamMode.FIXED)
         self.assertEqual(config.housing, api.Housing.AUTO)
         self.assertEqual(config.environment, api.Environment.UNDERWATER)
         self.assertEqual(config.underwater_color.mode, api.UnderwaterColorMode.OFF)

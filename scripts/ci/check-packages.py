@@ -22,7 +22,19 @@ import tomllib
 
 
 MAX_CRATE_BYTES = 10_000_000
-PACKAGE_PATHS = ("data/core", "data/enhancement", "data/underwater-model-a", "data/underwater-model-b", "data/underwater-resources", ".")
+PACKAGE_PATHS = (
+    "data/core",
+    "data/ai-stitch-video",
+    "data/enhancement",
+    "data/underwater-model-a",
+    "data/underwater-model-b",
+    "data/underwater-resources",
+    ".",
+)
+MODEL_REFERENCE_TESTS = (
+    "underwater::ai::tests::aquavision_thread_budget_preserves_numerical_and_temporal_contracts",
+    "underwater::model::tests::model_varied_tensors_match_complete_reference",
+)
 
 
 def check_size(archive: Path) -> int:
@@ -119,6 +131,18 @@ def verify(root: Path, output: Path, allow_dirty: bool, all_features: bool) -> N
                 ["build", "--release", "--lib", "--bins", "--examples"],
             ]:
                 run(["cargo"] + operation + common + features + patches, packaged, environment)
+            if is_main and all_features:
+                # MNN's process-global pool cannot grow. These ignored tests
+                # establish the largest budget first and verify actual threads,
+                # so each must run in its own process against extracted assets.
+                for reference in MODEL_REFERENCE_TESTS:
+                    run(
+                        ["cargo", "test", "--lib", reference]
+                        + common + features + patches
+                        + ["--", "--ignored", "--exact", "--nocapture", "--test-threads=1"],
+                        packaged,
+                        environment,
+                    )
             if not is_main:
                 data_packages[name] = packaged
                 source_packages[name] = manifest.parent

@@ -96,10 +96,10 @@ inspection without requiring a renderable model.
 | 117 / 118  | Invisible Dive Case | Underwater / Air |
 | 119 / 120  | Dive Case Pro       | Underwater / Air |
 
-Pro conversion uses the exact native physical curves for source and target IDs.
-The earlier standard conversion uses the recording's embedded physical curves.
-Neither route replaces measured extrinsics, principal points or non-radial
-parameters. Already-matching IDs are not converted again. The
+Standard and Pro conversion use the exact native physical curves selected by
+source and target lens IDs. Named embedded profile descriptors do not override
+those curves. Neither route replaces measured extrinsics, principal points or
+non-radial parameters. Already-matching IDs are not converted again. The
 [generated catalog](housing-catalog.md) includes the complete registry, exact
 coefficients, source software/version and artifact-relative paths.
 
@@ -117,8 +117,10 @@ The supplied sample's named profile submessages have one of two protobuf shapes:
 `ParsedEmbeddedProfile` validates and preserves both shapes. Static tracing of
 `OffsetConvert::getPhysical2PixelScale`,
 `OffsetConvert::getV6DistortAndFocalFromLens`, and
-`OffsetConvert::converOffsetNormal` establishes that the six doubles are an
-angle-to-physical-radius polynomial evaluated in degrees.
+`OffsetConvert::converOffsetNormal` establishes the angle-to-physical-radius
+polynomial evaluated in degrees. Its native lens-ID curve lookup must remain
+separate from similarly named metadata descriptors; matching a descriptor name
+does not establish the native conversion coefficients.
 
 For X5 V6 conversion, the resolver first fits the recorded Omni model to the
 source physical curve to recover pixels per physical-radius unit. It then fits
@@ -134,7 +136,7 @@ table 0x529e4d8 into the V6 branch0x1e2e0b4. The shared target fit is at
 regenerated offset carries the target lens type and validates like a native V6
 offset.
 
-The embedded X5 profile regression checks focal length and projected pixel radii
+The native-curve X5 regression checks focal length and projected pixel radii
 against an independent 65-decimal reference fit across the target field of view.
 The sampled normal equations are ill-conditioned, so individual fitted radial
 coefficients can vary across platforms while preserving those pixel radii. The

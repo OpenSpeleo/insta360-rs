@@ -15,7 +15,7 @@ photogrammetry is the primary use case.
 
 **Stack**: Rust, FFmpeg through `ffmpeg-next`, Rayon, optional `wgpu` compute,
 PyO3, and Maturin. The independent Cargo workspace contains the main library,
-five bundled-data crates, and the Python extension, with one root `Cargo.lock`.
+six bundled-data crates, and the Python extension, with one root `Cargo.lock`.
 
 Metadata recognition covers ONE, ONE R/RS panorama modules, ONE X through X6,
 and X4 Air. Encoded stream extraction accepts one- and two-file inputs
@@ -172,9 +172,16 @@ See [architecture](docs/architecture.md), [public API](docs/public-api.md),
 
 Use the compiler in `rust-toolchain.toml`. All-feature builds require the pinned
 independent MNN CPU prefix in `MNN_ROOT`; see `scripts/ci/build-mnn.py` and
-`docs/CI.md`. The optional `underwater-ai` feature enables that engine; Legacy
-and Off have no native engine dependency. Run Cargo checks with `--locked`
-except when intentionally updating versions or dependency resolution.
+`docs/CI.md`. The optional `underwater-ai` and `ai-stitching` features enable
+that engine; non-AI modes have no native engine dependency. Run Cargo checks
+with `--locked` except when intentionally updating versions or dependency
+resolution.
+
+The separate compatibility check `python3 scripts/ci/check-msrv.py` reads
+`workspace.package.rust-version` and checks published targets/features with that
+minimum compiler. It retains the prepared native environment and leaves the
+primary toolchain unchanged. CI runs this check on Linux; runtime tests and
+release artifacts continue to use `rust-toolchain.toml`.
 
 For core changes, start with the affected tests and the default-feature
 boundary:
@@ -248,7 +255,7 @@ complete matrix.
 - Use `prek autoupdate` for hooks and `cargo outdated` to inspect Rust updates.
   Review Python constraints in `src-python/pyproject.toml` and
   `scripts/ci/requirements-wheel.txt`.
-- Keep the seven Rust packages on the shared lockfile. Update the compiler
+- Keep the eight Rust packages on the shared lockfile. Update the compiler
   through `rust-toolchain.toml`; keep declared minimum Rust support accurate.
 - Keep GitHub Actions pinned by commit and shared build-tool versions aligned.
   Preserve the CMake constraint required by the current x265 build until that
@@ -316,8 +323,8 @@ reuse the verified MNN prefix prepared for the job. Keep the existing Rust
 profiles and Maturin build settings unchanged unless explicitly requested. The
 Python extension keeps `publish = false` for crates.io.
 
-`[workspace.package].version` is the package-version authority. All seven crates
-inherit it and Maturin derives the Python version dynamically. The six exact
+`[workspace.package].version` is the package-version authority. All eight crates
+inherit it and Maturin derives the Python version dynamically. The seven exact
 internal dependency pins must match. Use `cargo-edit` to update them together;
 replace this example version with the intended release:
 
@@ -335,7 +342,7 @@ environments `crates-io` and `pypi`. Each Rust crate needs its own registration
 after its initial manual upload. Follow [release instructions](docs/RELEASE.md)
 for bootstrap, tag publication, attestations, and recovery.
 
-Before publication, verify all six package archives and their extracted
+Before publication, verify all seven package archives and their extracted
 contents. Each compressed crate must be below 10,000,000 bytes. Keep Cargo's
 publication verification enabled and preserve byte-identical licensed assets in
 crates, wheels, and source distributions.

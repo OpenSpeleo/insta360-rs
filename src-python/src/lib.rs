@@ -13,8 +13,8 @@ use insta360_rs::{
     GpuAdapterInfo as CoreGpuAdapterInfo, GpuFailure as CoreGpuFailure, ImageExportOptions,
     ImageFormat as CoreImageFormat, InputSet, MediaAcceleration as CoreMediaAcceleration,
     ProcessingBackend as CoreProcessingBackend,
-    RollingShutterCorrection as CoreRollingShutterCorrection, Stabilization as CoreStabilization,
-    StitchConfig as CoreStitchConfig, VideoExportOptions,
+    RollingShutterCorrection as CoreRollingShutterCorrection, SeamMode as CoreSeamMode,
+    Stabilization as CoreStabilization, StitchConfig as CoreStitchConfig, VideoExportOptions,
 };
 use insta360_rs::{
     DecodedVideoFrame as CoreDecodedVideoFrame, EncodedPacket as CoreEncodedPacket,
@@ -126,6 +126,42 @@ impl From<CoreProcessingBackend> for PyProcessingBackend {
             CoreProcessingBackend::Gpu => Self::Gpu,
             _ => Self::Auto,
         }
+    }
+}
+
+/// Seam optimization is independent of the processor and underwater color restoration.
+#[pyclass(
+    name = "SeamMode",
+    module = "insta360_rs._native",
+    eq,
+    eq_int,
+    from_py_object,
+    rename_all = "SCREAMING_SNAKE_CASE"
+)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PySeamMode {
+    Fixed,
+    Dynamic,
+    OpticalFlow,
+    Ai,
+}
+
+impl From<PySeamMode> for CoreSeamMode {
+    fn from(value: PySeamMode) -> Self {
+        match value {
+            PySeamMode::Fixed => Self::Fixed,
+            PySeamMode::Dynamic => Self::Dynamic,
+            PySeamMode::OpticalFlow => Self::OpticalFlow,
+            PySeamMode::Ai => Self::Ai,
+        }
+    }
+}
+
+#[pymethods]
+impl PySeamMode {
+    /// Returns build/qualification limitations without opening a model or device.
+    fn unavailable_reason(&self) -> Option<&'static str> {
+        CoreSeamMode::from(*self).unavailable_reason()
     }
 }
 
@@ -303,6 +339,8 @@ struct PyStitchConfig {
     #[pyo3(get, set)]
     backend: PyProcessingBackend,
     #[pyo3(get, set)]
+    seam_mode: PySeamMode,
+    #[pyo3(get, set)]
     color_conversion: PyColorConversion,
     #[pyo3(get, set)]
     width: Option<u32>,
@@ -313,7 +351,7 @@ struct PyStitchConfig {
 #[pymethods]
 impl PyStitchConfig {
     #[new]
-    #[pyo3(signature = (*, housing=None, environment=None, lens_accessory=None, mounting_accessory=None, underwater_color=None, stabilization=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None))]
+    #[pyo3(signature = (*, housing=None, environment=None, lens_accessory=None, mounting_accessory=None, underwater_color=None, stabilization=None, rolling_shutter=None, backend=None, seam_mode=None, color_conversion=None, width=None, height=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         housing: Option<PyHousing>,
@@ -324,6 +362,7 @@ impl PyStitchConfig {
         stabilization: Option<PyStabilization>,
         rolling_shutter: Option<PyRollingShutterCorrection>,
         backend: Option<PyProcessingBackend>,
+        seam_mode: Option<PySeamMode>,
         color_conversion: Option<PyColorConversion>,
         width: Option<u32>,
         height: Option<u32>,
@@ -337,6 +376,7 @@ impl PyStitchConfig {
             stabilization: stabilization.unwrap_or(PyStabilization::DirectionLock),
             rolling_shutter: rolling_shutter.unwrap_or(PyRollingShutterCorrection::Auto),
             backend: backend.unwrap_or(PyProcessingBackend::Auto),
+            seam_mode: seam_mode.unwrap_or(PySeamMode::Fixed),
             color_conversion: color_conversion.unwrap_or(PyColorConversion::Auto),
             width,
             height,
@@ -346,7 +386,7 @@ impl PyStitchConfig {
     }
 
     #[staticmethod]
-    #[pyo3(signature = (*, housing=None, mounting_accessory=None, underwater_color=None, rolling_shutter=None, backend=None, color_conversion=None, width=None, height=None))]
+    #[pyo3(signature = (*, housing=None, mounting_accessory=None, underwater_color=None, rolling_shutter=None, backend=None, seam_mode=None, color_conversion=None, width=None, height=None))]
     #[allow(clippy::too_many_arguments)]
     fn underwater_photogrammetry(
         housing: Option<PyHousing>,
@@ -354,6 +394,7 @@ impl PyStitchConfig {
         underwater_color: Option<PyUnderwaterColorOptions>,
         rolling_shutter: Option<PyRollingShutterCorrection>,
         backend: Option<PyProcessingBackend>,
+        seam_mode: Option<PySeamMode>,
         color_conversion: Option<PyColorConversion>,
         width: Option<u32>,
         height: Option<u32>,
@@ -367,6 +408,7 @@ impl PyStitchConfig {
             stabilization: PyStabilization::DirectionLock,
             rolling_shutter: rolling_shutter.unwrap_or(PyRollingShutterCorrection::Auto),
             backend: backend.unwrap_or(PyProcessingBackend::Auto),
+            seam_mode: seam_mode.unwrap_or(PySeamMode::Fixed),
             color_conversion: color_conversion.unwrap_or(PyColorConversion::Auto),
             width,
             height,
@@ -378,8 +420,8 @@ impl PyStitchConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "StitchConfig(housing={:?}, environment={:?}, lens_accessory={:?}, mounting_accessory={:?}, underwater_color={:?}, stabilization={:?}, rolling_shutter={:?}, backend={:?}, color_conversion={:?}, width={:?}, height={:?})",
-            self.housing, self.environment, self.lens_accessory, self.mounting_accessory, self.underwater_color, self.stabilization, self.rolling_shutter, self.backend, self.color_conversion, self.width, self.height
+            "StitchConfig(housing={:?}, environment={:?}, lens_accessory={:?}, mounting_accessory={:?}, underwater_color={:?}, stabilization={:?}, rolling_shutter={:?}, backend={:?}, seam_mode={:?}, color_conversion={:?}, width={:?}, height={:?})",
+            self.housing, self.environment, self.lens_accessory, self.mounting_accessory, self.underwater_color, self.stabilization, self.rolling_shutter, self.backend, self.seam_mode, self.color_conversion, self.width, self.height
         )
     }
 }
@@ -407,6 +449,7 @@ impl PyStitchConfig {
             stabilization: self.stabilization.into(),
             rolling_shutter: self.rolling_shutter.into(),
             backend: self.backend.into(),
+            seam_mode: self.seam_mode.into(),
             color_conversion: self.color_conversion.into(),
             projection,
             ..CoreStitchConfig::default()
@@ -1573,6 +1616,7 @@ fn default_py_config() -> PyStitchConfig {
         stabilization: PyStabilization::DirectionLock,
         rolling_shutter: PyRollingShutterCorrection::Auto,
         backend: PyProcessingBackend::Auto,
+        seam_mode: PySeamMode::Fixed,
         color_conversion: PyColorConversion::Auto,
         width: None,
         height: None,
@@ -1739,6 +1783,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyStabilization>()?;
     module.add_class::<PyRollingShutterCorrection>()?;
     module.add_class::<PyProcessingBackend>()?;
+    module.add_class::<PySeamMode>()?;
     module.add_class::<PyColorConversion>()?;
     module.add_class::<PyEffectiveBackend>()?;
     module.add_class::<PyImageFormat>()?;
@@ -1781,6 +1826,28 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seam_mode_defaults_and_explicit_choices_reach_core() {
+        assert_eq!(
+            default_py_config().to_core().unwrap().seam_mode,
+            CoreSeamMode::Fixed
+        );
+        for (mode, expected) in [
+            (PySeamMode::Fixed, CoreSeamMode::Fixed),
+            (PySeamMode::Dynamic, CoreSeamMode::Dynamic),
+            (PySeamMode::OpticalFlow, CoreSeamMode::OpticalFlow),
+            (PySeamMode::Ai, CoreSeamMode::Ai),
+        ] {
+            let config = PyStitchConfig {
+                seam_mode: mode,
+                ..default_py_config()
+            };
+            assert_eq!(config.to_core().unwrap().seam_mode, expected);
+            assert_eq!(mode.unavailable_reason(), expected.unavailable_reason());
+            assert!(config.__repr__().contains(&format!("seam_mode={mode:?}")));
+        }
+    }
 
     #[test]
     fn color_conversion_defaults_and_explicit_choices_reach_core() {

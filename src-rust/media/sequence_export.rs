@@ -31,6 +31,7 @@ fn inspect_video(
     config: &StitchConfig,
     options: &VideoExportOptions,
 ) -> Result<VideoPreflight> {
+    config.seam_mode.validate_capabilities()?;
     config.underwater_color.validate_capabilities()?;
     let first = sequence
         .chapters
@@ -178,6 +179,7 @@ fn export_attempt(
     ffmpeg::init().map_err(|error| media_error("initializing FFmpeg", error))?;
     // Runtime GPU opening uses the typed failure path for whole-job Auto retry.
     let mut stitcher = StitchSession::select(config.backend, requested, fallback, context)?;
+    stitcher.set_seam_mode(config.seam_mode)?;
     context.emit(ExportEvent::BackendSelected(Box::new(
         stitcher.report.clone(),
     )));
@@ -186,7 +188,6 @@ fn export_attempt(
         config.underwater_color,
         Some(report.frame_rate),
     )?;
-    stitcher.force_rgb = underwater.enabled();
     for warning in &report.warnings {
         context.emit(ExportEvent::Warning(warning.clone()));
     }
@@ -273,15 +274,14 @@ fn export_attempt(
         )?;
         let decoded = native_pair(&pair);
         let projection = video_projection(config, options, &decoded)?;
-        let panorama =
-            stitcher.stitch_video(decoded, &prepared.calibration, projection, &motion)?;
-        let panorama = match panorama {
-            StitchedVideoFrame::Rgb(frame) => {
-                StitchedVideoFrame::Rgb(underwater.process(frame, media_time.as_micros() as i64)?)
-            }
-            #[cfg(feature = "gpu")]
-            frame @ StitchedVideoFrame::Yuv420(_) => frame,
-        };
+        let panorama = stitcher.stitch_video(
+            decoded,
+            &prepared.calibration,
+            projection,
+            &motion,
+            &context.cancel,
+            Some(underwater.frame(pair.timestamp_micros, false)),
+        )?;
         context.check_cancelled()?;
         let writer = match &mut writer {
             Some(writer) => writer,

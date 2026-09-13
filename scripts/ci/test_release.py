@@ -24,20 +24,29 @@ class ReleaseVersionTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         (self.root / "src-python").mkdir()
         (self.root / "data/core").mkdir(parents=True)
+        (self.root / "data/ai-stitch-video").mkdir()
         (self.root / "data/enhancement").mkdir()
         (self.root / "data/underwater-model-a").mkdir()
         (self.root / "data/underwater-model-b").mkdir()
         (self.root / "data/underwater-resources").mkdir()
         self.manifests = [
             "Cargo.toml", "data/core/Cargo.toml", "data/enhancement/Cargo.toml",
+            "data/ai-stitch-video/Cargo.toml",
             "data/underwater-model-a/Cargo.toml",
             "data/underwater-model-b/Cargo.toml",
             "data/underwater-resources/Cargo.toml",
             "src-python/Cargo.toml",
         ]
-        for relative in self.manifests:
-            (self.root / relative).write_text('[package]\nversion.workspace = true\n')
+        for name, path in {**release.PUBLISHED_CRATES, "insta360-rs-python": "src-python"}.items():
+            (self.root / path / "Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion.workspace = true\n'
+            )
         with (self.root / "Cargo.toml").open("a") as manifest:
+            paths = list(release.PUBLISHED_CRATES.values())
+            manifest.write(
+                f'[workspace]\nmembers = {json.dumps(paths + ["src-python"])}\n'
+                f'default-members = {json.dumps(paths)}\n'
+            )
             manifest.write('[workspace.package]\nversion = "1.2.3"\n[workspace.dependencies]\n')
             for name, path in {"insta360-rs": ".", **release.DATA_CRATES}.items():
                 manifest.write(f'{name} = {{ version = "=1.2.3", path = "{path}" }}\n')
@@ -52,6 +61,46 @@ class ReleaseVersionTests(unittest.TestCase):
 
     def test_matching_versions_are_accepted(self):
         self.assertEqual(release.validate("v1.2.3", self.root), "1.2.3")
+
+    def test_workspace_cannot_publish_or_skip_unverified_packages(self):
+        manifest = self.root / "Cargo.toml"
+        original = manifest.read_text()
+        for field in ("members", "default-members"):
+            paths = list(release.PUBLISHED_CRATES.values())
+            if field == "members":
+                paths.append("src-python")
+            for replacement in (paths + ["unverified"], paths[1:], paths + [paths[0]]):
+                with self.subTest(field=field, replacement=replacement):
+                    manifest.write_text(original.replace(
+                        f'\n{field} = {json.dumps(paths)}\n',
+                        f'\n{field} = {json.dumps(replacement)}\n',
+                    ))
+                    with self.assertRaisesRegex(ValueError, "verified package inventory"):
+                        release.validate("v1.2.3", self.root)
+        manifest.write_text(original.replace('[workspace]\n', '[workspace]\nexclude = ["data/core"]\n'))
+        with self.assertRaisesRegex(ValueError, "workspace.exclude"):
+            release.validate("v1.2.3", self.root)
+
+    def test_every_verified_package_must_keep_its_published_identity(self):
+        for name, path in {**release.PUBLISHED_CRATES, "insta360-rs-python": "src-python"}.items():
+            manifest = self.root / path / "Cargo.toml"
+            original = manifest.read_text()
+            with self.subTest(package=name):
+                manifest.write_text(original.replace(f'name = "{name}"', 'name = "different-package"'))
+                with self.assertRaisesRegex(ValueError, "must declare package name"):
+                    release.validate("v1.2.3", self.root)
+            manifest.write_text(original)
+
+    def test_data_and_library_crates_cannot_disable_registry_publication(self):
+        for name, path in release.PUBLISHED_CRATES.items():
+            manifest = self.root / path / "Cargo.toml"
+            original = manifest.read_text()
+            for publish in ('false', '[]', '["private-registry"]'):
+                with self.subTest(package=name, publish=publish):
+                    manifest.write_text(original.replace('[package]\n', f'[package]\npublish = {publish}\n'))
+                    with self.assertRaisesRegex(ValueError, "allow publication to crates.io"):
+                        release.validate("v1.2.3", self.root)
+            manifest.write_text(original)
 
     def test_workspace_version_must_match_tag(self):
         manifest = self.root / "Cargo.toml"

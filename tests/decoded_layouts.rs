@@ -1430,3 +1430,456 @@ fn frame_preflight_checks_dimensions_color_resources_and_exact_pair_contract() {
     pair.chapter_index = 2;
     assert!(renderer.render(&pair, projection, &cancel).is_err());
 }
+
+#[test]
+fn continuous_renderers_retain_independent_color_history_and_reset_for_stills() {
+    use insta360_rs::media::{NativeColorProcessor, RecordingFrameRenderer};
+    use insta360_rs::underwater::UnderwaterColorSession;
+    use insta360_rs::{ColorConversion, UnderwaterColorMode, UnderwaterColorOptions};
+    let directory = tempfile::tempdir().unwrap();
+    let sequence = RecordingSequence::single(fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        3,
+        "0.25",
+        false,
+    ))
+    .unwrap();
+    let options = UnderwaterColorOptions {
+        mode: UnderwaterColorMode::Legacy,
+        ..Default::default()
+    };
+    let cancel = AtomicBool::new(false);
+    let mut reader = PairedReader::open(&sequence, Duration::ZERO).unwrap();
+    let mut original = NativeColorProcessor::new(
+        sequence.clone(),
+        ColorConversion::Preserve,
+        UnderwaterColorOptions::default(),
+    )
+    .unwrap();
+    let mut native =
+        NativeColorProcessor::new(sequence.clone(), ColorConversion::Preserve, options).unwrap();
+    let mut native_reference: [_; 2] = std::array::from_fn(|_| {
+        UnderwaterColorSession::prepare(
+            options,
+            64,
+            64,
+            12,
+            1,
+            &insta360_rs::assets::BundledAssetProvider,
+        )
+        .unwrap()
+    });
+    let mut panorama_reference = UnderwaterColorSession::prepare(
+        options,
+        128,
+        64,
+        12,
+        1,
+        &insta360_rs::assets::BundledAssetProvider,
+    )
+    .unwrap();
+    let projection = EquirectangularProjection {
+        width: 128,
+        height: 64,
+    };
+    let base_config = StitchConfig {
+        color_conversion: ColorConversion::Preserve,
+        ..config()
+    };
+    let mut panorama_original =
+        RecordingFrameRenderer::new(sequence.clone(), base_config.clone()).unwrap();
+    let mut panorama = RecordingFrameRenderer::new(
+        sequence.clone(),
+        StitchConfig {
+            underwater_color: options,
+            ..base_config
+        },
+    )
+    .unwrap();
+    let mut last = None;
+    let mut last_native = None;
+    for (a_luma, b_luma) in [(60, 150), (130, 35), (100, 80)] {
+        let mut pair = reader.next_pair(&cancel).unwrap().unwrap();
+        // Independent changing gray lenses exercise temporal history without
+        // degenerate channel means from the encoded fixture's saturated colors.
+        for (frame, luma) in [(&mut pair.a, a_luma), (&mut pair.b, b_luma)] {
+            frame.data_mut(0).fill(luma);
+            frame.data_mut(1).fill(128);
+            frame.data_mut(2).fill(128);
+        }
+        let raw = original.process(&pair, None, &cancel).unwrap();
+        let rendered = native.process_continuous(&pair, None, &cancel).unwrap();
+        let pts = pair.timestamp_micros as f64 / 1_000_000.0;
+        for index in 0..2 {
+            let mut expected = raw[index].as_rgb8().to_vec();
+            native_reference[index]
+                .process_rgb8_continuous(&mut expected, pts)
+                .unwrap();
+            assert_eq!(
+                rendered[index].as_rgb8(),
+                expected,
+                "each lens owns its temporal history"
+            );
+        }
+        let mut expected = panorama_original
+            .render(&pair, projection, &cancel)
+            .unwrap()
+            .frame
+            .into_rgb8();
+        panorama_reference
+            .process_rgb8_continuous(&mut expected, pts)
+            .unwrap();
+        assert_eq!(
+            panorama
+                .render_continuous(&pair, projection, &cancel)
+                .unwrap()
+                .frame
+                .as_rgb8(),
+            expected
+        );
+        last_native = Some(rendered);
+        last = Some(pair);
+    }
+    let pair = last.unwrap();
+    let mut independent_still =
+        NativeColorProcessor::new(sequence, ColorConversion::Preserve, options).unwrap();
+    let expected = independent_still.process(&pair, None, &cancel).unwrap();
+    assert_ne!(
+        last_native.unwrap()[0].as_rgb8(),
+        expected[0].as_rgb8(),
+        "continuous history must survive successive source frames"
+    );
+    let repeated = native.process_continuous(&pair, None, &cancel).unwrap();
+    assert_eq!(
+        repeated[0].as_rgb8(),
+        expected[0].as_rgb8(),
+        "non-increasing PTS resets preview history"
+    );
+    native.reset_continuous();
+    let reset = native.process_continuous(&pair, None, &cancel).unwrap();
+    assert_eq!(reset[1].as_rgb8(), expected[1].as_rgb8());
+    let still = panorama.render(&pair, projection, &cancel).unwrap();
+    panorama.reset_continuous();
+    assert_eq!(
+        panorama
+            .render_continuous(&pair, projection, &cancel)
+            .unwrap()
+            .frame
+            .as_rgb8(),
+        still.frame.as_rgb8()
+    );
+}
+
+#[test]
+fn failed_second_lens_resets_both_continuous_color_histories() {
+    use insta360_rs::media::NativeColorProcessor;
+    use insta360_rs::{ColorConversion, UnderwaterColorMode, UnderwaterColorOptions};
+
+    let directory = tempfile::tempdir().unwrap();
+    let sequence = RecordingSequence::single(fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        4,
+        "0.25",
+        false,
+    ))
+    .unwrap();
+    let options = UnderwaterColorOptions {
+        mode: UnderwaterColorMode::Legacy,
+        ..Default::default()
+    };
+    let processor =
+        || NativeColorProcessor::new(sequence.clone(), ColorConversion::Preserve, options).unwrap();
+    let mut actual = processor();
+    let mut uninterrupted = processor();
+    let cancel = AtomicBool::new(false);
+    let mut reader = PairedReader::open(&sequence, Duration::ZERO).unwrap();
+    let mut pairs = Vec::new();
+    for (a_luma, b_luma) in [(60, 150), (130, 35), (70, 180), (100, 80)] {
+        let mut pair = reader.next_pair(&cancel).unwrap().unwrap();
+        for (frame, luma) in [(&mut pair.a, a_luma), (&mut pair.b, b_luma)] {
+            frame.data_mut(0).fill(luma);
+            frame.data_mut(1).fill(128);
+            frame.data_mut(2).fill(128);
+        }
+        pairs.push(pair);
+    }
+    for pair in &pairs[..2] {
+        actual.process_continuous(pair, None, &cancel).unwrap();
+        uninterrupted
+            .process_continuous(pair, None, &cancel)
+            .unwrap();
+    }
+
+    let failed = &mut pairs[2];
+    failed.b.set_color_transfer_characteristic(
+        ffmpeg_next::util::color::TransferCharacteristic::SMPTE2084,
+    );
+    // The altered transfer marker does not invalidate the exact pair contract.
+    // With restoration enabled, lens A is processed before lens B's HDR check.
+    NativeColorProcessor::new(
+        sequence.clone(),
+        ColorConversion::Preserve,
+        UnderwaterColorOptions::default(),
+    )
+    .unwrap()
+    .process(failed, None, &cancel)
+    .unwrap();
+    let failure = actual
+        .process_continuous(failed, None, &cancel)
+        .unwrap_err();
+    assert!(
+        matches!(failure, insta360_rs::Error::MissingCapability(ref reason) if reason.contains("HDR tone mapper")),
+        "expected the second lens's transfer rejection: {failure}"
+    );
+
+    let next = &pairs[3];
+    let expected = processor().process_continuous(next, None, &cancel).unwrap();
+    let old_history = uninterrupted
+        .process_continuous(next, None, &cancel)
+        .unwrap();
+    let recovered = actual.process_continuous(next, None, &cancel).unwrap();
+    for index in 0..2 {
+        assert_ne!(
+            old_history[index].as_rgb8(),
+            expected[index].as_rgb8(),
+            "fixture must expose retained lens {index} history"
+        );
+        assert_eq!(
+            recovered[index].as_rgb8(),
+            expected[index].as_rgb8(),
+            "a failed pair must reset lens {index}, including the already processed first lens"
+        );
+    }
+}
+
+#[test]
+fn retained_seam_geometry_is_exact_pair_bound_and_survives_save_resize() {
+    use insta360_rs::media::RecordingFrameRenderer;
+    use insta360_rs::SeamMode;
+    let directory = tempfile::tempdir().unwrap();
+    let inputs = fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        2,
+        "0",
+        false,
+    );
+    let sequence = RecordingSequence::single(inputs).unwrap();
+    let cancel = AtomicBool::new(false);
+    let mut reader = PairedReader::open(&sequence, Duration::ZERO).unwrap();
+    let first = reader.next_pair(&cancel).unwrap().unwrap();
+    let second = reader.next_pair(&cancel).unwrap().unwrap();
+    for seam_mode in [SeamMode::Dynamic, SeamMode::OpticalFlow, SeamMode::Ai]
+        .into_iter()
+        .filter(|mode| mode.unavailable_reason().is_none())
+    {
+        let mut settings = config();
+        settings.seam_mode = seam_mode;
+        let preview_size = EquirectangularProjection {
+            width: 64,
+            height: 32,
+        };
+        let save_size = EquirectangularProjection {
+            width: 128,
+            height: 64,
+        };
+        let mut renderer = RecordingFrameRenderer::new(sequence.clone(), settings.clone()).unwrap();
+        let still = renderer.render(&first, preview_size, &cancel).unwrap();
+        let preview = renderer
+            .render_continuous(&first, preview_size, &cancel)
+            .unwrap();
+        assert_eq!(
+            preview.frame, still.frame,
+            "preview scheduling changed {seam_mode:?} pixels"
+        );
+        let restored_still = renderer.render(&first, preview_size, &cancel).unwrap();
+        assert_eq!(
+            restored_still.frame, still.frame,
+            "returning to still scheduling changed pixels"
+        );
+        let plan = preview.stitch_plan.unwrap();
+        assert_eq!(plan.mode(), seam_mode);
+
+        // Save changes output size and may select a different backend; the source
+        // pair's prepared geometry is retained, rather than being estimated again.
+        settings.projection = Some(save_size);
+        let mut save = RecordingFrameRenderer::new(sequence.clone(), settings.clone()).unwrap();
+        let saved = save
+            .render_with_stitch_plan(&first, save_size, Arc::clone(&plan), &cancel)
+            .unwrap();
+        assert!(Arc::ptr_eq(saved.stitch_plan.as_ref().unwrap(), &plan));
+        let independently_prepared = save.render(&first, save_size, &cancel).unwrap();
+        assert_eq!(saved.frame, independently_prepared.frame);
+
+        assert!(matches!(
+            save.render_with_stitch_plan(&second, save_size, Arc::clone(&plan), &cancel),
+            Err(insta360_rs::Error::InvalidMedia(_))
+        ));
+        assert!(matches!(
+            save.render_with_stitch_plan(
+                &first,
+                save_size,
+                Arc::clone(&plan),
+                &AtomicBool::new(true)
+            ),
+            Err(insta360_rs::Error::Cancelled)
+        ));
+        let next = save.render(&second, save_size, &cancel).unwrap();
+        assert!(
+            !Arc::ptr_eq(next.stitch_plan.as_ref().unwrap(), &plan),
+            "cancelled retained render must not leak its plan to the next pair"
+        );
+
+        settings.seam_mode = SeamMode::Fixed;
+        let mut fixed = RecordingFrameRenderer::new(sequence.clone(), settings).unwrap();
+        assert!(matches!(
+            fixed.render_with_stitch_plan(&first, save_size, plan, &cancel),
+            Err(insta360_rs::Error::InvalidMedia(_))
+        ));
+        assert!(fixed
+            .render(&first, save_size, &cancel)
+            .unwrap()
+            .stitch_plan
+            .is_none());
+    }
+}
+
+#[cfg(not(feature = "ai-stitching"))]
+#[test]
+fn disabled_ai_stitching_fails_renderer_before_source_or_backend_preparation() {
+    use insta360_rs::media::RecordingFrameRenderer;
+    use insta360_rs::{Error, SeamMode};
+
+    // Dimension inspection would reject this sequence. Missing AI support must
+    // win before that inspection or any backend/model resources are prepared.
+    let sequence = RecordingSequence {
+        chapters: Vec::new(),
+        duration: Duration::ZERO,
+        complete: true,
+        warnings: Vec::new(),
+    };
+    for backend in [
+        ProcessingBackend::Auto,
+        ProcessingBackend::Cpu,
+        ProcessingBackend::Gpu,
+    ] {
+        let settings = StitchConfig {
+            seam_mode: SeamMode::Ai,
+            backend,
+            ..config()
+        };
+        assert!(matches!(
+            RecordingFrameRenderer::new(sequence.clone(), settings.clone()),
+            Err(Error::MissingCapability(reason)) if reason.contains("ai-stitching")
+        ));
+        assert!(matches!(
+            RecordingFrameRenderer::preflight(&sequence, &settings, None, &AtomicBool::new(false)),
+            Err(Error::MissingCapability(reason)) if reason.contains("ai-stitching")
+        ));
+    }
+    assert!(matches!(
+        RecordingFrameRenderer::new(sequence, config()),
+        Err(Error::InvalidMedia(reason)) if reason == "recording sequence is empty"
+    ));
+}
+
+#[cfg(not(feature = "ai-stitching"))]
+#[test]
+fn disabled_ai_stitching_fails_video_preflight_before_creating_outputs() {
+    let directory = tempfile::tempdir().unwrap();
+    let inputs = fixture(
+        directory.path(),
+        "Insta360 X5",
+        113,
+        6,
+        Layout::Tracks,
+        2,
+        "0",
+        false,
+    );
+    let mut settings = config();
+    settings.seam_mode = insta360_rs::SeamMode::Ai;
+    let exporter = Exporter::new(inputs, settings).unwrap();
+    assert!(matches!(
+        exporter.preflight_video(&VideoExportOptions::default()),
+        Err(insta360_rs::Error::MissingCapability(_))
+    ));
+    let output = directory.path().join("unavailable.mp4");
+    assert!(matches!(
+        exporter
+            .export_video(&output, VideoExportOptions::default())
+            .wait(),
+        Err(insta360_rs::Error::MissingCapability(_))
+    ));
+    assert!(!output.exists());
+}
+
+#[test]
+fn preview_selection_preserves_track_legacy_and_packed_layout_identity() {
+    use insta360_rs::paired::PreviewSelection;
+    for layout in [Layout::Tracks, Layout::Legacy, Layout::Packed] {
+        let directory = tempfile::tempdir().unwrap();
+        let inputs = fixture(
+            directory.path(),
+            "Insta360 ONE X2",
+            41,
+            3,
+            layout,
+            12,
+            "0.25",
+            false,
+        );
+        let sequence = RecordingSequence::single(inputs).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut serial = PairedReader::open(&sequence, Duration::ZERO).unwrap();
+        let mut expected = Vec::new();
+        while let Some(pair) = serial.next_pair(&cancel).unwrap() {
+            expected.push(pair.identity());
+        }
+        let mut reader =
+            PairedPreviewReader::new(&sequence, PreviewAcceleration::Software).unwrap();
+        for (advance, threshold, index) in [(3, None, 2), (2, Some(600), 8), (100, Some(5000), 11)]
+        {
+            reader.prefetch_next(cancel.clone()).unwrap();
+            let pair = reader
+                .next_selected_pair(
+                    PreviewSelection {
+                        advance: std::num::NonZeroU32::new(advance).unwrap(),
+                        not_before: threshold.map(Duration::from_millis),
+                    },
+                    cancel.clone(),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                pair.identity(),
+                expected[index],
+                "{layout:?} source index {index}"
+            );
+            assert_lens_colors(&pair);
+        }
+        assert!(reader.next_pair(cancel.clone()).unwrap().is_none());
+        assert_eq!(reader.decode_stats().validated_pairs, 12);
+        assert_eq!(reader.decode_stats().materialized_pairs, 3);
+        assert_eq!(reader.decode_stats().hardware_transfer_attempts, 0);
+        assert_eq!(
+            reader
+                .seek_pair(Duration::ZERO, cancel)
+                .unwrap()
+                .unwrap()
+                .identity(),
+            expected[0]
+        );
+    }
+}

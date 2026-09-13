@@ -113,6 +113,47 @@ pub struct RenderedFrame {
     pub frame: PanoramaFrame,
     pub info: FrameRenderInfo,
     pub backend: BackendReport,
+    /// Reusable exact-pair geometry for full-resolution Save; absent for fixed stitching.
+    pub stitch_plan: Option<Arc<FrameStitchPlan>>,
+}
+
+/// Immutable seam geometry bound to one exact recording pair and processing recipe.
+/// Retaining this small plan does not retain an additional decoded image.
+pub struct FrameStitchPlan {
+    identity: crate::FramePairIdentity,
+    inputs: Vec<PathBuf>,
+    config: StitchConfig,
+    prepared: Arc<PreparedStitchPlan>,
+}
+
+fn plan_config(config: &StitchConfig) -> StitchConfig {
+    let mut config = config.clone();
+    config.projection = None;
+    config.backend = ProcessingBackend::Auto;
+    config
+}
+
+impl FrameStitchPlan {
+    /// Effective algorithm used to prepare this frame's correction field.
+    pub fn mode(&self) -> crate::SeamMode {
+        self.prepared.mode()
+    }
+
+    /// Fraction of the bounded overlap analysis field carrying a trusted correction.
+    /// This describes solver confidence, not independent physical-scene accuracy.
+    pub fn confidence_coverage(&self) -> f64 {
+        self.prepared.confidence_coverage()
+    }
+
+    fn matches(&self, pair: &FramePair, recording: &PreparedRecording) -> bool {
+        self.identity == pair.identity()
+            && self.config == plan_config(&recording.config)
+            && self.inputs.iter().eq(recording
+                .sequence
+                .chapters
+                .iter()
+                .flat_map(|chapter| chapter.inputs.paths()))
+    }
 }
 
 pub(super) struct PreparedChapter {
@@ -204,8 +245,8 @@ impl PreparedRecording {
 ///
 /// No files are written and no frames are decoded or re-seeked here. Keep the
 /// session on its owning processing thread; scalers and GPU resources are reused.
-/// Every render resets independent-still color history, while file motion always
-/// preserves preceding chapter continuity. Resolution-reduced previews may differ
+/// Still rendering resets color history; continuous preview rendering retains
+/// timestamp-aware history. File motion preserves preceding chapter continuity. Resolution-reduced previews may differ
 /// photometrically from full-size stills and continuous video.
 pub struct RecordingFrameRenderer {
     prepared: PreparedRecording,
@@ -213,6 +254,8 @@ pub struct RecordingFrameRenderer {
     stitcher: StitchSession,
     underwater: underwater_color::UnderwaterProcessor,
     frame_rate: Option<f64>,
+    continuous: ContinuousFrameState,
+    retained_stitch_plan: Option<Arc<FrameStitchPlan>>,
 }
 
 impl RecordingFrameRenderer {
@@ -233,6 +276,7 @@ impl RecordingFrameRenderer {
         fallback: Option<GpuFailure>,
         context: &ExportContext,
     ) -> Result<Self> {
+        config.seam_mode.validate_capabilities()?;
         let dimensions = inspect_frame_dimensions(&sequence)?;
         if let Some(projection) = config.projection {
             validate_projection(projection)?;
@@ -240,13 +284,16 @@ impl RecordingFrameRenderer {
         let frame_rate = sequence.chapters[0].inspection.fps;
         let underwater =
             underwater_color::UnderwaterProcessor::new(config.underwater_color, frame_rate)?;
-        let stitcher = StitchSession::select(config.backend, requested, fallback, context)?;
+        let mut stitcher = StitchSession::select(config.backend, requested, fallback, context)?;
+        stitcher.set_seam_mode(config.seam_mode)?;
         Ok(Self {
             prepared: PreparedRecording::new(sequence, config),
             dimensions,
             stitcher,
             underwater,
             frame_rate,
+            continuous: ContinuousFrameState::default(),
+            retained_stitch_plan: None,
         })
     }
 
@@ -355,16 +402,68 @@ impl RecordingFrameRenderer {
         projection: EquirectangularProjection,
         cancel: &AtomicBool,
     ) -> Result<RenderedFrame> {
+        self.reset_continuous();
+        self.render_with_fallback(pair, projection, cancel, false)
+    }
+
+    /// Reuses a displayed pair's exact seam field at a new output resolution.
+    /// A different source, timestamp or processing recipe is rejected before rendering.
+    pub fn render_with_stitch_plan(
+        &mut self,
+        pair: &FramePair,
+        projection: EquirectangularProjection,
+        plan: Arc<FrameStitchPlan>,
+        cancel: &AtomicBool,
+    ) -> Result<RenderedFrame> {
+        if !plan.matches(pair, &self.prepared) {
+            return Err(Error::InvalidMedia(
+                "retained stitching plan does not match the source pair or processing recipe"
+                    .into(),
+            ));
+        }
+        self.retained_stitch_plan = Some(plan);
+        let result = self.render(pair, projection, cancel);
+        self.retained_stitch_plan = None;
+        self.stitcher.retained_plan = None;
+        result
+    }
+
+    /// Renders a sequential preview frame with PTS-aware restoration history.
+    /// Call `reset_continuous` on seeks or source discontinuities. Chapter/size
+    /// changes and non-increasing PTS reset automatically. Dropped preview
+    /// frames advance restoration timing without processing missing images.
+    pub fn render_continuous(
+        &mut self,
+        pair: &FramePair,
+        projection: EquirectangularProjection,
+        cancel: &AtomicBool,
+    ) -> Result<RenderedFrame> {
+        let result = self.render_with_fallback(pair, projection, cancel, true);
+        if result.is_err() {
+            self.reset_continuous();
+        }
+        result
+    }
+
+    /// Clears preview color history without discarding models or GPU resources.
+    pub fn reset_continuous(&mut self) {
+        self.continuous = ContinuousFrameState::default();
+        self.underwater.reset();
+    }
+
+    fn render_with_fallback(
+        &mut self,
+        pair: &FramePair,
+        projection: EquirectangularProjection,
+        cancel: &AtomicBool,
+        continuous: bool,
+    ) -> Result<RenderedFrame> {
         render_unpublished(self.prepared.config.backend, cancel, |fallback| {
             if let Some(failure) = fallback {
-                self.stitcher = StitchSession::try_open(
-                    BackendAttempt::Cpu,
-                    ProcessingBackend::Auto,
-                    Some(failure),
-                )
-                .map_err(Error::GpuUnavailable)?;
+                self.stitcher.retry_on_cpu(failure);
+                self.reset_continuous();
             }
-            self.render_strict(pair, projection, cancel)
+            self.render_frame(pair, projection, cancel, continuous)
         })
     }
 
@@ -376,6 +475,17 @@ impl RecordingFrameRenderer {
         projection: EquirectangularProjection,
         cancel: &AtomicBool,
     ) -> Result<RenderedFrame> {
+        self.reset_continuous();
+        self.render_frame(pair, projection, cancel, false)
+    }
+
+    fn render_frame(
+        &mut self,
+        pair: &FramePair,
+        projection: EquirectangularProjection,
+        cancel: &AtomicBool,
+        continuous: bool,
+    ) -> Result<RenderedFrame> {
         check_cancel(cancel)?;
         validate_pair(pair, &self.dimensions, &self.prepared.sequence)?;
         let info = self.prepare(pair.chapter_index, projection, cancel)?;
@@ -384,24 +494,60 @@ impl RecordingFrameRenderer {
             current.stabilizer.as_ref(),
             FrameTimestamp::Pts(pair.source_timestamp_micros),
         )?;
-        let panorama =
-            self.stitcher
-                .stitch(native_pair(pair), &current.calibration, projection, &motion)?;
+        self.stitcher.retained_plan = self
+            .retained_stitch_plan
+            .as_ref()
+            .map(|plan| Arc::clone(&plan.prepared));
+        let size = FrameDimensions {
+            width: projection.width,
+            height: projection.height,
+        };
+        if !continuous || self.continuous.starts_new_sequence(pair, size) {
+            self.underwater.reset();
+        }
+        self.stitcher.planner.set_interactive(continuous);
+        let panorama = self.stitcher.stitch(
+            native_pair(pair),
+            &current.calibration,
+            projection,
+            &motion,
+            cancel,
+            Some(self.underwater.frame(pair.timestamp_micros, continuous)),
+        )?;
+        let stitch_plan = self.retained_stitch_plan.clone().or_else(|| {
+            self.stitcher.current_plan.as_ref().map(|prepared| {
+                Arc::new(FrameStitchPlan {
+                    identity: pair.identity(),
+                    inputs: self
+                        .prepared
+                        .sequence
+                        .chapters
+                        .iter()
+                        .flat_map(|chapter| chapter.inputs.paths())
+                        .cloned()
+                        .collect(),
+                    config: plan_config(&self.prepared.config),
+                    prepared: Arc::clone(prepared),
+                })
+            })
+        });
         check_cancel(cancel)?;
-        self.underwater.reset();
-        let frame = self.underwater.process(panorama, pair.timestamp_micros)?;
-        check_cancel(cancel)?;
+        if continuous {
+            self.continuous.accept(pair, size);
+        }
         Ok(RenderedFrame {
-            frame,
+            frame: panorama,
             info,
             backend: self.stitcher.report.clone(),
+            stitch_plan,
         })
     }
 }
 
 /// Color-only native lens processing, independent of optical calibration/motion.
 /// Resizes without upscaling, converts declared source matrix/range to packed
-/// RGB8, applies I-Log then underwater restoration, and resets each lens image.
+/// RGB8 and applies I-Log then underwater restoration. Independent stills reset
+/// each lens image; continuous previews retain separate histories.
 pub struct NativeColorProcessor {
     sequence: RecordingSequence,
     dimensions: Vec<FrameDimensions>,
@@ -412,6 +558,8 @@ pub struct NativeColorProcessor {
     converters: [RgbFrameConverter; 2],
     underwater: underwater_color::UnderwaterProcessor,
     frame_rate: Option<f64>,
+    continuous_underwater: Option<underwater_color::UnderwaterProcessor>,
+    continuous: ContinuousFrameState,
 }
 
 impl NativeColorProcessor {
@@ -433,6 +581,8 @@ impl NativeColorProcessor {
             converters: [RgbFrameConverter::default(), RgbFrameConverter::default()],
             underwater,
             frame_rate,
+            continuous_underwater: None,
+            continuous: ContinuousFrameState::default(),
         })
     }
 
@@ -453,6 +603,8 @@ impl NativeColorProcessor {
                     chapter.inspection.fps,
                 )?;
                 self.frame_rate = chapter.inspection.fps;
+                self.continuous_underwater = None;
+                self.continuous = ContinuousFrameState::default();
             }
             self.lut = lut;
             self.current = Some(chapter_index);
@@ -486,11 +638,56 @@ impl NativeColorProcessor {
         width: Option<u32>,
         cancel: &AtomicBool,
     ) -> Result<[LensFrame; 2]> {
+        self.reset_continuous();
+        self.process_frame(pair, width, cancel, false)
+    }
+
+    /// Processes a sequential preview pair with independent lens history and
+    /// source-PTS-aware restoration timing. Does not change still/export mode.
+    pub fn process_continuous(
+        &mut self,
+        pair: &FramePair,
+        width: Option<u32>,
+        cancel: &AtomicBool,
+    ) -> Result<[LensFrame; 2]> {
+        let result = self.process_frame(pair, width, cancel, true);
+        if result.is_err() {
+            self.reset_continuous();
+        }
+        result
+    }
+
+    /// Clears both lens histories on seeks while retaining prepared resources.
+    pub fn reset_continuous(&mut self) {
+        self.continuous = ContinuousFrameState::default();
+        self.underwater.reset();
+        if let Some(processor) = &mut self.continuous_underwater {
+            processor.reset();
+        }
+    }
+
+    fn process_frame(
+        &mut self,
+        pair: &FramePair,
+        width: Option<u32>,
+        cancel: &AtomicBool,
+        continuous: bool,
+    ) -> Result<[LensFrame; 2]> {
         check_cancel(cancel)?;
         validate_pair(pair, &self.dimensions, &self.sequence)?;
         let processing = self.requires_processing(pair.chapter_index)?;
         let size = self.dimensions[pair.chapter_index].scaled(width)?;
-        self.underwater.prepare(size.width, size.height)?;
+        if continuous {
+            if self.continuous.starts_new_sequence(pair, size) {
+                self.reset_continuous();
+            }
+            if self.continuous_underwater.is_none() {
+                self.continuous_underwater = Some(underwater_color::UnderwaterProcessor::new(
+                    self.options,
+                    self.frame_rate,
+                )?);
+            }
+        }
         let mut lenses = Vec::with_capacity(2);
         for (index, source) in [&pair.a, &pair.b].into_iter().enumerate() {
             check_cancel(cancel)?;
@@ -506,19 +703,53 @@ impl NativeColorProcessor {
             if let Some(lut) = &self.lut {
                 lut.apply_rgb8(&mut rgb)?;
             }
-            self.underwater.reset();
-            self.underwater.process_rgb8(
-                &mut rgb,
-                size.width,
-                size.height,
-                pair.timestamp_micros,
-            )?;
+            if continuous {
+                let processor = if index == 0 {
+                    &mut self.underwater
+                } else {
+                    self.continuous_underwater
+                        .as_mut()
+                        .expect("second lens processor prepared")
+                };
+                processor.process_rgb8_continuous(
+                    &mut rgb,
+                    size.width,
+                    size.height,
+                    pair.timestamp_micros,
+                )?;
+            } else {
+                self.underwater.reset();
+                self.underwater.process_rgb8(
+                    &mut rgb,
+                    size.width,
+                    size.height,
+                    pair.timestamp_micros,
+                )?;
+            }
             lenses.push(LensFrame::new(size.width, size.height, rgb)?);
         }
         check_cancel(cancel)?;
+        if continuous {
+            self.continuous.accept(pair, size);
+        }
         Ok(lenses
             .try_into()
             .unwrap_or_else(|_| unreachable!("two lenses processed")))
+    }
+}
+
+#[derive(Default)]
+struct ContinuousFrameState(Option<(usize, i64, FrameDimensions)>);
+
+impl ContinuousFrameState {
+    fn starts_new_sequence(&self, pair: &FramePair, dimensions: FrameDimensions) -> bool {
+        self.0.is_none_or(|(chapter, pts, size)| {
+            chapter != pair.chapter_index || pair.timestamp_micros <= pts || size != dimensions
+        })
+    }
+
+    fn accept(&mut self, pair: &FramePair, dimensions: FrameDimensions) {
+        self.0 = Some((pair.chapter_index, pair.timestamp_micros, dimensions));
     }
 }
 
@@ -590,7 +821,7 @@ fn validate_pair(
     Ok(())
 }
 
-fn check_cancel(cancel: &AtomicBool) -> Result<()> {
+pub(super) fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Acquire) {
         Err(Error::Cancelled)
     } else {

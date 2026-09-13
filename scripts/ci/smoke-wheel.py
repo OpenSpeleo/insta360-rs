@@ -9,7 +9,11 @@ import insta360_rs
 
 
 def smoke(source: Path) -> None:
-    print(insta360_rs.capabilities())
+    capabilities = insta360_rs.capabilities()
+    print(capabilities)
+    assert capabilities.underwater_ai_compiled, "wheel must include the underwater AI engine"
+    reason = insta360_rs.SeamMode.AI.unavailable_reason()
+    assert reason is None, f"wheel must include AI stitching: {reason}"
     info = insta360_rs.probe(source)
     assert info.video_tracks, "fixture must contain a video track"
     media = insta360_rs.open_media(source)
@@ -23,7 +27,7 @@ def smoke(source: Path) -> None:
     assert files is not None
     assert any(str(path).endswith("py.typed") for path in files)
     assert any(str(path).endswith("__init__.pyi") for path in files)
-    print("Repaired wheel: import, probe, decode, extraction, and typing files passed")
+    print("Repaired wheel: AI capabilities, import, probe, decode, extraction, and typing files passed")
 
 
 if __name__ == "__main__":

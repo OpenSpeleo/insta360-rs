@@ -103,16 +103,16 @@ publishing CI's test wheel.
 
 ## Contract coverage
 
-| Tests                   | What they verify                                                                                                                                                                             |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_public_api.py`    | Real extension import, installed version, exports, exception hierarchy, installed stubs/member/signature parity, every wrapper's arguments/defaults/return/error propagation.                |
-| `test_config.py`        | All enum members, constructor/preset defaults, property mutation, dimensions and native type/range validation, capabilities and adapter fields.                                              |
-| `test_probe.py`         | INSV framing/metadata, camera aliases, optional values, timing, trailer/track/calibration/motion fields, path discovery, defensive result copies and typed errors.                           |
-| `test_extract.py`       | V2/V3 tails, records/streams/audio, decoded metadata and manifest, original bytes and packet hashes, paired inputs, destination safety and rollback.                                         |
-| `test_stream.py`        | Descriptors, independent readers, packet payload/flags/side data against FFprobe, RGB colors, PTS/time bases, B-frame draining and seeks, EOF recovery, lifetime and concurrent access.      |
-| `test_exports.py`       | Selection/interval validation, native errors, calibrated CPU PNG/JPEG/HEVC output, sorting/deduplication, scaling/quality/color/stabilization, underwater preset, atomic output and cleanup. |
-| `test_jobs.py`          | Async frame/video success, progress/backend/warnings, result consumption, cancellation, simultaneous waiters, GIL release, configuration snapshots and GPU-unavailable fallback.             |
-| `test_stabilization.py` | Camera-clock/exposure alignment, stabilization across seeks, rolling-shutter policies, and malformed motion metadata.                                                                        |
+| Tests                   | What they verify                                                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test_public_api.py`    | Real extension import, installed version, exports, exception hierarchy, installed stubs/member/signature parity, every wrapper's arguments/defaults/return/error propagation.                                                                                |
+| `test_config.py`        | All enum members, constructor/preset defaults, property mutation, dimensions and native type/range validation, capabilities and adapter fields.                                                                                                              |
+| `test_probe.py`         | INSV framing/metadata, camera aliases, optional values, timing, trailer/track/calibration/motion fields, path discovery, defensive result copies and typed errors.                                                                                           |
+| `test_extract.py`       | V2/V3 tails, records/streams/audio, decoded metadata and manifest, original bytes and packet hashes, paired inputs, destination safety and rollback.                                                                                                         |
+| `test_stream.py`        | Descriptors, independent readers, packet payload/flags/side data against FFprobe, RGB colors, PTS/time bases, B-frame draining and seeks, EOF recovery, lifetime and concurrent access.                                                                      |
+| `test_exports.py`       | Selection/interval validation, native errors, calibrated CPU PNG/JPEG/HEVC output, Dynamic/Optical Flow/AI seam exports and unavailable-AI errors, sorting/deduplication, scaling/quality/color/stabilization, underwater preset, atomic output and cleanup. |
+| `test_jobs.py`          | Async frame/video success, progress/backend/warnings, result consumption, cancellation, simultaneous waiters, GIL release, configuration snapshots and GPU-unavailable fallback.                                                                             |
+| `test_stabilization.py` | Camera-clock/exposure alignment, stabilization across seeks, rolling-shutter policies, and malformed motion metadata.                                                                                                                                        |
 
 FFmpeg creates short two-track recordings with distinguishable colors/patterns,
 AAC audio, and B-frames. Helpers append generated INSV metadata and calibration.
@@ -148,6 +148,14 @@ behavior. They do not establish real-camera stitch quality, every codec's
 behavior, cross-platform GPU correctness, or independence from the host's shared
 libraries. See the broader [Rust test strategy](../../docs/testing.md) and
 [wheel release qualification](../../docs/packaging.md#python-wheels).
+
+Seam-mode coverage exports a generated calibrated recording through each of
+`DYNAMIC`, `OPTICAL_FLOW`, and `AI`, then independently decodes each PNG and
+checks its dimensions and nonempty image content. An intentionally non-AI build
+must report the capability reason and create no output. The tests preserve the
+selected configuration; Rust binding tests separately verify its exact core-enum
+mapping. Synthetic image differences are not used as evidence of solver
+accuracy.
 
 ## Housing and restoration coverage
 

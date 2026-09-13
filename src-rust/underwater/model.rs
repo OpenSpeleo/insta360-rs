@@ -1,140 +1,39 @@
-//! Verified model wrapper decoding and the private MNN ownership boundary.
-use crate::{assets::sha256, Error, Result};
-use aes::{
-    cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit},
-    Aes256,
-};
-use std::{
-    ffi::{c_char, c_int, c_void, CStr},
-    ptr::NonNull,
-};
+//! Underwater tensor contracts over the shared independent MNN adapter.
+#[cfg(test)]
+use crate::mnn::decode_model;
+pub(super) use crate::mnn::runtime_version;
+use crate::Result;
 
-const WRAPPER_KEY: [u8; 32] = [
-    57, 98, 117, 97, 113, 109, 112, 99, 48, 116, 51, 98, 48, 53, 106, 119, 52, 121, 120, 117, 106,
-    50, 118, 103, 115, 105, 107, 118, 106, 118, 97, 50,
-];
-const MODEL197_DECODED: &str = "67bd7fa68fdc488b9cd139a850ced8b59107745023f110896f6859f193a98736";
-const MODEL198_DECODED: &str = "e1b7c4189166c1bf4b451146c87d295d12850fc069f01976b5ef9aa077d19bad";
-
-// The V1 wrapper encrypts first and last 2000 bytes using AES-256 ECB;
-// byte zero is padding length and the final byte selects key zero. Only
-// the two verified complete models are accepted, before native parsing.
-pub(super) fn decode_model(original: &[u8], id: u32) -> Result<Vec<u8>> {
-    let (length, original_hash, decoded_hash) = match id {
-        197 => (
-            15_009_214,
-            "53a24a86a41673adfbb56709cda53ec16584801d8918ad5ee0306f5027a92d5e",
-            MODEL197_DECODED,
-        ),
-        198 => (
-            7_574_990,
-            "0d9998552303ed52e7da489e126d6ac0884e7990fda05c14ae0e7ebb62afaf52",
-            MODEL198_DECODED,
-        ),
-        _ => {
-            return Err(Error::InvalidMedia(
-                "unknown underwater model identity".into(),
-            ))
-        }
-    };
-    if original.len() != length
-        || sha256(original).to_hex() != original_hash
-        || original[0] != 0
-        || original[length - 1] != 0
-    {
-        return Err(Error::InvalidMedia(format!(
-            "underwater model {id} original resource identity mismatch"
-        )));
-    }
-    let mut decoded = original[1..length - 1].to_vec();
-    let cipher = Aes256::new(GenericArray::from_slice(&WRAPPER_KEY));
-    let end = decoded.len();
-    for range in [0..2000, end - 2000..end] {
-        for block in decoded[range].chunks_exact_mut(16) {
-            cipher.decrypt_block(GenericArray::from_mut_slice(block));
-        }
-    }
-    if sha256(&decoded).to_hex() != decoded_hash {
-        return Err(Error::InvalidMedia(format!(
-            "underwater model {id} decoded resource identity mismatch"
-        )));
-    }
-    Ok(decoded)
-}
-
-unsafe extern "C" {
-    fn insta360_mnn_version() -> *const c_char;
-    fn insta360_mnn_create(
-        bytes: *const u8,
-        length: usize,
-        id: c_int,
-        error: *mut c_char,
-        capacity: usize,
-    ) -> *mut c_void;
-    fn insta360_mnn_run(
-        session: *mut c_void,
-        first: *const f32,
-        first_length: usize,
-        second: *const f32,
-        second_length: usize,
-        third: *const f32,
-        third_length: usize,
-        output: *mut f32,
-        output_length: usize,
-        error: *mut c_char,
-        capacity: usize,
-    ) -> c_int;
-    fn insta360_mnn_destroy(session: *mut c_void);
-}
-
-pub(super) fn runtime_version() -> Result<&'static str> {
-    // SAFETY: MNN returns its linked library's immutable static version string.
-    let pointer = unsafe { insta360_mnn_version() };
-    if pointer.is_null() {
-        return Err(Error::Media("MNN returned no runtime version".into()));
-    }
-    unsafe { CStr::from_ptr(pointer) }
-        .to_str()
-        .map_err(|_| Error::Media("MNN returned an invalid runtime version".into()))
-}
-
+#[derive(Debug)]
 pub(super) struct Model {
-    native: NonNull<c_void>,
+    inner: crate::mnn::Model,
     id: u32,
 }
-// A session is owned by one job. MNN CPU sessions may move between threads;
-// inference and buffer access require &mut self and are never concurrent.
-unsafe impl Send for Model {}
-impl std::fmt::Debug for Model {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MnnModel")
-            .field("id", &self.id)
-            .finish_non_exhaustive()
-    }
-}
-fn failure(bytes: &[c_char; 512]) -> Error {
-    // SAFETY: the buffer is initialized to zero and the C shim always terminates
-    // messages within capacity, including catch-all exception paths.
-    let message = unsafe { CStr::from_ptr(bytes.as_ptr()) }.to_string_lossy();
-    Error::Media(format!("underwater MNN: {message}"))
-}
 impl Model {
+    pub(super) fn open_with_threads(original: &[u8], id: u32, cpu_threads: usize) -> Result<Self> {
+        if !matches!(id, 197 | 198) {
+            return Err(crate::Error::InvalidMedia(
+                "unknown underwater model identity".into(),
+            ));
+        }
+        Ok(Self {
+            inner: crate::mnn::Model::open_with_threads(original, id, cpu_threads)?,
+            id,
+        })
+    }
+
+    #[cfg(test)]
     pub(super) fn open(original: &[u8], id: u32) -> Result<Self> {
-        let decoded = decode_model(original, id)?;
-        let mut error = [0; 512];
-        // SAFETY: byte slice remains live throughout creation; the independently
-        // built shim copies model data and retains no Rust buffer pointers.
-        let native = unsafe {
-            insta360_mnn_create(
-                decoded.as_ptr(),
-                decoded.len(),
-                id as c_int,
-                error.as_mut_ptr(),
-                error.len(),
-            )
-        };
-        let native = NonNull::new(native).ok_or_else(|| failure(&error))?;
-        Ok(Self { native, id })
+        Self::open_with_threads(original, id, 1)
+    }
+    #[cfg(test)]
+    pub(super) fn actual_threads(&self) -> Result<usize> {
+        self.inner.actual_threads()
+    }
+
+    #[cfg(test)]
+    pub(super) fn allocation_identity(&self) -> usize {
+        self.inner.allocation_identity()
     }
     pub(super) fn run(
         &mut self,
@@ -143,51 +42,12 @@ impl Model {
         third: &[f32],
         output: &mut [f32],
     ) -> Result<()> {
-        let lengths = if self.id == 197 {
-            [3 * 17 * 17 * 17, 3 * 256 * 256, 256, 3 * 17 * 17 * 17]
-        } else {
-            [3 * 224 * 224, 0, 0, 576]
-        };
-        if [first.len(), second.len(), third.len(), output.len()] != lengths
-            || first
-                .iter()
-                .chain(second)
-                .chain(third)
-                .any(|v| !v.is_finite())
-        {
-            return Err(Error::InvalidMedia(
-                "underwater MNN tensor length or finite-value contract mismatch".into(),
-            ));
-        }
-        let mut error = [0; 512];
-        // SAFETY: live slices have the verified lengths; the shim copies inputs,
-        // bounds output by length, catches exceptions, and retains no pointers.
-        let status = unsafe {
-            insta360_mnn_run(
-                self.native.as_ptr(),
-                first.as_ptr(),
-                first.len(),
-                second.as_ptr(),
-                second.len(),
-                third.as_ptr(),
-                third.len(),
-                output.as_mut_ptr(),
-                output.len(),
-                error.as_mut_ptr(),
-                error.len(),
-            )
-        };
-        if status != 0 {
-            return Err(failure(&error));
-        }
-        Ok(())
-    }
-}
-impl Drop for Model {
-    fn drop(&mut self) {
-        // SAFETY: this is the unique pointer returned by create, destroyed once.
-        unsafe {
-            insta360_mnn_destroy(self.native.as_ptr());
+        match self.id {
+            197 => self.inner.run(&[first, second, third], &mut [output]),
+            198 if second.is_empty() && third.is_empty() => self.inner.run(&[first], &mut [output]),
+            _ => Err(crate::Error::InvalidMedia(
+                "underwater MNN tensor contract mismatch".into(),
+            )),
         }
     }
 }
@@ -197,82 +57,96 @@ mod tests {
     use super::*;
 
     #[test]
+    fn invalid_cpu_thread_budgets_fail_before_model_parsing() {
+        for threads in [0, 5, usize::MAX] {
+            let error = Model::open_with_threads(&[], 197, threads).unwrap_err();
+            assert!(error.to_string().contains("CPU thread count"));
+        }
+    }
+
+    #[test]
     fn linked_runtime_is_the_pinned_mnn_version() {
         assert_eq!(runtime_version().unwrap(), "3.6.1");
     }
 
     #[test]
+    #[ignore = "requires a fresh MNN process; run the isolated shipping check"]
     fn model_varied_tensors_match_complete_reference() {
         // See tests/reference/README.md: generated through a standalone C++
         // Interpreter, without this adapter, with two nonuniform input patterns.
         let bytes = include_bytes!("../../tests/fixtures/underwater-mnn-reference-v1.bin");
         assert_eq!(&bytes[..8], b"MNNREF1\0");
-        let mut references = bytes[8..]
-            .chunks_exact(4)
-            .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()));
-        for id in [197, 198] {
-            let original = if id == 197 {
-                let mut original = insta360_rs_data_underwater_model_a::PAYLOADS[0].1.to_vec();
-                original.extend_from_slice(insta360_rs_data_underwater_model_b::PAYLOADS[0].1);
-                original
-            } else {
-                insta360_rs_data_underwater_resources::PAYLOADS
-                    .iter()
-                    .find(|(path, _)| *path == "underwater/model198.ins")
-                    .unwrap()
-                    .1
-                    .to_vec()
-            };
-            let mut model = Model::open(&original, id).unwrap();
-            for pattern in 0..2 {
-                let sample = |input: usize, index: usize| -> f32 {
-                    if id == 198 {
-                        (((index * if pattern == 0 { 17 } else { 71 } + 23 + pattern * 37) % 257)
-                            as i32
-                            - 128) as f32
-                            / 128.0
-                    } else {
-                        let factor = match input {
-                            0 => pattern + 3,
-                            1 => pattern + 7,
-                            _ => 13,
-                        };
-                        let offset = match input {
-                            0 => 19,
-                            1 => 43,
-                            _ => pattern * 31,
-                        };
-                        ((index * factor + offset) % 257) as f32 / 256.0
-                    }
-                };
-                let lengths = if id == 197 {
-                    [3 * 17 * 17 * 17, 3 * 256 * 256, 256]
+        // MNN's process-global pool never grows after its first creation.
+        // Establish its maximum first and verify each actual backend budget.
+        for threads in [4, 1, 2, 3] {
+            let mut references = bytes[8..]
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()));
+            for id in [197, 198] {
+                let original = if id == 197 {
+                    let mut original = insta360_rs_data_underwater_model_a::PAYLOADS[0].1.to_vec();
+                    original.extend_from_slice(insta360_rs_data_underwater_model_b::PAYLOADS[0].1);
+                    original
                 } else {
-                    [3 * 224 * 224, 0, 0]
+                    insta360_rs_data_underwater_resources::PAYLOADS
+                        .iter()
+                        .find(|(path, _)| *path == "underwater/model198.ins")
+                        .unwrap()
+                        .1
+                        .to_vec()
                 };
-                let inputs: [Vec<f32>; 3] = std::array::from_fn(|input| {
-                    (0..lengths[input])
-                        .map(|index| sample(input, index))
-                        .collect()
-                });
-                let mut actual = vec![0.0; if id == 197 { 3 * 17 * 17 * 17 } else { 576 }];
-                model
-                    .run(&inputs[0], &inputs[1], &inputs[2], &mut actual)
-                    .unwrap();
-                for (index, value) in actual.into_iter().enumerate() {
-                    let expected = references.next().expect("complete reference tensor");
-                    let tolerance = 0.0005 + expected.abs() * 0.0005;
-                    assert!(
-                        (value - expected).abs() <= tolerance,
-                        "model {id}, pattern {pattern}, element {index}: {value} vs {expected}"
-                    );
+                let mut model = Model::open_with_threads(&original, id, threads).unwrap();
+                assert_eq!(model.actual_threads().unwrap(), threads);
+                for pattern in 0..2 {
+                    let sample = |input: usize, index: usize| -> f32 {
+                        if id == 198 {
+                            (((index * if pattern == 0 { 17 } else { 71 } + 23 + pattern * 37)
+                                % 257) as i32
+                                - 128) as f32
+                                / 128.0
+                        } else {
+                            let factor = match input {
+                                0 => pattern + 3,
+                                1 => pattern + 7,
+                                _ => 13,
+                            };
+                            let offset = match input {
+                                0 => 19,
+                                1 => 43,
+                                _ => pattern * 31,
+                            };
+                            ((index * factor + offset) % 257) as f32 / 256.0
+                        }
+                    };
+                    let lengths = if id == 197 {
+                        [3 * 17 * 17 * 17, 3 * 256 * 256, 256]
+                    } else {
+                        [3 * 224 * 224, 0, 0]
+                    };
+                    let inputs: [Vec<f32>; 3] = std::array::from_fn(|input| {
+                        (0..lengths[input])
+                            .map(|index| sample(input, index))
+                            .collect()
+                    });
+                    let mut actual = vec![0.0; if id == 197 { 3 * 17 * 17 * 17 } else { 576 }];
+                    model
+                        .run(&inputs[0], &inputs[1], &inputs[2], &mut actual)
+                        .unwrap();
+                    for (index, value) in actual.into_iter().enumerate() {
+                        let expected = references.next().expect("complete reference tensor");
+                        let tolerance = 0.0005 + expected.abs() * 0.0005;
+                        assert!(
+                            (value - expected).abs() <= tolerance,
+                            "model {id}, threads {threads}, pattern {pattern}, element {index}: {value} vs {expected}"
+                        );
+                    }
                 }
             }
+            assert!(
+                references.next().is_none(),
+                "no unconsumed reference elements"
+            );
         }
-        assert!(
-            references.next().is_none(),
-            "no unconsumed reference elements"
-        );
     }
 
     #[test]

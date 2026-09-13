@@ -117,7 +117,7 @@ cargo add insta360-rs --features media,gpu
 ```
 
 The package name uses a hyphen; Rust code imports it as `insta360_rs`. The
-minimum supported Rust version is 1.88.
+minimum supported Rust version is 1.90, checked in CI with all library features.
 
 ### Command-line application
 
@@ -585,11 +585,12 @@ offset layouts, profile conversion, masks, and recommended capture policy.
 
 ## Bundled licensed Insta360 and Studio assets
 
-The library ships original Insta360 and Studio data resources through five
-licensed data dependencies, including the complete underwater AI resource group.
-The files live under `data/*/assets/` in this repository; each published crate
-stays below 10 MB. They are compiled into the library with `include_bytes!` and
-available directly at runtime.
+The library ships original Insta360 and Studio data resources through six
+licensed data dependencies, including the complete underwater AI resource group
+and Studio video stitching model 213 with its CoreML reference group. The files
+live under `data/*/assets/` in this repository; each published crate stays below
+10 MB. They are compiled into the library with `include_bytes!` and available
+directly at runtime.
 
 The bundle currently contains:
 
@@ -636,13 +637,15 @@ camera, lens ID, and Rust target.
 
 Bundling is not algorithm qualification. Every copied model is **unqualified by
 default**. The crate can parse OpenCV linear-SVM payloads and validate complete
-CoreML/Espresso groups, but it does not yet implement the camera-specific SVM
-feature extractor, AI seam inference, ColorPlus, deflicker, defringe, or denoise
-execution. The deterministic stitcher therefore does not silently invoke those
-resources. Explicit underwater AI restoration executes its verified resource
-group through independently built MNN. Its camera/platform qualification remains
-separate from that opt-in execution path. Other model groups remain
-inspection-only.
+CoreML/Espresso groups. Explicit underwater AI restoration and video AI
+stitching execute their verified resources through independently built MNN.
+Video AI stitching includes cylindrical belt preparation, bidirectional
+confidence checks and shared CPU/GPU flow compositing; see
+[model qualification](docs/ai-stitching-model.md). Camera/platform release
+qualification remains separate from these opt-in paths. The camera-specific SVM
+feature extractor, ColorPlus, deflicker, defringe, denoise and CoreML execution
+remain unavailable. The geometry-stable default does not silently invoke
+learned-model resources.
 
 The project Apache-2.0 license covers project-authored code. The original
 Insta360 resources retain their vendor licensing, and downstream distributors
@@ -733,7 +736,7 @@ See [Python bindings](docs/python.md) for examples and wheel targets.
 
 ## Development
 
-This independent Cargo workspace contains the library, five data crates, and
+This independent Cargo workspace contains the library, six data crates, and
 Python bindings. The root `[workspace.package]` table shares version, author,
 repository, edition, and minimum Rust version; all members use one `Cargo.lock`.
 

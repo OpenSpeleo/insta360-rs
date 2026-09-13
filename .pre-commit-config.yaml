@@ -1,6 +1,6 @@
 ---
 # Vendor payloads must retain their exact bytes: bundled tests check their hashes.
-exclude: ^data/(core|enhancement|underwater-model-a|underwater-model-b|underwater-resources)/assets/
+exclude: ^data/(core|ai-stitch-video|enhancement|underwater-model-a|underwater-model-b|underwater-resources)/assets/
 default_stages: [pre-commit]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

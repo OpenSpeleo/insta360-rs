@@ -25,7 +25,7 @@ CI. No CI distribution artifacts are published. See
 [release instructions](RELEASE.md) for dispatch, attestations, and recovery.
 
 For Rust publication, the release job uses this repository’s Cargo workspace.
-The Python extension has `publish = false`, leaving six publishable crates.
+The Python extension has `publish = false`, leaving seven publishable crates.
 Cargo packages and verifies all selected crates before its first upload. A
 deliberate compilation failure in any crate must therefore leave every crate
 unpublished. Separate registry requests can still fail after an earlier upload;
@@ -33,14 +33,24 @@ see [release recovery](RELEASE.md#failures-and-retries).
 
 ## Compiler and native dependencies
 
-[rust-toolchain.toml](../rust-toolchain.toml) is the single authority for the
-Rust compiler. Local Cargo, the shared CI setup action, and every wheel builder
-use its channel. There is no independently pinned CI version, moving stable
-channel, or alternate MSRV compiler. Update that file to change the compiler
-everywhere. All seven workspace members share the committed root `Cargo.lock`,
-and builds use `--locked`. Default members are the library and five data crates.
-Python is tested explicitly so its media/GPU dependencies do not change the
-library's feature boundaries.
+[rust-toolchain.toml](../rust-toolchain.toml) is the authority for the main Rust
+compiler. Local Cargo, the shared CI setup action, and every wheel builder use
+its channel. Update that file to change the primary compiler everywhere. All
+eight workspace members share the committed root `Cargo.lock`, and builds use
+`--locked`. Default members are the library and six data crates. Python is
+tested explicitly so its media/GPU dependencies do not change the library's
+feature boundaries.
+
+The minimum supported compiler is separately declared by
+`workspace.package.rust-version` in `Cargo.toml`. It is 1.90 because the locked
+`ordered-float` dependency used by the Linux and Windows GPU backends requires
+that version. The Linux job runs [`check-msrv.py`](../scripts/ci/check-msrv.py),
+which reads that declaration, installs the matching patch release, and checks
+all targets and features of the published workspace members with `rustup run`.
+It preserves the prepared FFmpeg/MNN environment, lockfile, Cargo flags,
+profile, and target directory; the main compiler remains pinned. This is a
+compile check on the minimum compiler, while runtime tests and release builds
+use the primary compiler.
 
 One Prepare FFmpeg matrix covers Linux, macOS ARM64/x86_64 and Windows. Each row
 identifies, restores or builds, and uploads its platform's SDK. The Linux row
@@ -104,30 +114,54 @@ unavailable macOS adapter leaves GPU execution unqualified even when the
 all-feature build passes. Licensed recordings, vendor-oracle comparisons, and
 physical GPU qualification remain separate; see [testing.md](testing.md).
 
+Every installed-wheel test job also sets `INSTA360_RS_REQUIRE_UNDERWATER_AI=1`
+and `INSTA360_RS_REQUIRE_AI_STITCHING=1`. The runner checks the actual
+extension's AquaVision capability and `SeamMode.AI.unavailable_reason()` before
+discovering tests. A missing shipped engine fails the job instead of becoming
+skipped coverage. Generated-fixture exports execute Dynamic, Optical Flow, and
+AI stitching through the installed Python API. Development builds can omit these
+requirements to test explicit disabled-feature errors.
+
 ## Checks and artifacts
 
-| Job                              | Coverage                                                                                                                                                         |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Prepare FFmpeg (each platform)   | Restore or build the matching native SDK once for downstream consumers                                                                                           |
-| Full prek                        | Both hook configurations, all Rust manifests and CI-script unit tests                                                                                            |
-| Tests (each platform)            | All-feature Rust test targets, doctests, release builds and binding Rust tests; build/repair a wheel and run the full Python 3.14 suite                          |
-| Tests (Linux), additional checks | Compile isolated features, execute the disabled-AI failure tests, build API docs, verify extracted crate archives, and smoke-test the wheel in a clean container |
-| Python 3.10–3.13 installed wheel | Test the same Linux wheel on the remaining supported interpreters; 3.14 already ran in Tests (Linux)                                                             |
-| Trigger matching release         | Dispatch release for the matching tag only after every test platform and compatibility row passes                                                                |
+| Job                              | Coverage                                                                                                                                                                           |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prepare FFmpeg (each platform)   | Restore or build the matching native SDK once for downstream consumers                                                                                                             |
+| Full prek                        | Both hook configurations, all Rust manifests and CI-script unit tests                                                                                                              |
+| Tests (each platform)            | All-feature Rust targets, isolated neural numerical references, doctests, release builds and binding Rust tests; build/repair a wheel and run the full Python 3.14 suite           |
+| Tests (Linux), additional checks | Compile isolated features and the declared Rust minimum, execute disabled-AI failure tests, build API docs, verify extracted crates, and smoke-test the wheel in a clean container |
+| Python 3.10–3.13 installed wheel | Test the same Linux wheel on the remaining supported interpreters; 3.14 already ran in Tests (Linux)                                                                               |
+| Trigger matching release         | Dispatch release for the matching tag only after every test platform and compatibility row passes                                                                                  |
 
 `--all-features` excludes code guarded by disabled-feature conditions. Linux
 therefore retains `cargo check --all-targets` for default, media, GPU, CLI and
-underwater-AI configurations, plus the specific unit/export failures for missing
-AI support. These checks do not repeat the complete runtime suites. Extracted
-crate tests are retained because they verify the shipped files rather than the
-checkout.
+underwater-AI and AI-stitching configurations, plus the specific unit/export
+failures for missing AI support. These checks do not repeat the complete runtime
+suites. Extracted crate tests are retained because they verify the shipped files
+rather than the checkout.
+
+The two ignored neural reference tests run separately in fresh processes on
+every test platform and for extracted all-feature crate archives. MNN's
+process-global CPU worker pool retains its initial size, so running these amid
+other tests could silently clamp a requested thread budget. Each reference test
+creates its largest budget first and verifies the runtime's effective thread
+counts. Ordinary `--all-targets` tests alone do not execute this numerical
+contract.
+
+Linux also runs the ignored
+`underwater::ilut::tests::exhaustive_optimized_grids_match_scalar_byte_domain`
+test once, after the release build, using the primary compiler and ordinary
+release profile. It compares optimized step-4 and step-16 LUT application with
+the scalar reference across all 16,777,216 RGB inputs. This checks byte
+equality; it runs no timing benchmarks and adds no timing threshold to CI.
 
 CI's `python-test-dist-<platform>` artifacts contain repaired test wheels;
 `python-test-dist-linux-x86_64` also contains the source distribution.
 `rust-crates` contains verified crate archives. These are available for
 inspection, while release builds its own distributions. Linux's clean smoke test
 uses a fresh Python container without system FFmpeg libraries and checks import,
-capabilities, probing, decoding, extraction, and typing metadata.
+both shipped AI capabilities, probing, decoding, extraction, and typing
+metadata. GPU availability is not required in that container.
 
 The PyO3 `extension-module` feature is enabled by Maturin when building wheels.
 Plain `cargo test --manifest-path src-python/Cargo.toml` leaves that feature off
@@ -176,7 +210,7 @@ export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
 Prek discovers [.pre-commit-config.yaml](../.pre-commit-config.yaml) and the
 nested [Python configuration](../src-python/.pre-commit-config.yaml). It checks
 common file errors, Markdown formatting, YAML, GitHub Actions, Rust formatting,
-unused dependencies, and Clippy across all seven workspace members with all
+unused dependencies, and Clippy across all eight workspace members with all
 features and warnings denied. Clippy also performs compilation checks. Rust
 hooks trigger for manifests and lockfiles as well as Rust sources. The Clippy
 hook also runs when its configuration or native setup scripts change. The Python
@@ -218,8 +252,14 @@ export LIBCLANG_PATH="$(llvm-config --libdir)"
 python3 scripts/ci/build-mnn.py --output .cache/mnn
 export MNN_ROOT="$PWD/.cache/mnn"
 cargo test --locked --all-targets --all-features
+for reference in underwater::ai::tests::aquavision_thread_budget_preserves_numerical_and_temporal_contracts underwater::model::tests::model_varied_tensors_match_complete_reference; do
+  cargo test --locked --all-features --lib "$reference" -- --ignored --exact --nocapture --test-threads=1
+done
 cargo test --locked --doc --all-features
 cargo build --locked --release --lib --bins --examples --all-features
+cargo test --locked --release --all-features --lib \
+  underwater::ilut::tests::exhaustive_optimized_grids_match_scalar_byte_domain \
+  -- --ignored --exact
 cargo test --locked --manifest-path src-python/Cargo.toml --all-targets
 RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps --all-features
 python3 scripts/ci/check-packages.py --all-features
@@ -229,11 +269,14 @@ python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
 The Linux-only feature-boundary checks are:
 
 ```sh
-for features in '' media gpu cli underwater-ai; do
+for features in '' media gpu cli underwater-ai ai-stitching; do
   cargo check --locked --all-targets --no-default-features --features "$features"
 done
 cargo test --locked --no-default-features --lib ai_capability_fails_before_requesting_resources_without_native_feature
+cargo test --locked --no-default-features --lib seam_ai::disabled_tests
+cargo test --locked --no-default-features --features media --test decoded_layouts disabled_ai_stitching_fails_
 cargo test --locked --no-default-features --features media --test decoded_layouts unavailable_ai_fails_preflight_and_both_exports_before_creating_outputs
+python3 scripts/ci/check-msrv.py
 ```
 
 For fast Python development, build and install a native wheel against system
@@ -303,10 +346,11 @@ Linux ARM64, Windows ARM64, musl, PyPy, and free-threaded CPython wheels are
 outside this build matrix. See [RELEASE.md](RELEASE.md) for registry
 configuration and publication from a version tag.
 
-## Optional underwater AI native prerequisite
+## Optional AI native prerequisite
 
-The core and legacy restoration build without MNN. Enabling `underwater-ai`
-requires CMake, a C/C++ compiler and a verified static CPU prefix:
+The core and non-AI modes build without MNN. Enabling `underwater-ai` or
+`ai-stitching` requires CMake, a C/C++ compiler and a verified static CPU
+prefix:
 
 ```sh
 python3 scripts/ci/build-mnn.py --output /path/to/mnn-prefix --jobs 2
@@ -322,7 +366,9 @@ Release static library with position-independent code. CUDA, OpenCL, Metal,
 Vulkan, OpenMP, training, converters, tools and optional KleidiAI/SME2 code are
 disabled. Windows uses the dynamic MSVC C runtime with a static MNN library. The
 Rust build compiles its private C++17 adapter and links MNN only when the
-feature is enabled.
+corresponding feature is enabled. Both features share one adapter and pinned
+engine; video AI stitching's preprocessing and numerical references are
+described in [video AI stitching](ai-stitching-model.md).
 
 The prefix includes unchanged MNN licensing bytes and third-party notices.
 Release wheels carry both `MNN-LICENSE.txt` and `MNN-THIRD-PARTY-NOTICES.txt`.
