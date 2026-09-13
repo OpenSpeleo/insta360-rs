@@ -8,6 +8,8 @@ details are intentionally omitted.
 
 ### Features
 
+- Choose Dynamic, Optical Flow or AI stitching optimizations, or keep them off.
+  c8f88dc
 - Select housing corrections automatically from recorded settings, with
   independent housing, environment, lens-accessory and mounting controls.
   7f8324f
@@ -21,12 +23,13 @@ details are intentionally omitted.
 
 ### Performance
 
-- Open housing-corrected panoramas faster and keep repeated previews responsive.
-  7b8abe6
-- Faster synchronized fisheye previews when moving through a recording. 84430e5
+- Faster underwater color restoration and repeated panorama previews. c8f88dc
+- Faster synchronized fisheye previews when moving through a recording. c8f88dc
 
 ### Fixes
 
+- Improve X5 underwater housing correction and prevent unstable seam distortion.
+  c8f88dc
 - Correct X5 Dive Case Pro selection, radial housing masks and recorded
   sensor-window calibration. 7f8324f
 - Correct polynomial projection and housing conversion for unequal lens
