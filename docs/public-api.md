@@ -86,9 +86,9 @@ file profiles. See [stabilization](stabilization.md) for equations and limits.
 Explicit `Hardware` fails if no named hardware encoder can be opened. Export
 decoding remains software, while native random-access previews have a separate
 hardware-decoding policy. Native GPU codec surfaces are not exposed. `Auto`
-tries hardware HEVC encoders first regardless of the panorama renderer and
-falls back to software when hardware candidates are unavailable or fail to open.
-It does not yet restart after a mid-stream encoder failure. Encoder policy and
+tries hardware HEVC encoders first regardless of the panorama renderer and falls
+back to software when hardware candidates are unavailable or fail to open. It
+does not yet restart after a mid-stream encoder failure. Encoder policy and
 fallback-order tests cover strict hardware/software selection and automatic
 fallback without requiring a physical GPU.
 

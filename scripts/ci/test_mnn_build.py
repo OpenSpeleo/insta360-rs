@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -100,9 +101,9 @@ class MnnBuildTests(unittest.TestCase):
             (destination / "include/source.hpp").read_bytes(), b"original header"
         )
 
-    def test_verified_build_cache_rejects_changed_native_bytes_and_configuration(self):
+    def source_archive(self):
         source = f"MNN-{mnn.COMMIT}"
-        archive = self.archive(
+        return self.archive(
             [
                 (f"{source}/include/MNN/Interpreter.hpp", b"header"),
                 (f"{source}/LICENSE.txt", b"original MNN notice"),
@@ -113,7 +114,9 @@ class MnnBuildTests(unittest.TestCase):
                 ),
             ]
         )
-        body = archive.read_bytes()
+
+    def test_verified_build_cache_rejects_changed_native_bytes_and_configuration(self):
+        body = self.source_archive().read_bytes()
         calls = []
 
         def compile_source(args, *, check):
@@ -162,6 +165,98 @@ class MnnBuildTests(unittest.TestCase):
             metadata["files"] = {"../escape": "invalid"}
             (prefix / "insta360-mnn-build.json").write_text(json.dumps(metadata))
             self.assertFalse(mnn.verify_prefix(prefix, config))
+
+    def test_deep_cache_build_uses_short_work_paths_and_atomic_publication(self):
+        body = self.source_archive().read_bytes()
+        prefix = (
+            self.root
+            / "src-tauri/.mnn-cache"
+            / f"mnn-windows-x86_64-{'a' * 64}"
+            / "install"
+        ).resolve()
+        work_paths = []
+        rename = Path.rename
+
+        def compile_source(args, *, check):
+            self.assertTrue(check)
+            if "-S" in args:
+                source = Path(args[args.index("-S") + 1])
+                build = Path(args[args.index("-B") + 1])
+                self.assertTrue((source / "include/MNN/Interpreter.hpp").is_file())
+                self.assertFalse(source.is_relative_to(prefix.parent))
+                self.assertFalse(build.is_relative_to(prefix.parent))
+                self.assertEqual(build.parent.parent, Path(tempfile.gettempdir()))
+                work_paths.append(build.parent)
+                self.assertEqual(args[5:], list(mnn.CMAKE_FLAGS))
+            else:
+                build = Path(args[args.index("--build") + 1])
+                self.assertEqual(
+                    args,
+                    [
+                        "cmake",
+                        "--build",
+                        str(build),
+                        "--config",
+                        "Release",
+                        "--target",
+                        "MNN",
+                        "--parallel",
+                        "2",
+                    ],
+                )
+                (build / "Release").mkdir(parents=True)
+                (build / "Release/MNN.lib").write_bytes(b"static CPU library")
+
+        def publish(source, target):
+            self.assertEqual(target, prefix.resolve())
+            self.assertEqual(source.parent.parent, target.parent)
+            self.assertFalse(target.exists())
+            self.assertTrue(mnn.verify_prefix(source, mnn.build_configuration()))
+            return rename(source, target)
+
+        with (
+            patch.object(mnn, "SHA256", hashlib.sha256(body).hexdigest()),
+            patch.object(mnn.urllib.request, "urlopen", return_value=io.BytesIO(body)),
+            patch.object(mnn.subprocess, "run", side_effect=compile_source),
+            patch.object(Path, "rename", autospec=True, side_effect=publish) as move,
+            redirect_stdout(io.StringIO()),
+        ):
+            mnn.build(prefix, 2)
+            move.assert_called_once()
+            self.assertTrue(mnn.verify_prefix(prefix, mnn.build_configuration()))
+        self.assertEqual(len(work_paths), 1)
+        self.assertFalse(work_paths[0].exists())
+        self.assertEqual(list(prefix.parent.iterdir()), [prefix])
+        self.assertEqual((prefix / "lib/MNN.lib").read_bytes(), b"static CPU library")
+
+    def test_cmake_failures_remove_work_and_staging_without_publishing(self):
+        body = self.source_archive().read_bytes()
+        for failed_step in ("-S", "--build"):
+            with self.subTest(failed_step=failed_step):
+                prefix = self.root / failed_step / "install"
+                work_paths = []
+
+                def compile_source(args, *, check):
+                    self.assertTrue(check)
+                    if "-S" in args:
+                        build = Path(args[args.index("-B") + 1])
+                        build.mkdir()
+                        work_paths.append(build.parent)
+                    if failed_step in args:
+                        raise subprocess.CalledProcessError(1, args)
+
+                with (
+                    patch.object(mnn, "SHA256", hashlib.sha256(body).hexdigest()),
+                    patch.object(
+                        mnn.urllib.request, "urlopen", return_value=io.BytesIO(body)
+                    ),
+                    patch.object(mnn.subprocess, "run", side_effect=compile_source),
+                ):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        mnn.build(prefix, 2)
+                self.assertEqual(len(work_paths), 1)
+                self.assertFalse(work_paths[0].exists())
+                self.assertEqual(list(prefix.parent.iterdir()), [])
 
     def test_source_digest_failure_never_invokes_cmake_or_publishes_prefix(self):
         prefix = self.root / "prefix"

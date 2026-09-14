@@ -129,9 +129,16 @@ def build(output: Path, jobs: int) -> None:
             f"MNN output already exists but is incomplete or incompatible: {output}"
         )
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix="insta360-mnn-", dir=output.parent
-    ) as directory:
+    # MSBuild's file tracker can exceed MAX_PATH when CMake's nested scratch
+    # directories live under a hash-named cache. Build in the OS temp directory,
+    # but stage the finished prefix beside its destination for an atomic rename
+    # even when the temporary directory is on another drive.
+    with (
+        tempfile.TemporaryDirectory(prefix="mnn-") as directory,
+        tempfile.TemporaryDirectory(
+            prefix="mnn-install-", dir=output.parent
+        ) as staging_directory,
+    ):
         work = Path(directory)
         archive = work / "source.tar.gz"
         with (
@@ -145,7 +152,7 @@ def build(output: Path, jobs: int) -> None:
             )
         source = extract_source(archive, work / "source")
         build_dir = work / "build"
-        prefix = work / "prefix"
+        prefix = Path(staging_directory) / "prefix"
         subprocess.run(
             ["cmake", "-S", str(source), "-B", str(build_dir), *CMAKE_FLAGS], check=True
         )  # nosec B603 B607

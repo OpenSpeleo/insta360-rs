@@ -379,6 +379,14 @@ Build output is published only after compilation, header copying and notice
 preparation succeed. The shared `setup-mnn` action and wheel builders use this
 same script; no Insta360 SDK runtime is needed.
 
+Source extraction and CMake builds use the OS temporary directory so deeply
+nested cache paths do not exceed Windows MSBuild file-tracker path limits. The
+completed prefix is staged beside its destination and renamed into place,
+preserving atomic publication when temporary work and the cache are on different
+drives. Both temporary directories are removed on success or failure; the cache
+identity, native build flags and installed layout remain independent of scratch
+paths.
+
 Application build wrappers can run
 `python3 scripts/ci/build-mnn.py --configuration` to read the JSON cache
 identity, including the builder digest, source pin, flags and compiler
