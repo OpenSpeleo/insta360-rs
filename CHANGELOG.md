@@ -23,6 +23,8 @@ details are intentionally omitted.
 
 ### Performance
 
+- Automatically use available hardware encoders for faster video exports.
+  3dbdfb7
 - Faster underwater color restoration and repeated panorama previews. c8f88dc
 - Faster synchronized fisheye previews when moving through a recording. c8f88dc
 
