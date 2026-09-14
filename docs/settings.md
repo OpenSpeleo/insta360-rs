@@ -23,11 +23,12 @@ Keep the normal path small:
   mixes renderers in one successful output. Explicit `Cpu` and `Gpu` are strict.
 - **Media acceleration**: video-only `Auto`, `Software`, or `Hardware`,
   independent of the stitch backend. It currently selects the HEVC encoder;
-  export decoding is software FFmpeg. `Hardware` is strict. `Auto` prefers
-  software encoding for CPU stitching and hardware encoding for GPU stitching,
-  then tries all eligible encoder candidates in priority order when an encoder
-  cannot be configured/opened. Failure after encoding begins does not yet
-  restart the complete export.
+  export decoding is software FFmpeg. `Hardware` and `Software` are strict.
+  `Auto` tries hardware encoders first with either renderer, then falls back to
+  software when hardware encoders are unavailable or cannot be configured/opened.
+  This keeps available encoder acceleration independent of panorama rendering;
+  encoder selection runs once when opening the writer, not per frame. Failure
+  after encoding begins does not yet restart the complete export.
 - **Color conversion**: `Auto`, `Preserve`, or `ILogToRec709`. Auto applies the
   bundled X5 Rec.709 LUT only to positively identified I-Log recordings.
   Preserve keeps the recorded encoding; the explicit mode handles older unmarked

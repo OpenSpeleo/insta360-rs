@@ -96,13 +96,10 @@ fn inspect_video(
     let duration = range
         .effective_duration(Some(sequence.duration))
         .expect("known source duration");
-    let encoder_candidates = hevc_encoder_candidates(
-        options.acceleration,
-        config.backend != ProcessingBackend::Cpu,
-    )
-    .into_iter()
-    .map(|codec| codec.name().to_owned())
-    .collect::<Vec<_>>();
+    let encoder_candidates = hevc_encoder_candidates(options.acceleration)
+        .into_iter()
+        .map(|codec| codec.name().to_owned())
+        .collect::<Vec<_>>();
     if encoder_candidates.is_empty() {
         return Err(Error::MissingCapability(
             "no eligible HEVC encoder is available for the selected acceleration policy".into(),
@@ -294,7 +291,6 @@ fn export_attempt(
                     options.quality,
                     HevcEncodingPolicy {
                         acceleration: options.acceleration,
-                        gpu_stitching: stitcher.report.selected == EffectiveBackend::Gpu,
                         direct_bt709_yuv: panorama.is_gpu_yuv420(),
                         converted_rec709: stitcher.color_lut.is_some(),
                     },

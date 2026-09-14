@@ -465,9 +465,11 @@ Video-only options:
 | `--media-acceleration` | `auto`, `software`, `hardware` | `auto`  | HEVC encoder selection, independent of the stitch backend. |
 
 `--media-acceleration hardware` requires an eligible hardware HEVC encoder;
-`software` requires a software encoder. `auto` tries eligible encoders in
-priority order. Export decoding is software in every mode, and an encoder
-failure after frames have already been submitted does not restart the job.
+`software` requires a software encoder. `auto` tries hardware encoders first
+with either stitch backend and falls back to software when hardware encoders
+are unavailable or fail to open. Export decoding is software in every mode,
+and an encoder failure after frames have already been submitted does not
+restart the job.
 
 ### Direction Lock
 

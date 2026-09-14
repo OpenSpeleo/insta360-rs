@@ -15,10 +15,10 @@ use crate::color::CubeLut;
 use crate::container::{InsvMetadata, RecordedColorMode};
 use crate::{
     AudioPolicy, BackendReport, CalibrationResolver, ColorConversion, CpuStitcher,
-    EffectiveBackend, EquirectangularProjection, Error, ExportResult, FrameSelection, GpuFailure,
-    GpuFailureCode, GpuFailureStage, ImageExportOptions, ImageFormat, InputSet, LensFrame,
-    MediaAcceleration, Orientation, PanoramaFrame, ProcessingBackend, ResolvedCalibration, Result,
-    StitchConfig, VideoExportOptions,
+    EquirectangularProjection, Error, ExportResult, FrameSelection, GpuFailure, GpuFailureCode,
+    GpuFailureStage, ImageExportOptions, ImageFormat, InputSet, LensFrame, MediaAcceleration,
+    Orientation, PanoramaFrame, ProcessingBackend, ResolvedCalibration, Result, StitchConfig,
+    VideoExportOptions,
 };
 
 use super::stabilization::FileStabilizer;
@@ -1605,7 +1605,6 @@ struct HevcWriter {
 #[derive(Clone, Copy)]
 struct HevcEncodingPolicy {
     acceleration: MediaAcceleration,
-    gpu_stitching: bool,
     direct_bt709_yuv: bool,
     converted_rec709: bool,
 }
@@ -1633,7 +1632,7 @@ impl HevcWriter {
         policy: HevcEncodingPolicy,
         audio_layout: Option<audio::AudioLayout>,
     ) -> Result<Self> {
-        let candidates = hevc_encoder_candidates(policy.acceleration, policy.gpu_stitching);
+        let candidates = hevc_encoder_candidates(policy.acceleration);
         if candidates.is_empty() {
             return Err(Error::MissingCapability(match policy.acceleration {
                 MediaAcceleration::Hardware => {
@@ -1831,31 +1830,20 @@ const HARDWARE_HEVC_ENCODERS: &[&str] = &[
 ];
 const SOFTWARE_HEVC_ENCODERS: &[&str] = &["libx265", "libkvazaar"];
 
-fn hevc_encoder_priority(
-    acceleration: MediaAcceleration,
-    gpu_stitching: bool,
-) -> Vec<&'static str> {
-    match (acceleration, gpu_stitching) {
-        (MediaAcceleration::Hardware, _) => HARDWARE_HEVC_ENCODERS.to_vec(),
-        (MediaAcceleration::Software, _) => SOFTWARE_HEVC_ENCODERS.to_vec(),
-        (MediaAcceleration::Auto, true) => HARDWARE_HEVC_ENCODERS
+fn hevc_encoder_priority(acceleration: MediaAcceleration) -> Vec<&'static str> {
+    match acceleration {
+        MediaAcceleration::Hardware => HARDWARE_HEVC_ENCODERS.to_vec(),
+        MediaAcceleration::Software => SOFTWARE_HEVC_ENCODERS.to_vec(),
+        MediaAcceleration::Auto => HARDWARE_HEVC_ENCODERS
             .iter()
             .chain(SOFTWARE_HEVC_ENCODERS)
-            .copied()
-            .collect(),
-        (MediaAcceleration::Auto, false) => SOFTWARE_HEVC_ENCODERS
-            .iter()
-            .chain(HARDWARE_HEVC_ENCODERS)
             .copied()
             .collect(),
     }
 }
 
-fn hevc_encoder_candidates(
-    acceleration: MediaAcceleration,
-    gpu_stitching: bool,
-) -> Vec<ffmpeg::Codec> {
-    let mut candidates = hevc_encoder_priority(acceleration, gpu_stitching)
+fn hevc_encoder_candidates(acceleration: MediaAcceleration) -> Vec<ffmpeg::Codec> {
+    let mut candidates = hevc_encoder_priority(acceleration)
         .into_iter()
         .filter_map(ffmpeg::encoder::find_by_name)
         .collect::<Vec<_>>();
@@ -2474,7 +2462,7 @@ fn media_error(action: &str, error: ffmpeg::Error) -> Error {
 mod tests {
     use super::*;
     use crate::Stabilization;
-    use crate::{Environment, Housing, PanoramaFrame};
+    use crate::{EffectiveBackend, Environment, Housing, PanoramaFrame};
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
@@ -3775,32 +3763,52 @@ mod tests {
     #[test]
     fn hevc_encoder_priorities_preserve_acceleration_policy() {
         assert_eq!(
-            hevc_encoder_priority(MediaAcceleration::Hardware, false),
+            hevc_encoder_priority(MediaAcceleration::Hardware),
             HARDWARE_HEVC_ENCODERS
         );
         assert_eq!(
-            hevc_encoder_priority(MediaAcceleration::Software, true),
+            hevc_encoder_priority(MediaAcceleration::Software),
             SOFTWARE_HEVC_ENCODERS
         );
 
-        let gpu_auto = hevc_encoder_priority(MediaAcceleration::Auto, true);
+        let automatic = hevc_encoder_priority(MediaAcceleration::Auto);
         assert_eq!(
-            &gpu_auto[..HARDWARE_HEVC_ENCODERS.len()],
+            &automatic[..HARDWARE_HEVC_ENCODERS.len()],
             HARDWARE_HEVC_ENCODERS
         );
         assert_eq!(
-            &gpu_auto[HARDWARE_HEVC_ENCODERS.len()..],
+            &automatic[HARDWARE_HEVC_ENCODERS.len()..],
             SOFTWARE_HEVC_ENCODERS
         );
+    }
 
-        let cpu_auto = hevc_encoder_priority(MediaAcceleration::Auto, false);
+    #[test]
+    fn automatic_encoder_falls_back_to_software_after_hardware_open_failures() {
+        let mut attempted = Vec::new();
+        let selected = try_in_order(
+            hevc_encoder_priority(MediaAcceleration::Auto),
+            |candidate| {
+                attempted.push(*candidate);
+                if *candidate == "libx265" {
+                    Ok(*candidate)
+                } else {
+                    Err("hardware encoder unavailable")
+                }
+            },
+        )
+        .expect("software fallback opens");
+
+        assert_eq!(selected, "libx265");
         assert_eq!(
-            &cpu_auto[..SOFTWARE_HEVC_ENCODERS.len()],
-            SOFTWARE_HEVC_ENCODERS
-        );
-        assert_eq!(
-            &cpu_auto[SOFTWARE_HEVC_ENCODERS.len()..],
-            HARDWARE_HEVC_ENCODERS
+            attempted,
+            [
+                "hevc_videotoolbox",
+                "hevc_mf",
+                "hevc_nvenc",
+                "hevc_amf",
+                "hevc_vaapi",
+                "libx265",
+            ]
         );
     }
 
@@ -3838,7 +3846,7 @@ mod tests {
     #[test]
     fn hevc_writer_creates_an_atomic_mp4_when_an_encoder_is_available() {
         ffmpeg::init().expect("FFmpeg initialization");
-        if hevc_encoder_candidates(MediaAcceleration::Software, false).is_empty() {
+        if hevc_encoder_candidates(MediaAcceleration::Software).is_empty() {
             return;
         }
         let directory = tempfile::tempdir().expect("temp directory");
@@ -3854,7 +3862,6 @@ mod tests {
             80,
             HevcEncodingPolicy {
                 acceleration: MediaAcceleration::Software,
-                gpu_stitching: false,
                 direct_bt709_yuv: false,
                 converted_rec709: false,
             },
