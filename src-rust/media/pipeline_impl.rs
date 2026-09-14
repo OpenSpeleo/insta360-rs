@@ -3005,6 +3005,18 @@ mod tests {
         }
     }
 
+    fn assert_restoration_fixture(frame: &PanoramaFrame, color: [u8; 3], session: &StitchSession) {
+        // Identical solid lenses cover the whole synthetic panorama. Check the
+        // signal independently before comparing restoration paths with each other.
+        for (index, pixel) in frame.as_rgb8().chunks_exact(3).enumerate() {
+            assert!(
+                pixel.iter().zip(color).all(|(a, b)| a.abs_diff(b) <= 2),
+                "before restoration, pixel {index}: {pixel:?}, expected {color:?}, backend {:?}",
+                session.report
+            );
+        }
+    }
+
     #[cfg(feature = "gpu")]
     fn restoration_gpu_available() -> bool {
         if !crate::gpu::available_adapters().is_empty() {
@@ -3080,6 +3092,11 @@ mod tests {
                         None,
                     )
                     .unwrap();
+                let mut expected_color = color;
+                if let Some(lut) = &lut {
+                    lut.apply_rgb8(&mut expected_color).unwrap();
+                }
+                assert_restoration_fixture(&unprocessed, expected_color, &session);
                 let mut expected = unprocessed.as_rgb8().to_vec();
                 if continuous {
                     reference
@@ -3090,10 +3107,10 @@ mod tests {
                         .process_rgb8(&mut expected, pts as f64 / 1_000_000.0)
                         .unwrap();
                 }
-                assert_ne!(
-                    expected,
-                    unprocessed.as_rgb8(),
-                    "fixture must exercise restoration"
+                assert!(
+                    expected != unprocessed.as_rgb8(),
+                    "fixture must exercise restoration: {attempt:?}, frame {index}, backend {:?}",
+                    session.report
                 );
                 let frame = if video {
                     match session
@@ -3182,7 +3199,11 @@ mod tests {
             ..Default::default()
         };
         let mut color = underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
-        for (index, luma) in [95, 141].into_iter().enumerate() {
+        // Independent BT.709 limited-range conversion of Y with Cb=148, Cr=102.
+        for (index, (luma, rgb)) in [(95, [45, 102, 134]), (141, [99, 155, 188])]
+            .into_iter()
+            .enumerate()
+        {
             let expected = session
                 .stitch(
                     restoration_yuv_pair(false, luma),
@@ -3193,6 +3214,7 @@ mod tests {
                     None,
                 )
                 .unwrap();
+            assert_restoration_fixture(&expected, rgb, &session);
             let image = session
                 .stitch(
                     restoration_yuv_pair(false, luma),
@@ -3252,7 +3274,15 @@ mod tests {
                 underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
             // Exercise export's processed-frame clock and preview's source-time clock.
             let continuous = mixed;
-            for (index, luma) in [95, 141, 110].into_iter().enumerate() {
+            // Independent BT.709 limited-range conversion with Cb=148, Cr=102.
+            for (index, (luma, rgb)) in [
+                (95, [45, 102, 134]),
+                (141, [99, 155, 188]),
+                (110, [63, 119, 152]),
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 let pts = 1_000_000 + index as i64 * 170_000;
                 let unprocessed = session
                     .stitch(
@@ -3264,6 +3294,7 @@ mod tests {
                         None,
                     )
                     .unwrap();
+                assert_restoration_fixture(&unprocessed, rgb, &session);
                 let image = session
                     .stitch(
                         restoration_yuv_pair(mixed, luma),
@@ -3274,10 +3305,10 @@ mod tests {
                         Some(image_color.frame(pts, continuous)),
                     )
                     .unwrap();
-                assert_ne!(
-                    image.as_rgb8(),
-                    unprocessed.as_rgb8(),
-                    "AI must change the fixture colors"
+                assert!(
+                    image.as_rgb8() != unprocessed.as_rgb8(),
+                    "AI must change fixture colors: mixed={mixed}, frame {index}, backend {:?}",
+                    session.report
                 );
                 let video = session
                     .stitch_video(

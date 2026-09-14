@@ -116,6 +116,13 @@ successful-frame temporal reuse.
 
 ## GPU qualification status
 
+Restoration bridge and LUT-cache tests first qualify the uncorrected panorama
+against independently known solid RGB colors. NV12 fixtures use BT.709
+limited-range reference values. This prevents two all-black renders from
+satisfying a comparison and distinguishes missing source signal from a
+restoration failure. Assertion messages include the selected backend or adapter
+and the first incorrect pixel rather than dumping entire image buffers.
+
 Prepared-correction parity compares each backend's signed RGB change from its
 own fixed-calibration render, at both tested output sizes and with global
 rotation. The mean difference between these effects must stay below 0.2 byte

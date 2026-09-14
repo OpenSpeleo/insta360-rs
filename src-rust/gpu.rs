@@ -2425,9 +2425,10 @@ mod tests {
             return;
         }
         let mut stitcher = super::GpuStitcher::new().unwrap();
+        let color = [64u8, 96, 128];
         let lenses = [
-            LensFrame::new(16, 16, vec![96; 16 * 16 * 3]).unwrap(),
-            LensFrame::new(16, 16, vec![96; 16 * 16 * 3]).unwrap(),
+            LensFrame::new(16, 16, color.repeat(16 * 16)).unwrap(),
+            LensFrame::new(16, 16, color.repeat(16 * 16)).unwrap(),
         ];
         let calibration = synthetic_dual_fisheye_calibration(16, 16).unwrap();
         let projection = EquirectangularProjection {
@@ -2449,6 +2450,15 @@ mod tests {
             )
         };
         let uncorrected = render(&stitcher);
+        // A constant LUT can paint even a failed, all-black projection. Qualify
+        // the uncorrected renderer against the known input before testing reuse.
+        for (index, pixel) in uncorrected.as_rgb8().chunks_exact(3).enumerate() {
+            assert!(
+                pixel.iter().zip(color).all(|(a, b)| a.abs_diff(b) <= 1),
+                "uncorrected pixel {index}: {pixel:?}, expected {color:?}, adapter {:?}",
+                stitcher.adapter_info()
+            );
+        }
         let original_buffer = buffer(&stitcher);
         stitcher.set_color_lut(None);
         assert_eq!(buffer(&stitcher), original_buffer);
