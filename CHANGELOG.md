@@ -8,6 +8,19 @@ details are intentionally omitted.
 
 ### Features
 
+### Performance
+
+- Automatically use available hardware encoders for faster video exports.
+  3dbdfb7
+
+### Fixes
+
+- Prevent black or incorrect stitched panoramas on Windows. d66773c
+
+## v0.2.0 - 2026-09-13
+
+### Features
+
 - Choose Dynamic, Optical Flow or AI stitching optimizations, or keep them off.
   c8f88dc
 - Select housing corrections automatically from recorded settings, with
@@ -23,8 +36,6 @@ details are intentionally omitted.
 
 ### Performance
 
-- Automatically use available hardware encoders for faster video exports.
-  3dbdfb7
 - Faster underwater color restoration and repeated panorama previews. c8f88dc
 - Faster synchronized fisheye previews when moving through a recording. c8f88dc
 
