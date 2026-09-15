@@ -3268,6 +3268,9 @@ mod tests {
         for mixed in [false, true] {
             let mut session =
                 StitchSession::try_open(BackendAttempt::Gpu, ProcessingBackend::Gpu, None).unwrap();
+            let mut cpu_reference = mixed.then(|| {
+                StitchSession::try_open(BackendAttempt::Cpu, ProcessingBackend::Cpu, None).unwrap()
+            });
             let mut image_color =
                 underwater_color::UnderwaterProcessor::new(options, Some(30.0)).unwrap();
             let mut video_color =
@@ -3294,7 +3297,46 @@ mod tests {
                         None,
                     )
                     .unwrap();
-                assert_restoration_fixture(&unprocessed, rgb, &session);
+                if let Some(cpu_reference) = &mut cpu_reference {
+                    // Mixed layouts pass through FFmpeg's integer RGB conversion,
+                    // whose rounding varies with format and CPU implementation.
+                    // Compare stitching after that shared conversion boundary.
+                    let expected = cpu_reference
+                        .stitch(
+                            restoration_yuv_pair(mixed, luma),
+                            &calibration,
+                            projection,
+                            &motion,
+                            &cancel,
+                            None,
+                        )
+                        .unwrap();
+                    assert_eq!(unprocessed.as_rgb8().len(), expected.as_rgb8().len());
+                    for (pixel_index, (pixel, reference)) in unprocessed
+                        .as_rgb8()
+                        .chunks_exact(3)
+                        .zip(expected.as_rgb8().chunks_exact(3))
+                        .enumerate()
+                    {
+                        // These blue fixtures have three positive, increasing,
+                        // unsaturated channels. Two black renders must not pass.
+                        assert!(
+                            0 < reference[0]
+                                && reference[0] < reference[1]
+                                && reference[1] < reference[2]
+                                && reference[2] < 255,
+                            "invalid CPU fixture: frame {index}, pixel {pixel_index}: {reference:?}"
+                        );
+                        assert!(
+                            pixel.iter().zip(reference).all(|(a, b)| a.abs_diff(*b) <= 2),
+                            "before restoration, mixed={mixed}, frame {index}, pixel {pixel_index}: \
+                             {pixel:?}, CPU reference {reference:?}, backend {:?}",
+                            session.report
+                        );
+                    }
+                } else {
+                    assert_restoration_fixture(&unprocessed, rgb, &session);
+                }
                 let image = session
                     .stitch(
                         restoration_yuv_pair(mixed, luma),

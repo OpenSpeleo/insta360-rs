@@ -117,11 +117,18 @@ successful-frame temporal reuse.
 ## GPU qualification status
 
 Restoration bridge and LUT-cache tests first qualify the uncorrected panorama
-against independently known solid RGB colors. NV12 fixtures use BT.709
-limited-range reference values. This prevents two all-black renders from
-satisfying a comparison and distinguishes missing source signal from a
-restoration failure. Assertion messages include the selected backend or adapter
-and the first incorrect pixel rather than dumping entire image buffers.
+against independently known solid RGB colors. Direct GPU NV12 fixtures use
+BT.709 limited-range reference values. Mixed NV12/YUV420P restoration fixtures
+instead compare GPU stitching with a CPU panorama after the shared FFmpeg RGB
+conversion, while independently requiring the CPU fixture's positive, increasing
+R/G/B channels and absence of saturation. This prevents two all-black renders
+from satisfying parity. FFmpeg's integer conversion can differ by several byte
+levels from the ideal BT.709 result depending on pixel format and CPU
+implementation; do not apply the direct GPU conversion's tolerance to that
+boundary. The GPU/CPU comparison retains a two-level per-channel tolerance, and
+the restoration effect and image/video comparisons remain separate checks.
+Assertion messages identify the first incorrect pixel and the selected backend
+or adapter where relevant, rather than dumping entire image buffers.
 
 Prepared-correction parity compares each backend's signed RGB change from its
 own fixed-calibration render, at both tested output sizes and with global
