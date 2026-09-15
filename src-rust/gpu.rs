@@ -238,10 +238,7 @@ impl std::fmt::Debug for GpuStitcher {
 impl GpuStitcher {
     /// Opens a high-performance adapter and compiles the fixed stitch shader.
     pub fn new() -> Result<Self> {
-        let backends = compiled_backends();
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = backends;
-        let instance = wgpu::Instance::new(descriptor);
+        let instance = create_instance();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
@@ -1489,14 +1486,27 @@ impl StitchEngine for GpuStitcher {
 
 /// Enumerates portable compute providers compiled for the current platform.
 pub fn available_adapters() -> Vec<GpuAdapterInfo> {
-    let backends = compiled_backends();
-    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    descriptor.backends = backends;
-    let instance = wgpu::Instance::new(descriptor);
-    pollster::block_on(instance.enumerate_adapters(backends))
+    pollster::block_on(create_instance().enumerate_adapters(compiled_backends()))
         .into_iter()
         .map(|adapter| public_adapter_info(adapter.get_info()))
         .collect()
+}
+
+fn create_instance() -> wgpu::Instance {
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = compiled_backends();
+    #[cfg(target_os = "windows")]
+    {
+        // FXC silently miscompiles the stitch shader, even with optimization.
+        // Keep discovery and rendering on DXC, with validation/debug flags intact.
+        descriptor.backend_options.dx12.shader_compiler =
+            if cfg!(all(target_arch = "x86_64", target_env = "msvc")) {
+                wgpu::Dx12Compiler::StaticDxc
+            } else {
+                wgpu::Dx12Compiler::default_dynamic_dxc()
+            };
+    }
+    wgpu::Instance::new(descriptor)
 }
 
 fn compiled_backends() -> wgpu::Backends {

@@ -116,6 +116,22 @@ successful-frame temporal reuse.
 
 ## GPU qualification status
 
+Windows discovery and rendering share an explicit DXC compiler policy. The
+Windows x64 MSVC build links DXC through `wgpu/static-dxc`, so applications and
+Python wheels do not need an external compiler DLL. Other Windows targets
+require a compatible `dxcompiler.dll`; they must not fall back to FXC, which
+silently miscompiles the complete stitch shader into black or saturated output.
+Shader debug information, API validation, and error scopes remain enabled under
+their normal settings. Cargo profiles, projection math, and frame resource reuse
+are unaffected. The static compiler adds build/download and binary-size costs on
+Windows x64, without adding per-frame work.
+
+The original LUT-cache and three restoration baseline regressions reproduce the
+FXC failure and pass with DXC on Microsoft's software D3D12 adapter. Run the
+full Windows GPU suite with `INSTA360_RS_REQUIRE_GPU=1` and without an external
+DXC installation to qualify the embedded compiler as well as initialization,
+allocation validation, RGB/YUV sampling, motion, restoration, and reuse.
+
 Restoration bridge and LUT-cache tests first qualify the uncorrected panorama
 against independently known solid RGB colors. Direct GPU NV12 fixtures use
 BT.709 limited-range reference values. Mixed NV12/YUV420P restoration fixtures

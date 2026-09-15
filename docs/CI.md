@@ -114,6 +114,18 @@ unavailable macOS adapter leaves GPU execution unqualified even when the
 all-feature build passes. Licensed recordings, vendor-oracle comparisons, and
 physical GPU qualification remain separate; see [testing.md](testing.md).
 
+Windows x64 MSVC GPU builds embed DXC through `wgpu/static-dxc`; both adapter
+discovery and rendering select it explicitly. FXC is not a supported fallback:
+it can compile the stitch shader successfully while producing incorrect pixels.
+The `mach-dxcompiler-rs` dependency downloads its versioned native archive with
+`curl` and extracts it with `tar` on the first build, then reuses Cargo's build
+output. Its MSVC archive requires Visual Studio 2022 17.11 or newer and follows
+the existing static/dynamic CRT setting. The current upstream build script does
+not checksum that native archive; `Cargo.lock` verifies the Rust package only.
+No DXC DLL installation or wheel/runtime staging step is needed. Other Windows
+targets require a compatible dynamic DXC installation and report GPU
+unavailability when it is absent.
+
 Every installed-wheel test job also sets `INSTA360_RS_REQUIRE_UNDERWATER_AI=1`
 and `INSTA360_RS_REQUIRE_AI_STITCHING=1`. The runner checks the actual
 extension's AquaVision capability and `SeamMode.AI.unavailable_reason()` before

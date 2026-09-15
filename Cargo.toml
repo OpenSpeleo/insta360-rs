@@ -101,6 +101,9 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "m
 [target.'cfg(target_os = "windows")'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12"], optional = true }
 
+[target.'cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["static-dxc"], optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan"], optional = true }
 
