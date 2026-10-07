@@ -240,6 +240,25 @@ INSV/FFmpeg comparison results.
 
 ## Housing, layout and underwater contracts
 
+The shared model decoder has direct `mnn::tests` coverage for all three audited
+models (197, 198 and 213). Tests reassemble the split model, compare decrypted
+bytes with recorded SHA-256 identities, check both encrypted edges, and preserve
+the plaintext body and original resources. Unknown or mismatched identities,
+truncation, extra bytes, wrapper corruption and corruption on either side of the
+encryption boundaries must return typed errors before native model parsing.
+These tests use bundled assets without initializing an MNN inference session.
+
+The module is compiled only with `underwater-ai` or `ai-stitching`; a default
+feature test run cannot verify its AES dependency compatibility. The existing
+all-feature SDK CI suite and FrameForge's `all-insv` checks include these tests.
+FrameForge's `make test-rust` compiles this dependency but does not run its unit
+tests, because the SDK is a separate workspace. From the FrameForge root, run
+the focused suite with
+`make test-insv-stitch INSV_TEST_ARGS='--lib mnn::tests'`. The standard native
+SDK setup and link prerequisites still apply. After changing optional
+dependencies, verify their enabled feature builds: formatting or default-feature
+tests alone cannot establish that the changed dependency API compiles.
+
 Synthetic fixtures exercise camera-scoped V1/V2/V3/V6 profiles, dual-track,
 legacy two-file and explicitly marked packed panoramas, rational timestamp
 pairing, chapter boundaries, audio packet identity and bounded queue stress.
