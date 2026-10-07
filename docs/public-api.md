@@ -109,6 +109,16 @@ Packed sources retain one decoder. Export may use the single-demux
 `PairedPreviewReader` used for seeking. See
 [recording sequences](recording-sequences.md).
 
+On macOS, automatic preview decoding uses
+`hardware::videotoolbox_decode_supported` to query `VTIsHardwareDecodeSupported`
+before selecting VideoToolbox. Media hosts can use the same helper before
+attaching their own decoder device. Unsupported codecs use software immediately,
+while supported H.264/HEVC remain eligible for acceleration. The query runs once
+per decoder opening, not per frame. Codec support is only a preflight:
+stream-specific initialization, decoding or hardware-transfer failures still
+retain the existing software recovery path. Other platform backends are
+unchanged.
+
 Continuous hosts may call `prefetch_next(cancel)` before rendering their current
 pair. It starts one decode and host transfer on each existing lens worker, so
 preparing the next CPU-readable pair overlaps processing the retained pair.
@@ -374,6 +384,13 @@ selects the bundled X5 LUT for explicit I-Log metadata. `Preserve` disables the
 transform; `ILogToRec709` selects it for unmarked X5 I-Log inputs. GPU callers
 can also set a table directly through `GpuStitcher::set_color_lut`. See
 [runtime asset usage](asset-usage.md) for metadata precedence and scope.
+
+HEVC output declares limited (MPEG) range on the encoder and submitted YUV420
+frames for both RGB conversion and direct GPU YUV. Range describes the encoded
+sample levels independently of color conversion; Rec.709 primaries and transfer
+metadata are still applied only after that conversion, so preserved I-Log is not
+mislabeled. This makes the existing limited-range pixel contract explicit
+without adding a pixel conversion or changing acceleration policy.
 
 ## Housing and underwater APIs
 

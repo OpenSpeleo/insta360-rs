@@ -183,13 +183,27 @@ and mid-export failures on Metal, D3D12, and Vulkan and must run the real X5
 midpoint geometry, radiometry, direction-lock, and seam corpus.
 
 Stitched rendering uses software decoding; native random-access previews support
-hardware decoding with software fallback. Asynchronous two/three-slot execution
-and native zero-copy stitching surfaces are not implemented. Encoder testing
-must treat each `MediaAcceleration` policy and codec independently: `Hardware`
-and `Software` are strict, while `Auto` retries eligible candidates on
-configuration/opening failure. Mid-stream encoder restart coverage remains open.
-Performance qualification requires matched release-build warm-run medians;
-current functional tests make no speed claim.
+hardware decoding with software fallback. macOS previews query
+`VTIsHardwareDecodeSupported` before creating a VideoToolbox device. Codec
+mapping tests cover H.264/HEVC container aliases, runtime rejection and ProRes
+tag byte order. On Macs without MPEG-4 Part 2 hardware support, native tests
+assert that automatic decoding leaves the hardware context/callback unchanged
+and matches software pixels and PTS. The existing failure-injection tests still
+cover exact-frame software recovery after hardware transfer failure: a positive
+codec capability query does not guarantee a particular stream or available
+decoder resources. Asynchronous two/three-slot execution and native zero-copy
+stitching surfaces are not implemented. Encoder testing must treat each
+`MediaAcceleration` policy and codec independently: `Hardware` and `Software`
+are strict, while `Auto` retries eligible candidates on configuration/opening
+failure. Mid-stream encoder restart coverage remains open. Performance
+qualification requires matched release-build warm-run medians; current
+functional tests make no speed claim.
+
+HEVC color regressions check that RGB black/white convert to limited-range luma
+(16/235) with neutral chroma, both with and without Rec.709 conversion. The MP4
+writer test checks explicit encoder range and reopens completed output to verify
+range, primaries and transfer metadata; unconverted output must not be tagged as
+Rec.709.
 
 Bundled-asset tests load every embedded payload through the verified provider,
 check whole-file digests, contiguous original model parts and their reassembled

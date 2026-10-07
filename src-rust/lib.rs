@@ -12,6 +12,8 @@ pub mod error;
 pub mod extraction;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+#[cfg(feature = "media")]
+pub mod hardware;
 #[cfg(any(feature = "underwater-ai", feature = "ai-stitching"))]
 mod mnn;
 pub mod motion;

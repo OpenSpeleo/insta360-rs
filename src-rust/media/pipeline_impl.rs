@@ -1766,12 +1766,14 @@ impl HevcWriter {
         encoder.set_width(width);
         encoder.set_height(height);
         encoder.set_format(ffmpeg::format::Pixel::YUV420P);
+        // Both RGB conversion and direct GPU YUV produce limited-range samples,
+        // independently of whether the source transfer curve was converted.
+        encoder.set_color_range(ffmpeg::util::color::Range::MPEG);
         encoder.set_time_base(time_base);
         encoder.set_frame_rate(Some(rate));
         encoder.set_gop((frame_rate * 2.0).round().clamp(1.0, u32::MAX as f64) as u32);
         if policy.direct_bt709_yuv || policy.converted_rec709 {
             encoder.set_colorspace(ffmpeg::util::color::Space::BT709);
-            encoder.set_color_range(ffmpeg::util::color::Range::MPEG);
         }
         // The YUV matrix does not establish the RGB transfer curve or gamut.
         // In particular, preserved I-Log must not be tagged as converted Rec.709.
@@ -1953,8 +1955,8 @@ impl HevcWriter {
             &rgb,
             &mut yuv,
         )?;
+        yuv.set_color_range(ffmpeg::util::color::Range::MPEG);
         if self.rec709_output {
-            yuv.set_color_range(ffmpeg::util::color::Range::MPEG);
             yuv.set_color_space(ffmpeg::util::color::Space::BT709);
             yuv.set_color_primaries(ffmpeg::util::color::Primaries::BT709);
             yuv.set_color_transfer_characteristic(
@@ -2788,6 +2790,29 @@ mod tests {
         assert!(resolve_color_lut(&metadata, ColorConversion::Preserve)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn rgb_conversion_produces_limited_range_with_or_without_rec709_conversion() {
+        ffmpeg::init().unwrap();
+        for rec709 in [false, true] {
+            for (rgb_level, expected_y) in [(0, 16_u8), (255, 235_u8)] {
+                let mut rgb = allocate_video_frame(ffmpeg::format::Pixel::RGB24, 32, 16).unwrap();
+                rgb.data_mut(0).fill(rgb_level);
+                let mut yuv = allocate_video_frame(ffmpeg::format::Pixel::YUV420P, 32, 16).unwrap();
+                let mut scaler = rgb_to_yuv_scaler(32, 16, rec709).unwrap();
+                scale_video_frame(&mut scaler, &rgb, &mut yuv).unwrap();
+                for (plane, expected) in [expected_y, 128, 128].into_iter().enumerate() {
+                    let width = yuv.plane_width(plane) as usize;
+                    for row in 0..yuv.plane_height(plane) as usize {
+                        let offset = row * yuv.stride(plane);
+                        assert!(yuv.data(plane)[offset..offset + width]
+                            .iter()
+                            .all(|value| value.abs_diff(expected) <= 1));
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -3923,38 +3948,69 @@ mod tests {
             return;
         }
         let directory = tempfile::tempdir().expect("temp directory");
-        let output = directory.path().join("stitched.mp4");
-        let panorama =
-            PanoramaFrame::new(64, 32, vec![64; 64 * 32 * RGB_CHANNELS]).expect("panorama");
-        let context = test_context();
-        let mut writer = HevcWriter::new(
-            &output,
-            64,
-            32,
-            30.0,
-            80,
-            HevcEncodingPolicy {
-                acceleration: MediaAcceleration::Software,
-                direct_bt709_yuv: false,
-                converted_rec709: false,
-            },
-        )
-        .expect("HEVC writer");
-        for frame in 0..3 {
-            writer
-                .write(&panorama, FrameTimestamp::Pts(frame * 33_333), frame as u64)
-                .expect("HEVC frame");
-        }
-        writer.finish(&context).expect("finish MP4");
+        for converted_rec709 in [false, true] {
+            let output = directory
+                .path()
+                .join(format!("stitched-{converted_rec709}.mp4"));
+            let panorama =
+                PanoramaFrame::new(64, 32, vec![64; 64 * 32 * RGB_CHANNELS]).expect("panorama");
+            let context = test_context();
+            let mut writer = HevcWriter::new(
+                &output,
+                64,
+                32,
+                30.0,
+                80,
+                HevcEncodingPolicy {
+                    acceleration: MediaAcceleration::Software,
+                    direct_bt709_yuv: false,
+                    converted_rec709,
+                },
+            )
+            .expect("HEVC writer");
+            assert_eq!(
+                writer.encoder.color_range(),
+                ffmpeg::util::color::Range::MPEG
+            );
+            let expected_primaries = if converted_rec709 {
+                ffmpeg::util::color::Primaries::BT709
+            } else {
+                ffmpeg::util::color::Primaries::Unspecified
+            };
+            let expected_transfer = if converted_rec709 {
+                ffmpeg::util::color::TransferCharacteristic::BT709
+            } else {
+                ffmpeg::util::color::TransferCharacteristic::Unspecified
+            };
+            assert_eq!(writer.encoder.color_primaries(), expected_primaries);
+            assert_eq!(
+                writer.encoder.color_transfer_characteristic(),
+                expected_transfer
+            );
+            for frame in 0..3 {
+                writer
+                    .write(&panorama, FrameTimestamp::Pts(frame * 33_333), frame as u64)
+                    .expect("HEVC frame");
+            }
+            writer.finish(&context).expect("finish MP4");
 
-        assert!(output.is_file());
-        assert!(!temporary_output_path(&output).exists());
-        let input = ffmpeg::format::input(&output).expect("open encoded MP4");
-        let video = input
-            .streams()
-            .best(ffmpeg::media::Type::Video)
-            .expect("video stream");
-        assert_eq!(video.parameters().id(), ffmpeg::codec::Id::HEVC);
+            assert!(output.is_file());
+            assert!(!temporary_output_path(&output).exists());
+            let input = ffmpeg::format::input(&output).expect("open encoded MP4");
+            let video = input
+                .streams()
+                .best(ffmpeg::media::Type::Video)
+                .expect("video stream");
+            assert_eq!(video.parameters().id(), ffmpeg::codec::Id::HEVC);
+            let decoder = ffmpeg::codec::context::Context::from_parameters(video.parameters())
+                .unwrap()
+                .decoder()
+                .video()
+                .unwrap();
+            assert_eq!(decoder.color_range(), ffmpeg::util::color::Range::MPEG);
+            assert_eq!(decoder.color_primaries(), expected_primaries);
+            assert_eq!(decoder.color_transfer_characteristic(), expected_transfer);
+        }
     }
 
     #[test]

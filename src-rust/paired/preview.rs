@@ -1014,6 +1014,16 @@ fn initialize_hardware(context: &mut ffmpeg::codec::context::Context) -> bool {
         Device::AV_HWDEVICE_TYPE_CUDA,
         Device::AV_HWDEVICE_TYPE_VAAPI,
     ] {
+        #[cfg(target_os = "macos")]
+        if device == Device::AV_HWDEVICE_TYPE_VIDEOTOOLBOX
+            && !crate::hardware::videotoolbox_decode_supported(
+                context.id(),
+                // SAFETY: the borrowed decoder context remains live here.
+                unsafe { (*context.as_ptr()).codec_tag },
+            )
+        {
+            continue;
+        }
         unsafe {
             let mut index = 0;
             let mut supported = false;
@@ -1089,6 +1099,33 @@ fn transfer_native_frame(frame: ffmpeg::frame::Video) -> Result<ffmpeg::frame::V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn videotoolbox_unsupported_mpeg4_does_not_install_hardware_context_or_callback() {
+        // Do not assume all present or future Macs have identical capabilities.
+        if crate::hardware::videotoolbox_decode_supported(ffmpeg::codec::Id::MPEG4, 0) {
+            return;
+        }
+        ffmpeg::init().unwrap();
+        let codec = ffmpeg::decoder::find(ffmpeg::codec::Id::MPEG4).unwrap();
+        let mut context = ffmpeg::codec::context::Context::new_with_codec(codec);
+        let callback = unsafe {
+            (*context.as_ptr())
+                .get_format
+                .map(|callback| callback as *const ())
+        };
+        assert!(!initialize_hardware(&mut context));
+        unsafe {
+            assert!((*context.as_ptr()).hw_device_ctx.is_null());
+            assert_eq!(
+                (*context.as_ptr())
+                    .get_format
+                    .map(|callback| callback as *const ()),
+                callback
+            );
+        }
+    }
 
     fn worker_channels() -> (
         Worker,
@@ -1385,6 +1422,17 @@ mod tests {
                 }
             }
         };
+        #[cfg(target_os = "macos")]
+        if !crate::hardware::videotoolbox_decode_supported(ffmpeg::codec::Id::MPEG4, 0) {
+            let mut automatic =
+                LensReader::open(&chapters[0], 0, PreviewAcceleration::Auto).unwrap();
+            assert!(unsafe { (*automatic.decoder.as_ptr()).hw_device_ctx.is_null() });
+            for expected in &frames {
+                let actual = automatic.read_frame(None, None, &cancel).unwrap().unwrap();
+                assert_same(&actual, expected);
+            }
+            assert!(automatic.read_frame(None, None, &cancel).unwrap().is_none());
+        }
         for policy_at_transfer in [PreviewAcceleration::Auto, PreviewAcceleration::Software] {
             let mut worker = LensWorker {
                 chapters: chapters.clone(),
