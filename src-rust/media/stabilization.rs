@@ -16,6 +16,9 @@ use crate::telemetry::{decode_camera_exposure_record, CameraExposureSample};
 use crate::timing::{validate_camera_timestamp, ExposureTimeline};
 use crate::{Error, InsvReader, Result, RollingShutterCorrection, Stabilization, StitchConfig};
 
+/// Gravity initialization window used when the pre-roll has no steady interval.
+const GRAVITY_FALLBACK_WINDOW: Duration = Duration::from_secs(2);
+
 const MAX_GYRO_BYTES: u64 = 5_000_000 * 20;
 const MAX_EXPOSURE_BYTES: u64 = 10_000_000 * 16;
 const READOUT_POSES: usize = 129;
@@ -432,7 +435,21 @@ impl FileStabilizer {
         let attitude = if let Some(previous) = previous {
             previous.continue_attitude(&mut samples, camera_origin_micros, options)?
         } else {
-            AttitudeTrack::new(&samples, options)?
+            AttitudeTrack::new(&samples, options).or_else(|error| {
+                // Handheld recordings can start mid-motion, leaving no steady
+                // interval in the pre-roll. Later observations are transported
+                // into the first body frame through the gyro, so a longer
+                // window still yields the initial gravity. Keep the original
+                // error when even that finds none.
+                let extended = FusionOptions {
+                    initialization_window: GRAVITY_FALLBACK_WINDOW,
+                    ..options
+                };
+                if options.initialization_window >= GRAVITY_FALLBACK_WINDOW {
+                    return Err(error);
+                }
+                AttitudeTrack::new(&samples, extended).map_err(|_| error)
+            })?
         };
         let mut warnings = Vec::new();
         let readout = if config.rolling_shutter == RollingShutterCorrection::Off {
