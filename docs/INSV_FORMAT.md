@@ -247,9 +247,9 @@ versions are the ASCII signature:
 The LE `u32` immediately before this signature is the version. A bounded reader
 SHOULD read the final 40 bytes first, check the signature, then dispatch by
 version. Version `3` requires at least the complete 72-byte terminal header and
-a valid `inst` box. Version `2` uses the final 40-byte header directly. An
-unknown version MUST remain unsupported; it MUST NOT be interpreted as V3 merely
-because the signature matches.
+either a valid `inst` box or the bare profile below. Version `2` uses the final
+40-byte header directly. An unknown version MUST remain unsupported; it MUST NOT
+be interpreted as V3 merely because the signature matches.
 
 If a recognized version has invalid sizes or framing, report a damaged tail of
 that version. Do not retry it as another layout. Probe media validity separately
@@ -284,6 +284,22 @@ least 72. The computed start MUST coincide with a top-level `inst` box whose BE
 size is `E + 8` and whose end is EOF. The enclosing ordinary size word must be
 able to represent that total. An extended-size `inst` variant is not defined by
 these formulas and MUST NOT be accepted by silently changing the payload origin.
+
+### Bare terminal profile
+
+X4 recordings (observed on firmware v1.9.21) append the same V3 ExtraInfo
+without the enclosing `inst` box. `E` then spans the region exactly:
+
+```text
+payload_start    = F - E
+terminal_start   = F - 72
+record_region    = [payload_start, terminal_start)
+```
+
+The `inst` profile takes precedence: a region is bare only when no top-level
+`inst` box of size `E + 8` ends at EOF. `payload_start` MUST coincide with the
+end of the last top-level box; top-level box walking stops there. Record offsets
+are measured from `payload_start` exactly as for the boxed profile.
 
 The reserved bytes have no defined processing meaning. A new tail may zero them;
 a preserving rewrite SHOULD retain them. The ASCII signature is an identifier,

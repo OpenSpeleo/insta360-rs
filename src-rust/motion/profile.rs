@@ -39,7 +39,10 @@ impl X5MotionProfile {
             .camera_name
             .as_deref()
             .unwrap_or("missing camera name");
-        if camera_profile_for_name(name).map(|profile| &profile.camera) != Some(&CameraModel::X5) {
+        if !matches!(
+            camera_profile_for_name(name).map(|profile| &profile.camera),
+            Some(CameraModel::X5 | CameraModel::X4)
+        ) {
             return Err(Error::UnsupportedCamera(format!(
                 "automatic IMU normalization requires X5 metadata, found {name}"
             )));
@@ -398,7 +401,7 @@ mod tests {
     #[test]
     fn unsupported_or_ambiguous_profile_data_fails_explicitly() {
         let mut value = metadata();
-        value.camera_name = Some("Insta360 X4".into());
+        value.camera_name = Some("Insta360 X3".into());
         assert!(X5MotionProfile::from_metadata(&value).is_err());
         value = metadata();
         value.is_raw_gyro = Some(false);

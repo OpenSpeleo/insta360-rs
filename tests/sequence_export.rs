@@ -314,7 +314,7 @@ fn source_motion_support_is_independent_of_rendering_and_preserves_readout_failu
             .contains("chapter capture clock repeats or moves backwards"));
     }
     unavailable = sequence;
-    unavailable.chapters[0].inspection.metadata.camera_name = Some("Insta360 X4".into());
+    unavailable.chapters[0].inspection.metadata.camera_name = Some("Insta360 X3".into());
     let report = inspect_motion_support(&unavailable, &cancel).unwrap();
     assert!(report.stabilization_error.is_some());
     assert!(report.rolling_shutter_error.is_some());
