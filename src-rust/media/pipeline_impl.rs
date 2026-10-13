@@ -1701,6 +1701,12 @@ impl HevcWriter {
             stream.set_rate(rate);
             stream.set_avg_frame_rate(rate);
             stream.set_parameters(&encoder);
+            // The MP4 muxer defaults HEVC to `hev1`, which QuickTime and
+            // AVFoundation refuse to play. Parameter sets are carried in the
+            // global header, so `hvc1` is valid and plays everywhere.
+            unsafe {
+                (*(*stream.as_mut_ptr()).codecpar).codec_tag = u32::from_le_bytes(*b"hvc1");
+            }
             stream_index
         };
         let audio_indices = audio_layout

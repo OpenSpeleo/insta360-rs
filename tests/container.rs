@@ -618,6 +618,45 @@ fn typed_v3_reader_rejects_unknown_trailer_versions_as_unsupported() {
     }
 }
 
+#[test]
+fn parses_a_bare_trailer_appended_after_the_last_box() {
+    // X4 recordings append the trailer payload directly after `moov`; the
+    // header's payload size then spans the trailer exactly, without a box.
+    let boxed = x5_fixture();
+    let inst_offset = boxed.len() - (le_u32_at(&boxed, boxed.len() - 40) as usize + 8);
+    assert_eq!(&boxed[inst_offset + 4..inst_offset + 8], b"inst");
+    let mut bare = boxed[..inst_offset].to_vec();
+    bare.extend_from_slice(&boxed[inst_offset + 8..]);
+
+    let expected = InsvReader::new(Cursor::new(boxed))
+        .unwrap()
+        .inspect()
+        .unwrap();
+    let inspection = InsvReader::new(Cursor::new(bare.clone()))
+        .unwrap()
+        .inspect()
+        .unwrap();
+    assert_eq!(inspection.trailer.offset, inst_offset as u64);
+    assert_eq!(inspection.trailer.size, (bare.len() - inst_offset) as u64);
+    assert_eq!(inspection.records.len(), expected.records.len());
+    assert_eq!(inspection.metadata, expected.metadata);
+    assert_eq!(inspection.video_tracks, expected.video_tracks);
+    assert!(inspection.boxes.iter().all(|item| item.kind != *b"inst"));
+
+    // Bytes between the last box and the trailer are not a valid layout.
+    let mut gapped = bare[..inst_offset].to_vec();
+    gapped.extend_from_slice(&[0; 4]);
+    gapped.extend_from_slice(&bare[inst_offset..]);
+    assert!(InsvReader::new(Cursor::new(gapped))
+        .unwrap()
+        .inspect()
+        .is_err());
+}
+
+fn le_u32_at(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+}
+
 fn fixture_with_record_region(mut payload: Vec<u8>) -> Vec<u8> {
     let size = payload.len() as u32 + 72;
     payload.extend_from_slice(&[0; 32]);

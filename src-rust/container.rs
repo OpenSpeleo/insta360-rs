@@ -592,9 +592,13 @@ impl<R: Read + Seek> InsvReader<R> {
         }
 
         let (trailer, records) = self.read_trailer_index()?;
-        if !boxes.iter().any(|item| {
+        let boxed = boxes.iter().any(|item| {
             item.kind == *b"inst" && item.offset == trailer.offset && item.size == trailer.size
-        }) {
+        });
+        let bare = boxes
+            .last()
+            .is_some_and(|item| item.offset + item.size == trailer.offset);
+        if !boxed && !bare {
             return Err(Error::InvalidMedia(
                 "proprietary trailer is not a valid top-level `inst` box".into(),
             ));
@@ -976,13 +980,14 @@ impl<R: Read + Seek> InsvReader<R> {
     fn scan_top_level_boxes(&mut self) -> Result<Vec<BoxInfo>> {
         let mut boxes = Vec::new();
         let mut position = 0_u64;
-        while position < self.file_size {
+        let end = self.bare_trailer_offset()?.unwrap_or(self.file_size);
+        while position < end {
             if boxes.len() == MAX_TOP_LEVEL_BOXES {
                 return Err(Error::InvalidMedia(
                     "ISO-BMFF top-level box count exceeds the parser limit".into(),
                 ));
             }
-            let header = self.read_box_header(position, self.file_size)?;
+            let header = self.read_box_header(position, end)?;
             position = header
                 .offset
                 .checked_add(header.size)
@@ -994,6 +999,35 @@ impl<R: Read + Seek> InsvReader<R> {
             });
         }
         Ok(boxes)
+    }
+
+    /// Returns the offset of a trailer appended without an `inst` box wrapper.
+    ///
+    /// Older layouts (X4 and earlier) store the trailer payload, ending in the
+    /// 72-byte header, directly after the last ISO-BMFF box. The payload size in
+    /// the header then covers the trailer exactly instead of the box payload.
+    fn bare_trailer_offset(&mut self) -> Result<Option<u64>> {
+        if self.file_size < TRAILER_HEADER_SIZE + 8 {
+            return Ok(None);
+        }
+        let header = self.read_exact_at(
+            self.file_size - TRAILER_HEADER_SIZE,
+            TRAILER_HEADER_SIZE as usize,
+        )?;
+        if &header[40..] != INSTA360_MAGIC {
+            return Ok(None);
+        }
+        let payload_size = u64::from(le_u32(&header[32..36]));
+        if payload_size < TRAILER_HEADER_SIZE || payload_size > self.file_size {
+            return Ok(None);
+        }
+        if payload_size + 8 <= self.file_size {
+            let boxed = self.read_exact_at(self.file_size - payload_size - 8, 8)?;
+            if boxed[4..8] == *b"inst" && u64::from(be_u32(&boxed[0..4])) == payload_size + 8 {
+                return Ok(None);
+            }
+        }
+        Ok(Some(self.file_size - payload_size))
     }
 
     fn read_trailer_index(&mut self) -> Result<(TrailerInfo, Vec<RecordInfo>)> {
@@ -1020,23 +1054,32 @@ impl<R: Read + Seek> InsvReader<R> {
                 "INSV trailer version {version} is unsupported by the typed V3 reader"
             )));
         }
-        let trailer_size = payload_size
-            .checked_add(8)
-            .ok_or_else(|| Error::InvalidMedia("INSV trailer size overflows".into()))?;
-        if trailer_size > self.file_size {
-            return Err(Error::InvalidMedia(
-                "INSV trailer declares more data than the file contains".into(),
-            ));
-        }
-        let trailer_offset = self.file_size - trailer_size;
-        let box_header = self.read_box_header(trailer_offset, self.file_size)?;
-        if box_header.kind != *b"inst" || box_header.size != trailer_size {
-            return Err(Error::InvalidMedia(
-                "INSV trailer length does not match its `inst` box".into(),
-            ));
-        }
-
-        let payload_offset = trailer_offset + box_header.header_size;
+        let (trailer_offset, trailer_size, payload_offset) =
+            if let Some(offset) = self.bare_trailer_offset()? {
+                // X4-era cameras append the payload directly after `moov`.
+                (offset, payload_size, offset)
+            } else {
+                let trailer_size = payload_size
+                    .checked_add(8)
+                    .ok_or_else(|| Error::InvalidMedia("INSV trailer size overflows".into()))?;
+                if trailer_size > self.file_size {
+                    return Err(Error::InvalidMedia(
+                        "INSV trailer declares more data than the file contains".into(),
+                    ));
+                }
+                let trailer_offset = self.file_size - trailer_size;
+                let box_header = self.read_box_header(trailer_offset, self.file_size)?;
+                if box_header.kind != *b"inst" || box_header.size != trailer_size {
+                    return Err(Error::InvalidMedia(
+                        "INSV trailer length does not match its `inst` box".into(),
+                    ));
+                }
+                (
+                    trailer_offset,
+                    trailer_size,
+                    trailer_offset + box_header.header_size,
+                )
+            };
         if header_offset == payload_offset {
             return Ok((
                 TrailerInfo {

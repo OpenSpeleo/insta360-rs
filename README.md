@@ -63,8 +63,8 @@ use hardware decoding with software fallback. The crate does **not** currently
 run AI seam inference or ColorPlus, or preserve 10-bit depth in stitched output.
 Explicit HDR/PQ/HLG/Dolby stitched input is rejected until tone mapping is
 supported. Supported X5 recordings have gravity-referenced stabilization and
-sensor readout correction on both CPU and GPU; see
-[stabilization](docs/stabilization.md).
+sensor readout correction on both CPU and GPU; X4 recordings have stabilization
+without readout correction; see [stabilization](docs/stabilization.md).
 
 ## Camera support
 
@@ -79,7 +79,7 @@ conversion, and real-recording qualification are separate contracts.
 | CPU/GPU stitching and image/video export | Registered V1/V2/V3/V6 calibrations; validated dual-track, two-file, or metadata-proven horizontal packed panorama | Synthetic cross-camera/layout tests; supplied X5 recording is the real-camera reference           |
 | Housing and guards                       | Automatic recorded-state detection and independent explicit overrides                                              | Only registered profiles and evidence-backed conversions; see the complete catalog                |
 | X5 Pro correction                        | State 10/11 selects lens 119/120, native physical curves and distinct radial masks                                 | Corrected geometry supersedes earlier results using 117/118                                       |
-| Stabilization/readout                    | Supported X5 sensor and timing profiles                                                                            | Other cameras use stabilization Off unless their motion profile is established                    |
+| Stabilization/readout                    | Supported X5 sensor and timing profiles; X4 stabilization without readout correction                               | Other cameras use stabilization Off unless their motion profile is established                    |
 | I-Log conversion                         | Identified X5 I-Log to Rec.709; explicit low-level LUT APIs                                                        | No HDR tone mapping or 10-bit stitched output                                                     |
 | Underwater restoration                   | Opt-in scalar Legacy; optional independent MNN CPU AI engine                                                       | Formula/resource/inference tests, without Studio pixel-equivalence or scene-quality qualification |
 
@@ -697,8 +697,10 @@ See [Python bindings](docs/python.md) for examples and wheel targets.
   synthesize separate decoded lens tracks from that packed frame.
 - V1 sensor-crop conversion remains unsupported; its native polynomial
   projection does not establish real-camera qualification.
-- Stabilization currently resolves X5 compact raw IMU profiles only. Edited or
-  unsupported recording clocks and unknown sensor transforms fail explicitly.
+- Stabilization currently resolves X5 and X4 compact raw IMU profiles only. The
+  X4 reuses the X5 axis mapping, validated on real recordings rather than vendor
+  tables, and has no readout correction yet. Edited or unsupported recording
+  clocks and unknown sensor transforms fail explicitly.
 - Sensor-crop normalization is supported for established V2/V3/V6 coordinate
   mappings; unsupported source orientations fail explicitly. Readout correction
   has separate profile constraints; see the stabilization documentation.
