@@ -93,7 +93,7 @@ jobs:
           tar -xzf dist/ffmpeg-sdk.tar.gz -C .
       - name: Build fresh repaired wheel and source distribution
         run: bash scripts/ci/build-wheel.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist-linux
           path: |
@@ -134,7 +134,7 @@ jobs:
           workspaces: . -> target/wheel-native
       - name: Build and repair the native wheel
         run: python scripts/ci/build-native-wheel.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist-${{ matrix.target }}
           path: dist/*.whl
@@ -203,7 +203,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
       - name: Retain the signed provenance bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-provenance-${{ github.run_attempt }}
           path: ${{ steps.provenance.outputs.bundle-path }}
