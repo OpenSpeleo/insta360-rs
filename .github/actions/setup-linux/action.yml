@@ -43,4 +43,4 @@ runs:
         key: ${{ inputs.cache-key }}
         workspaces: . -> target
         cache-on-failure: true
-    - uses: cargo-bins/cargo-binstall@v1.25.2
+    - uses: cargo-bins/cargo-binstall@v1.25.3
