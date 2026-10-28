@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use super::{ComponentExtraction, ProgressTracker};
 use crate::error::io_error;
-use crate::{Error, Result};
+use crate::{Error, InsvReader, Result};
 
 const MAGIC: &[u8; 32] = b"8db42d694ccc418790edff439fe026bf";
 const GYRO_MAGIC: &[u8; 32] = b"9c792b1ac55c40418d36ffb0d1d16b58";
@@ -82,23 +82,13 @@ fn extract_container_impl(
         warnings: Vec::new(),
         control,
     };
-    let mut tail = extractor.detect_tail()?;
+    let tail = extractor.detect_tail()?;
     let media_end = tail.as_ref().map_or(file_size, |tail| tail.media_end);
     let v3_start = tail
         .as_ref()
         .filter(|tail| tail.version == 3)
         .map(|tail| tail.start);
-    let (boxes, top_level_inst) = extractor.extract_boxes(media_end, v3_start)?;
-    if let Some(tail) = &mut tail {
-        if tail.version == 3 && tail.valid && !top_level_inst.contains(&tail.start) {
-            tail.valid = false;
-            tail.records.clear();
-            tail.directory = None;
-            extractor.warnings.push(
-                "ExtraInfo V3 candidate does not begin at a top-level inst box; only raw bytes were preserved".into(),
-            );
-        }
-    }
+    let boxes = extractor.extract_boxes(media_end, v3_start)?;
     let mut records = Vec::new();
     let mut trailer = Value::Null;
     if let Some(tail) = tail {
@@ -320,24 +310,38 @@ impl Extractor<'_> {
                 "V3 terminal header or ExtraInfo size is shorter than 72 bytes",
             ));
         }
-        let total = extra_size
-            .checked_add(8)
-            .ok_or_else(|| invalid("V3 size overflow"))?;
-        let start = self
+        let payload_start = self
             .file_size
-            .checked_sub(total)
+            .checked_sub(extra_size)
             .ok_or_else(|| invalid("V3 ExtraInfo size exceeds the file"))?;
-        tail.start = start;
-        let header = self.read(start, 8)?;
-        if total > u64::from(u32::MAX)
-            || &header[4..8] != b"inst"
-            || u64::from(be_u32(&header[..4])) != total
-        {
-            return Err(invalid(
-                "V3 ExtraInfo does not match the enclosing ordinary-size inst header",
-            ));
-        }
-        let payload_start = start + 8;
+        tail.start = payload_start;
+        (self.control)(0)?;
+        let layout_result = InsvReader::new(&mut self.file)?
+            .container_layout_controlled(MAX_BOXES, &mut || (self.control)(0));
+        let (_, layout) = match layout_result {
+            Ok(layout) => layout,
+            Err(Error::InvalidMedia(message)) => {
+                // Keep a recognizable wrapper with damaged tails. Do not read
+                // before a successfully validated raw boundary: it may be mdat.
+                if let Some(header_start) = payload_start.checked_sub(8) {
+                    if &self.read(header_start, 8)?[4..8] == b"inst" {
+                        tail.start = header_start;
+                    }
+                }
+                return Err(Error::InvalidMedia(format!(
+                    "V3 candidate is not a valid top-level inst box or raw trailer boundary: {message}"
+                )));
+            }
+            Err(other) => return Err(other),
+        };
+        let layout = layout.ok_or_else(|| invalid("missing V3 trailer layout"))?;
+        tail.start = layout.offset;
+        tail.media_end = if layout.offset != layout.payload_offset {
+            self.file_size
+        } else {
+            layout.offset
+        };
+        let payload_start = layout.payload_offset;
         let terminal_start = self.file_size - 72;
         if terminal_start == payload_start {
             tail.framing = "v3_empty";
@@ -452,9 +456,8 @@ impl Extractor<'_> {
         Ok(())
     }
 
-    fn extract_boxes(&mut self, end: u64, v3_start: Option<u64>) -> Result<(Vec<Value>, Vec<u64>)> {
+    fn extract_boxes(&mut self, end: u64, v3_start: Option<u64>) -> Result<Vec<Value>> {
         let mut boxes = Vec::new();
-        let mut inst_offsets = Vec::new();
         let mut cursor = 0;
         while cursor < end {
             if end - cursor < 8 || boxes.len() == MAX_BOXES {
@@ -504,9 +507,6 @@ impl Extractor<'_> {
                 if kind == *b"mdat" { header_size } else { size },
                 &relative,
             )?;
-            if kind == *b"inst" {
-                inst_offsets.push(cursor);
-            }
             boxes.push(json!({
                 "type": String::from_utf8_lossy(&kind), "type_hex": hex(&kind),
                 "offset": cursor, "size": size, "header_size": header_size,
@@ -517,7 +517,7 @@ impl Extractor<'_> {
         if cursor < end {
             self.copy_range(cursor, end - cursor, Path::new("container/unparsed.bin"))?;
         }
-        Ok((boxes, inst_offsets))
+        Ok(boxes)
     }
 
     fn extract_record(&mut self, index: usize, record: &Record) -> Result<Value> {
@@ -806,6 +806,12 @@ mod tests {
         bytes
     }
 
+    fn unboxed_v3(records: &[(u8, u8, &[u8])], directory_order: Option<&[usize]>) -> Vec<u8> {
+        let mut bytes = v3(records, directory_order);
+        bytes.drain(prefix().len()..prefix().len() + 8);
+        bytes
+    }
+
     fn v2(metadata: &[u8], gyro: Option<&[u8]>) -> Vec<u8> {
         let mut bytes = prefix();
         if let Some(gyro) = gyro {
@@ -876,6 +882,147 @@ mod tests {
         );
         assert_eq!(artifact(&directory, &boxes[1], "raw_path").len(), 8);
         assert_eq!(boxes[1]["payload_preserved"], false);
+    }
+
+    #[test]
+    fn shared_v3_scan_preserves_extraction_box_limit_and_cancellation() {
+        let mut bytes = Vec::new();
+        for _ in 0..4097 {
+            bytes.extend(boxed(b"free", &[]));
+        }
+        let source = unboxed_v3(&[], None);
+        bytes.extend_from_slice(&source[prefix().len()..]);
+        let directory = tempdir().unwrap();
+        let input = directory.path().join("many-boxes.insv");
+        let output = directory.path().join("unused-output");
+        fs::write(&input, &bytes).unwrap();
+        let cancel = std::cell::Cell::new(false);
+        let calls = std::cell::Cell::new(0);
+        let mut control = |_| {
+            calls.set(calls.get() + 1);
+            if cancel.get() && calls.get() >= 10 {
+                Err(Error::Cancelled)
+            } else {
+                Ok(())
+            }
+        };
+        let mut extractor = Extractor {
+            input: &input,
+            output: &output,
+            file: File::open(&input).unwrap(),
+            file_size: bytes.len() as u64,
+            files: Vec::new(),
+            warnings: Vec::new(),
+            control: &mut control,
+        };
+        assert!(extractor.detect_tail().unwrap().unwrap().valid);
+        calls.set(0);
+        cancel.set(true);
+        assert!(matches!(extractor.detect_tail(), Err(Error::Cancelled)));
+        assert_eq!(calls.get(), 10);
+        cancel.set(false);
+        assert!(extractor.detect_tail().unwrap().unwrap().valid);
+    }
+
+    #[test]
+    fn unboxed_indexed_tail_preserves_exact_offsets_records_and_directory() {
+        let bytes = unboxed_v3(&[(0xfe, 8, b"first"), (0xfe, 9, b"second")], Some(&[1, 0]));
+        let (directory, result) = extract(&bytes);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let trailer = &result.description["trailer"];
+        assert_eq!(trailer["valid"], true);
+        assert_eq!(trailer["framing"], "v3_indexed");
+        assert_eq!(trailer["offset"], prefix().len());
+        assert_eq!(trailer["size"], bytes.len() - prefix().len());
+        assert_eq!(
+            artifact(&directory, trailer, "raw_path"),
+            &bytes[prefix().len()..]
+        );
+        let records = result.description["records"].as_array().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["offset"], prefix().len());
+        assert_eq!(records[1]["offset"], prefix().len() + b"first".len() + 6);
+        assert_eq!(records[0]["directory_index"], 1);
+        assert_eq!(records[1]["directory_index"], 0);
+        assert_eq!(artifact(&directory, &records[0], "raw_path"), b"first");
+        assert_eq!(artifact(&directory, &records[1], "raw_path"), b"second");
+        let index_start = bytes.len() - 72 - 6 - 20;
+        assert_eq!(
+            artifact(&directory, &trailer["directory"], "raw_path"),
+            &bytes[index_start..index_start + 20]
+        );
+        let boxes = result.description["boxes"].as_array().unwrap();
+        assert_eq!(boxes.len(), 3);
+        assert!(boxes.iter().all(|item| item["type"] != "inst"));
+        assert!(!result
+            .files
+            .iter()
+            .any(|path| path == Path::new("container/unparsed.bin")));
+    }
+
+    #[test]
+    fn unboxed_sequential_and_empty_tails_are_valid() {
+        for (bytes, framing, count) in [
+            (
+                unboxed_v3(&[(0xfe, 8, b"opaque")], None),
+                "v3_sequential",
+                1,
+            ),
+            (unboxed_v3(&[], None), "v3_empty", 0),
+            (unboxed_v3(&[], Some(&[])), "v3_indexed", 0),
+        ] {
+            let (directory, result) = extract(&bytes);
+            assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+            assert_eq!(result.item_count, count);
+            assert_eq!(result.description["trailer"]["valid"], true);
+            assert_eq!(result.description["trailer"]["framing"], framing);
+            assert_eq!(
+                artifact(&directory, &result.description["trailer"], "raw_path"),
+                &bytes[prefix().len()..]
+            );
+            assert_eq!(result.description["boxes"].as_array().unwrap().len(), 3);
+        }
+    }
+
+    #[test]
+    fn damaged_unboxed_records_remain_invalid_and_preserve_the_raw_tail() {
+        let duplicated = unboxed_v3(&[(0xfe, 8, b"opaque")], Some(&[0, 0]));
+        let mut bad_footer = unboxed_v3(&[(0xfe, 8, b"opaque")], Some(&[0]));
+        bad_footer[prefix().len() + b"opaque".len()] = 9;
+        let mut leftover_prefix = unboxed_v3(&[(0xfe, 8, b"opaque")], None);
+        leftover_prefix.insert(prefix().len(), 0xff);
+        let size = (leftover_prefix.len() - prefix().len()) as u32;
+        let length_offset = leftover_prefix.len() - 40;
+        leftover_prefix[length_offset..length_offset + 4].copy_from_slice(&size.to_le_bytes());
+        for bytes in [duplicated, bad_footer, leftover_prefix] {
+            let (directory, result) = extract(&bytes);
+            assert_eq!(result.description["trailer"]["valid"], false);
+            assert_eq!(result.item_count, 0);
+            assert!(!result.warnings.is_empty());
+            assert_eq!(
+                artifact(&directory, &result.description["trailer"], "raw_path"),
+                &bytes[prefix().len()..]
+            );
+        }
+    }
+
+    #[test]
+    fn unboxed_tail_inside_media_or_zero_size_box_is_not_a_valid_boundary() {
+        let source = unboxed_v3(&[(0xfe, 8, b"opaque")], Some(&[0]));
+        for size_zero in [false, true] {
+            let mut bytes = boxed(b"mdat", &source[prefix().len()..]);
+            if size_zero {
+                bytes[..4].copy_from_slice(&0_u32.to_be_bytes());
+            }
+            let (directory, result) = extract(&bytes);
+            assert_eq!(result.description["trailer"]["valid"], false);
+            assert_eq!(result.item_count, 0);
+            assert!(!result.warnings.is_empty());
+            assert_eq!(
+                artifact(&directory, &result.description["trailer"], "raw_path"),
+                &bytes[8..]
+            );
+        }
     }
 
     #[test]

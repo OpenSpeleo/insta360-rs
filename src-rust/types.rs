@@ -539,7 +539,9 @@ pub struct MediaInfo {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrailerInfo {
+    /// Absolute start of the trailer, including the `inst` wrapper when present.
     pub offset: u64,
+    /// Complete trailer length, including its terminal header and optional wrapper.
     pub size: u64,
     pub version: u8,
     pub record_count: u32,

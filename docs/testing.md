@@ -23,6 +23,27 @@ use generated recordings and the embedded resources. Bundled-asset tests verify
 the licensed payloads checked in under `data/*/assets/`, including consistent
 manifests and unique paths across six data crates.
 
+V3 container regressions build both terminal `inst` boxes and raw ExtraInfo
+tails appended directly after complete media boxes. The unboxed fixture models
+the framing observed in X4 media with invented metadata and payloads; it does
+not contain camera footage or copied calibration. Tiny generated fixtures make
+the boundary error reproducible without a licensed recording and allow precise
+mutations that would be difficult to maintain in a binary sample.
+
+The container suite checks inspection, probe/discovery, record offsets and
+payloads, and presentation timestamps. Indexed, sequential, empty, and
+empty-directory tails retain the same record origin in both outer layouts.
+Negative cases cover impossible sizes, invalid versions and wrappers, records
+overlapping the directory, footer mismatches, partial sequential prefixes, and
+tail candidates inside media boxes. Read guards reject compressed-media reads,
+including when `mdat` immediately precedes the tail. Component extraction checks
+exact raw artifacts and directory order, and keeps damaged tails invalid while
+preserving available bytes.
+
+These tests establish framing, bounds, and API contracts. Read-only checks of
+separately supplied recordings supplement them; neither synthetic fixtures nor a
+single recording qualify every camera mode, optical setup, or platform.
+
 ## Licensed integration corpus
 
 Large recordings are supplied out of tree through `INSTA360_RS_FIXTURE_DIR`. The

@@ -11,10 +11,202 @@ use insta360_rs::container::{
 use insta360_rs::motion::decode_motion_record;
 use insta360_rs::telemetry::{decode_camera_exposure_record, decode_exposure_record};
 use insta360_rs::timing::ExposureTimeline;
-use insta360_rs::{probe, CameraModel, InputSet, InsvReader};
+use insta360_rs::{probe, CameraModel, InputSet, InsvReader, RecordingSequence};
 use tempfile::tempdir;
 
 const MAGIC: &[u8; 32] = b"8db42d694ccc418790edff439fe026bf";
+
+#[test]
+fn unboxed_x4_v3_inspection_and_probe_use_the_declared_tail_boundary() {
+    let mut metadata = Vec::new();
+    protobuf_bytes(&mut metadata, 2, b"Insta360 X4");
+    let boxed = x5_fixture_with_metadata(metadata);
+    let extra_size = u32::from_le_bytes(
+        boxed[boxed.len() - 40..boxed.len() - 36]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let tail_start = boxed.len() - extra_size - 8;
+    let mut fixture = boxed[..tail_start].to_vec();
+    fixture.extend_from_slice(&boxed[tail_start + 8..]);
+
+    let mut reader = InsvReader::new(Cursor::new(&fixture)).unwrap();
+    let inspection = reader.inspect().expect("unboxed X4 V3 trailer");
+    assert_eq!(
+        inspection.metadata.camera_name.as_deref(),
+        Some("Insta360 X4")
+    );
+    assert_eq!(inspection.video_tracks.len(), 2);
+    assert_eq!(inspection.trailer.offset, tail_start as u64);
+    assert_eq!(inspection.trailer.size, extra_size as u64);
+    assert_eq!(inspection.trailer.record_count, 3);
+    assert!(!inspection.boxes.iter().any(|item| item.kind == *b"inst"));
+    assert_eq!(
+        reader.metadata().unwrap().camera_name,
+        inspection.metadata.camera_name
+    );
+    for record in reader.records().unwrap() {
+        assert_eq!(
+            reader.read_record_payload(&record, record.size).unwrap(),
+            fixture[record.offset as usize..(record.offset + record.size) as usize]
+        );
+    }
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("synthetic-x4.insv");
+    std::fs::write(&path, fixture).unwrap();
+    assert_eq!(
+        probe(&InputSet::new(vec![path.clone()]).unwrap())
+            .unwrap()
+            .camera,
+        CameraModel::X4
+    );
+    assert_eq!(
+        RecordingSequence::discover(&path).unwrap().chapters.len(),
+        1
+    );
+}
+
+fn unbox_v3(mut boxed: Vec<u8>) -> Vec<u8> {
+    let extra_size = u32::from_le_bytes(
+        boxed[boxed.len() - 40..boxed.len() - 36]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let start = boxed.len() - extra_size - 8;
+    assert_eq!(&boxed[start + 4..start + 8], b"inst");
+    boxed.drain(start..start + 8);
+    boxed
+}
+
+#[test]
+fn raw_v3_timing_and_inspection_never_read_the_preceding_mdat_payload() {
+    let tail = fixture_with_record_region(vec![0, 3, 0, 0, 0, 0]);
+    let prefix_length = bmff_box(*b"ftyp", b"isom\0\0\0\0isom").len();
+    for boxed in [false, true] {
+        let mut bytes = bmff_box(*b"ftyp", b"isom\0\0\0\0isom");
+        bytes.extend(timing_movie(&[(2, 30), (1, 60)], 1_000, None, None, 3));
+        let media_start = bytes.len() as u64 + 8;
+        bytes.extend(bmff_box(*b"mdat", &[0xab; 8192]));
+        let media_end = bytes.len() as u64;
+        bytes.extend_from_slice(&tail[prefix_length + if boxed { 0 } else { 8 }..]);
+        let mut reader = InsvReader::new(RejectMediaReads {
+            cursor: Cursor::new(bytes),
+            forbidden: media_start..media_end,
+        })
+        .unwrap();
+        assert_eq!(reader.inspect().unwrap().trailer.offset, media_end);
+        assert_eq!(
+            reader.video_presentation_timestamps().unwrap(),
+            [vec![0, 30_000, 60_000]]
+        );
+        assert_eq!(
+            reader.records().unwrap()[0].offset,
+            media_end + if boxed { 8 } else { 0 }
+        );
+    }
+}
+
+#[test]
+fn raw_v3_accepts_indexed_gaps_opaque_records_and_unused_directory_slots() {
+    // Independent bytes: arbitrary padding and opaque payload, one matching
+    // footer, one unused directory slot, then an entry relative to the raw tail.
+    let mut region = vec![0xab; 13];
+    region.extend_from_slice(b"opaque");
+    region.extend_from_slice(&[7, 99, 6, 0, 0, 0]);
+    region.extend_from_slice(&[0xcd; 17]);
+    region.extend_from_slice(&[0; 10]);
+    region.extend_from_slice(&[99, 7, 6, 0, 0, 0, 13, 0, 0, 0]);
+    region.extend_from_slice(&[0, 0, 20, 0, 0, 0]);
+    let bytes = unbox_v3(fixture_with_record_region(region));
+    let tail_start = bmff_box(*b"ftyp", b"isom\0\0\0\0isom").len() as u64;
+    let mut reader = InsvReader::new(Cursor::new(bytes)).unwrap();
+    let inspected = reader.inspect().unwrap();
+    assert_eq!(inspected.records.len(), 1);
+    assert_eq!(inspected.records[0].offset, tail_start + 13);
+    assert_eq!(
+        reader
+            .read_record_payload(&inspected.records[0], 6)
+            .unwrap(),
+        b"opaque"
+    );
+}
+
+#[test]
+fn v3_boundary_validation_rejects_nested_tails_and_damaged_wrappers() {
+    for boxed in [false, true] {
+        let bytes = fixture_with_record_region(vec![]);
+        let bytes = if boxed { bytes } else { unbox_v3(bytes) };
+        let prefix_length = bmff_box(*b"ftyp", b"isom\0\0\0\0isom").len();
+        let tail = &bytes[prefix_length..];
+        for size_zero in [false, true] {
+            let mut nested = bytes[..prefix_length].to_vec();
+            let mut media = bmff_box(*b"mdat", tail);
+            if size_zero {
+                media[..4].fill(0);
+            }
+            nested.extend(media);
+            let mut reader = InsvReader::new(Cursor::new(nested)).unwrap();
+            assert!(reader.inspect().is_err());
+            assert!(reader.records().is_err());
+            assert!(reader.video_presentation_timestamps().is_err());
+        }
+    }
+    let baseline = fixture_with_record_region(vec![]);
+    let inst_start = baseline.len() - 80;
+    for size in [0_u32, 1, 7, 8, 79, 81] {
+        let mut bytes = baseline.clone();
+        bytes[inst_start..inst_start + 4].copy_from_slice(&size.to_be_bytes());
+        assert!(
+            InsvReader::new(Cursor::new(bytes))
+                .unwrap()
+                .inspect()
+                .is_err(),
+            "size={size}"
+        );
+    }
+}
+
+#[test]
+fn raw_v3_rejects_invalid_terminal_lengths_and_indexed_footers() {
+    for length in [0_u32, 71, u32::MAX] {
+        let mut bytes = unbox_v3(fixture_with_record_region(vec![]));
+        let offset = bytes.len() - 40;
+        bytes[offset..offset + 4].copy_from_slice(&length.to_le_bytes());
+        assert!(InsvReader::new(Cursor::new(bytes))
+            .unwrap()
+            .records()
+            .is_err());
+    }
+    let baseline = unbox_v3(x5_fixture());
+    let index_start = baseline.len() - 72 - 6 - 310;
+    for relative_byte in [2, 6] {
+        let mut bytes = baseline.clone();
+        // Mismatch the metadata length or move its offset outside the tail.
+        let offset = index_start + 10 + relative_byte;
+        bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(InsvReader::new(Cursor::new(bytes))
+            .unwrap()
+            .records()
+            .is_err());
+    }
+    let mut bytes = baseline;
+    let extra_size = u32::from_le_bytes(
+        bytes[bytes.len() - 40..bytes.len() - 36]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let payload_start = bytes.len() - extra_size;
+    let metadata_size = u32::from_le_bytes(
+        bytes[index_start + 12..index_start + 16]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    bytes[payload_start + metadata_size] ^= 1;
+    assert!(InsvReader::new(Cursor::new(bytes))
+        .unwrap()
+        .records()
+        .is_err());
+}
 
 #[test]
 fn audio_handlers_are_counted_without_requiring_audio_packets_or_codec_headers() {
@@ -570,29 +762,35 @@ fn rejects_duplicate_and_overlapping_index_ranges() {
 
 #[test]
 fn sequential_records_reject_partial_prefixes() {
-    for prefix_length in 0..6 {
-        let mut region = vec![0xaa; prefix_length];
-        region.extend_from_slice(&[0, 3, 0, 0, 0, 0]);
-        let records = InsvReader::new(Cursor::new(fixture_with_record_region(region)))
-            .unwrap()
-            .records();
-        if prefix_length == 0 {
-            assert_eq!(records.unwrap().len(), 1);
-        } else {
-            assert!(records
-                .unwrap_err()
-                .to_string()
-                .contains("partial record prefix"));
+    for boxed in [false, true] {
+        for prefix_length in 0..6 {
+            let mut region = vec![0xaa; prefix_length];
+            region.extend_from_slice(&[0, 3, 0, 0, 0, 0]);
+            let fixture = fixture_with_record_region(region);
+            let fixture = if boxed { fixture } else { unbox_v3(fixture) };
+            let records = InsvReader::new(Cursor::new(fixture)).unwrap().records();
+            if prefix_length == 0 {
+                assert_eq!(records.unwrap().len(), 1);
+            } else {
+                assert!(records
+                    .unwrap_err()
+                    .to_string()
+                    .contains("partial record prefix"));
+            }
         }
     }
 }
 
 #[test]
 fn v3_reader_accepts_empty_tails_and_requires_both_directory_marker_bytes() {
-    for region in [vec![], vec![0, 0, 0, 0, 0, 0]] {
-        let mut reader = InsvReader::new(Cursor::new(fixture_with_record_region(region))).unwrap();
-        assert!(reader.records().unwrap().is_empty());
-        assert_eq!(reader.inspect().unwrap().trailer.record_count, 0);
+    for boxed in [false, true] {
+        for region in [vec![], vec![0, 0, 0, 0, 0, 0]] {
+            let fixture = fixture_with_record_region(region);
+            let fixture = if boxed { fixture } else { unbox_v3(fixture) };
+            let mut reader = InsvReader::new(Cursor::new(fixture)).unwrap();
+            assert!(reader.records().unwrap().is_empty());
+            assert_eq!(reader.inspect().unwrap().trailer.record_count, 0);
+        }
     }
     let region = vec![0xff, 9, 0, 1, 0, 0, 0];
     let mut reader = InsvReader::new(Cursor::new(fixture_with_record_region(region))).unwrap();

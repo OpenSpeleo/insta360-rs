@@ -145,9 +145,11 @@ MUST switch byte order at the format boundary.
 
 ### Movie and track organization
 
-The V3 profile has the following top-level form. The media boxes need not occur
-in the order shown, but `inst` is terminal and `ftyp` starts the file in the
-profile accepted by the project reader.
+The boxed V3 profile has the following top-level form. The media boxes need not
+occur in the order shown, but `inst` is terminal and `ftyp` starts the file in
+the profile accepted by the project reader. Unboxed V3 instead appends the same
+ExtraInfo payload directly after the final media box, without an `inst` header.
+Trailer version and camera model do not select between these two layouts.
 
 ```text
 ftyp                         file type and compatible brands
@@ -222,15 +224,15 @@ coexist with two HEVC video tracks, but neither is a mandatory INSV component.
 
 ## ExtraInfo version compatibility
 
-| Property         | Version 2                                 | Version 3 indexed                      | Version 3 sequential               |
-| ---------------- | ----------------------------------------- | -------------------------------------- | ---------------------------------- |
-| Outer framing    | Raw regions appended after ordinary media | Terminal `inst` box                    | Terminal `inst` box                |
-| Terminal header  | 40 bytes                                  | 72 bytes                               | 72 bytes                           |
-| Metadata         | JSON payload                              | Record `0x01`; format selects encoding | Same record encoding as indexed V3 |
-| Gyro             | Optional separate protobuf wrapper        | Record `0x03`                          | Record `0x03`                      |
-| Record footers   | None                                      | Six bytes per record                   | Six bytes per record               |
-| Directory        | None                                      | Final record `(format=0, id=0)`        | None; walk record footers backward |
-| Other record IDs | No general record framing defined         | Extensible ID catalogue                | Same catalogue                     |
+| Property         | Version 2                                 | Version 3 indexed                        | Version 3 sequential                     |
+| ---------------- | ----------------------------------------- | ---------------------------------------- | ---------------------------------------- |
+| Outer framing    | Raw regions appended after ordinary media | Terminal `inst` box or raw appended tail | Terminal `inst` box or raw appended tail |
+| Terminal header  | 40 bytes                                  | 72 bytes                                 | 72 bytes                                 |
+| Metadata         | JSON payload                              | Record `0x01`; format selects encoding   | Same record encoding as indexed V3       |
+| Gyro             | Optional separate protobuf wrapper        | Record `0x03`                            | Record `0x03`                            |
+| Record footers   | None                                      | Six bytes per record                     | Six bytes per record                     |
+| Directory        | None                                      | Final record `(format=0, id=0)`          | None; walk record footers backward       |
+| Other record IDs | No general record framing defined         | Extensible ID catalogue                  | Same catalogue                           |
 
 V3 sequential framing is not V2 framing. A common terminal signature does not
 make their preceding structures interchangeable.
@@ -247,43 +249,60 @@ versions are the ASCII signature:
 The LE `u32` immediately before this signature is the version. A bounded reader
 SHOULD read the final 40 bytes first, check the signature, then dispatch by
 version. Version `3` requires at least the complete 72-byte terminal header and
-a valid `inst` box. Version `2` uses the final 40-byte header directly. An
-unknown version MUST remain unsupported; it MUST NOT be interpreted as V3 merely
-because the signature matches.
+a valid boxed or unboxed boundary. Version `2` uses the final 40-byte header
+directly. An unknown version MUST remain unsupported; it MUST NOT be interpreted
+as V3 merely because the signature matches.
 
 If a recognized version has invalid sizes or framing, report a damaged tail of
 that version. Do not retry it as another layout. Probe media validity separately
-where partial inspection is required. For V2, determine the appended-region
-boundary before walking top-level media boxes, because the V2 tail is not a box.
+where partial inspection is required. Determine the appended-region candidate
+before walking top-level media boxes, because V2 and unboxed V3 tails are not
+boxes. A candidate is valid only when the complete media-box walk reaches its
+boundary exactly.
 
 ## ExtraInfo version 3
 
-### Terminal header and enclosing box
+### Terminal header and outer framing
 
 The final 72 bytes are:
 
-| Offset within terminal header | Size | Encoding     | Meaning                                                                              |
-| ----------------------------: | ---: | ------------ | ------------------------------------------------------------------------------------ |
-|                             0 |   32 | Opaque bytes | Reserved terminal data; preserve existing values                                     |
-|                            32 |    4 | `u32` LE     | ExtraInfo size `E`, including this header but excluding the eight-byte `inst` header |
-|                            36 |    4 | `u32` LE     | Version, equal to `3`                                                                |
-|                            40 |   32 | ASCII        | Common terminal signature                                                            |
+| Offset within terminal header | Size | Encoding     | Meaning                                                                                      |
+| ----------------------------: | ---: | ------------ | -------------------------------------------------------------------------------------------- |
+|                             0 |   32 | Opaque bytes | Reserved terminal data; preserve existing values                                             |
+|                            32 |    4 | `u32` LE     | ExtraInfo size `E`, including this header but excluding an optional eight-byte `inst` header |
+|                            36 |    4 | `u32` LE     | Version, equal to `3`                                                                        |
+|                            40 |   32 | ASCII        | Common terminal signature                                                                    |
 
-For the eight-byte `inst` header profile:
+Both V3 layouts use the same record origin:
 
 ```text
-inst_start       = F - E - 8
-payload_start    = inst_start + 8 = F - E
+payload_start    = F - E
 terminal_start   = F - 72
 record_region    = [payload_start, terminal_start)
-inst_total_size  = E + 8
 ```
 
-Every subtraction and addition MUST use checked arithmetic. `E` MUST be at
-least 72. The computed start MUST coincide with a top-level `inst` box whose BE
-size is `E + 8` and whose end is EOF. The enclosing ordinary size word must be
-able to represent that total. An extended-size `inst` variant is not defined by
-these formulas and MUST NOT be accepted by silently changing the payload origin.
+Every subtraction and addition MUST use checked arithmetic. `E` MUST be at least
+72 and no greater than `F`. A reader MUST establish one of these boundaries by
+walking actual top-level media headers:
+
+- **Boxed:** a terminal `inst` box starts at `payload_start - 8`, has an
+  ordinary eight-byte header and BE size `E + 8`, and ends at EOF. The ordinary
+  size word must be able to represent that total.
+- **Unboxed:** complete media boxes end exactly at `payload_start`; the bytes
+  from that position to EOF are the raw ExtraInfo tail.
+
+A media box crossing `payload_start` is invalid for this framing, even if its
+payload contains an apparent trailer signature or `inst` header. A top-level
+zero-size box still extends to physical EOF; a reader MUST NOT shorten it to
+make a trailer candidate valid. Malformed boxes or wrappers MUST NOT trigger a
+fallback that accepts their contents as an unboxed trailer. An extended-size
+`inst` variant is not defined by these formulas and MUST NOT be accepted by
+silently changing the payload origin.
+
+`TrailerInfo.offset` and `size` describe the complete actual trailer: boxed
+values are `payload_start - 8` and `E + 8`; unboxed values are `payload_start`
+and `E`. `BoxInfo` lists actual ISO-BMFF boxes, so an unboxed tail contributes
+no synthetic `inst` box.
 
 The reserved bytes have no defined processing meaning. A new tail may zero them;
 a preserving rewrite SHOULD retain them. The ASCII signature is an identifier,
@@ -343,8 +362,9 @@ SHOULD retain both the physical record order and the original directory order.
 An entry containing ten zero bytes is an unused directory slot and has no
 payload or record footer. Readers MUST skip it while preserving the original
 directory bytes. A nonempty entry with reserved ID zero is not a typed record.
-Offsets are measured from the beginning of the `inst` payload, not from EOF or
-from the beginning of the file.
+Offsets are measured from `payload_start` in either layout: the beginning of the
+`inst` payload when boxed, or the beginning of the raw tail when unboxed. They
+are not relative to EOF or the beginning of the file.
 
 ### Sequential records
 
@@ -1024,10 +1044,10 @@ The recording-set association and primary calibration must also survive.
 When changing the media or tail, recalculate every affected length, pointer, and
 time mapping. This includes BMFF chunk offsets when sample placement changes, V3
 directory offsets relative to the new payload origin, record lengths, ExtraInfo
-size, and `inst` size. If trimming or retiming changes camera-to-video
-alignment, copying the old tail unchanged does not restore that alignment. A
-pure relocation that leaves relative record positions unchanged does not require
-changing their relative directory offsets.
+size, and `inst` size when a wrapper is present. If trimming or retiming changes
+camera-to-video alignment, copying the old tail unchanged does not restore that
+alignment. A pure relocation that leaves relative record positions unchanged
+does not require changing their relative directory offsets.
 
 Work on a copy when rewriting originals. A generic media remux normally does not
 preserve the full tail contract. The project currently provides inspection and
@@ -1094,8 +1114,8 @@ and end-to-end media export are separate support levels.
 | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Input discovery                                | One or two existing files; conventional `_00_`/`_10_` pairing; primary ordered first                                                                            |
 | Camera identification                          | ONE X, ONE X2, X3, X4, X5, X6 and registered aliases; unknown names retained                                                                                    |
-| V3 indexed inspection                          | Supported within parser limits, including empty directories and record regions                                                                                  |
-| V3 sequential inspection                       | Backward-chain parsing supported; empty/header-only tails are not a supported input                                                                             |
+| V3 indexed inspection                          | Boxed and unboxed tails supported within parser limits, including empty directories and record regions                                                          |
+| V3 sequential inspection                       | Boxed and unboxed backward-chain parsing supported, including empty/header-only tails                                                                           |
 | Genuine V2 tail                                | Extraction preserves JSON metadata and gyro envelope; bounded `InsvReader` inspection is not implemented                                                        |
 | JSON metadata                                  | Readable JSON and raw bytes during extraction; bounded inspector remains protobuf-only                                                                          |
 | Protobuf metadata                              | Typed subset plus top-level unknown values; some known encodings remain undecoded                                                                               |
@@ -1126,9 +1146,11 @@ complete raw ExtraInfo tails, repeated and unknown records, thumbnails, and
 calibration material are extracted into indexed files with a JSON manifest.
 Unused bytes inside `mdat` are not a component of the extraction.
 
-The extraction parser independently validates V2 and V3 framing, including
-sequential and empty indexed V3 tails. Malformed or unsupported interpretations
-are reported while bounded raw bytes are preserved. The bounded `InsvReader`
+The extraction parser validates V2 framing independently and shares V3 boundary
+detection with inspection and presentation-timestamp parsing. Boxed and unboxed
+V3 support includes sequential and empty indexed tails. Extraction retains its
+record-preservation behavior and reports malformed or unsupported
+interpretations while preserving bounded raw bytes. The bounded `InsvReader`
 limitations below still apply to that separate inspection API.
 
 `MediaSource` and `MediaStream` provide file-backed stream selection, encoded
@@ -1160,9 +1182,10 @@ the INSV format:
 
 ### Conformance gaps and maintenance boundaries
 
-The bounded reader currently requires `ftyp` first and the terminal tail to
-match a top-level `inst` box. It does not implement V2 dispatch or independent
-media-only success when tail inspection fails. Actual inspected video-track
+The bounded inspector requires `ftyp` first and a validated boxed or unboxed V3
+tail. It does not implement V2 dispatch or independent media-only inspection
+success when tail inspection fails. The presentation-timestamp API also accepts
+ordinary MP4 inputs without an Insta360 trailer. Actual inspected video-track
 count supersedes the count inferred from metadata.
 
 The typed reader requires version 3 and protobuf metadata format 1; unsupported
@@ -1172,8 +1195,9 @@ duplicate ranges. Both directory-marker bytes are checked, empty tails and
 directories are supported, and sequential parsing must consume the complete
 record region. Signed first-frame timestamps preserve protobuf `int64` values.
 These checks use bounded descriptors and reads, without scanning media payloads.
-Tests include nested-container mutations and independently constructed malformed
-directory and sequential-record layouts.
+Tests include generated boxed and unboxed fixtures, readers that reject media
+payload reads, nested-container mutations, and independently constructed
+malformed directory and sequential-record layouts.
 
 The current reader also has the following limitations relevant to maintenance:
 
