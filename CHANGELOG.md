@@ -6,7 +6,7 @@ details are intentionally omitted.
 
 ## Unreleased
 
-### Features
+## v0.2.1 - 2026-10-28
 
 ### Performance
 
@@ -15,6 +15,7 @@ details are intentionally omitted.
 
 ### Fixes
 
+- Fix loading of affected Insta360 X4 recordings. f299983
 - Prevent black or incorrect stitched panoramas on Windows. d66773c
 
 ## v0.2.0 - 2026-09-13
