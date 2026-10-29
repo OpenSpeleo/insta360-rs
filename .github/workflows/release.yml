@@ -80,7 +80,7 @@ jobs:
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         id: ffmpeg-artifact
         continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ffmpeg-linux-x86_64
           run-id: ${{ inputs.ci_run_id }}
@@ -93,7 +93,7 @@ jobs:
           tar -xzf dist/ffmpeg-sdk.tar.gz -C .
       - name: Build fresh repaired wheel and source distribution
         run: bash scripts/ci/build-wheel.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist-linux
           path: |
@@ -134,7 +134,7 @@ jobs:
           workspaces: . -> target/wheel-native
       - name: Build and repair the native wheel
         run: python scripts/ci/build-native-wheel.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist-${{ matrix.target }}
           path: dist/*.whl
@@ -190,7 +190,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: python-dist-*
           merge-multiple: true
@@ -203,7 +203,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
       - name: Retain the signed provenance bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-provenance-${{ github.run_attempt }}
           path: ${{ steps.provenance.outputs.bundle-path }}
