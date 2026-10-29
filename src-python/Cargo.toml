@@ -21,4 +21,4 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 insta360-rs = { workspace = true, features = ["media", "gpu"] }
-pyo3 = { version = "0.29", features = ["abi3-py310"] }
+pyo3 = { version = "0.30", features = ["abi3-py310"] }
