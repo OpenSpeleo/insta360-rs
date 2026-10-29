@@ -457,12 +457,7 @@ impl PyStitchConfig {
     }
 }
 
-#[pyclass(
-    name = "VideoTrackInfo",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "VideoTrackInfo", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyVideoTrackInfo {
     #[pyo3(get)]
@@ -475,12 +470,7 @@ struct PyVideoTrackInfo {
     codec: String,
 }
 
-#[pyclass(
-    name = "TrailerInfo",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "TrailerInfo", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyTrailerInfo {
     #[pyo3(get)]
@@ -493,12 +483,7 @@ struct PyTrailerInfo {
     record_count: u32,
 }
 
-#[pyclass(
-    name = "MediaInfo",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "MediaInfo", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyMediaInfo {
     #[pyo3(get)]
@@ -582,12 +567,7 @@ impl From<insta360_rs::MediaInfo> for PyMediaInfo {
     }
 }
 
-#[pyclass(
-    name = "GpuAdapterInfo",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "GpuAdapterInfo", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyGpuAdapterInfo {
     #[pyo3(get)]
@@ -620,12 +600,7 @@ impl From<CoreGpuAdapterInfo> for PyGpuAdapterInfo {
     }
 }
 
-#[pyclass(
-    name = "GpuFailure",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "GpuFailure", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyGpuFailure {
     #[pyo3(get)]
@@ -649,12 +624,7 @@ impl From<CoreGpuFailure> for PyGpuFailure {
     }
 }
 
-#[pyclass(
-    name = "BackendReport",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "BackendReport", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyBackendReport {
     #[pyo3(get)]
@@ -678,12 +648,7 @@ impl From<CoreBackendReport> for PyBackendReport {
     }
 }
 
-#[pyclass(
-    name = "ExportResult",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "ExportResult", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyExportResult {
     #[pyo3(get)]
@@ -710,12 +675,7 @@ impl From<CoreExportResult> for PyExportResult {
     }
 }
 
-#[pyclass(
-    name = "ExtractionReport",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "ExtractionReport", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyExtractionReport {
     #[pyo3(get)]
@@ -748,12 +708,7 @@ impl From<CoreExtractionReport> for PyExtractionReport {
     }
 }
 
-#[pyclass(
-    name = "StreamInfo",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "StreamInfo", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyStreamInfo {
     #[pyo3(get)]
@@ -812,12 +767,7 @@ impl From<CoreStreamInfo> for PyStreamInfo {
     }
 }
 
-#[pyclass(
-    name = "MediaSource",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "MediaSource", module = "insta360_rs._native", frozen)]
 struct PyMediaSource {
     inner: CoreMediaSource,
 }
@@ -844,12 +794,7 @@ impl PyMediaSource {
     }
 }
 
-#[pyclass(
-    name = "MediaStream",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "MediaStream", module = "insta360_rs._native", frozen)]
 struct PyMediaStream {
     inner: CoreMediaStream,
 }
@@ -883,12 +828,7 @@ impl PyMediaStream {
     }
 }
 
-#[pyclass(
-    name = "StreamSideData",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "StreamSideData", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyStreamSideData {
     #[pyo3(get)]
@@ -913,12 +853,7 @@ impl From<CoreStreamSideData> for PyStreamSideData {
     }
 }
 
-#[pyclass(
-    name = "EncodedPacket",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "EncodedPacket", module = "insta360_rs._native", frozen)]
 struct PyEncodedPacket {
     #[pyo3(get)]
     input_index: usize,
@@ -972,12 +907,7 @@ impl From<CoreEncodedPacket> for PyEncodedPacket {
     }
 }
 
-#[pyclass(
-    name = "DecodedVideoFrame",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "DecodedVideoFrame", module = "insta360_rs._native", frozen)]
 struct PyDecodedVideoFrame {
     data: Vec<u8>,
     #[pyo3(get)]
@@ -1013,12 +943,7 @@ impl From<CoreDecodedVideoFrame> for PyDecodedVideoFrame {
     }
 }
 
-#[pyclass(
-    name = "PacketReader",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "PacketReader", module = "insta360_rs._native", frozen)]
 struct PyPacketReader {
     reader: Mutex<CorePacketReader>,
 }
@@ -1041,12 +966,7 @@ impl PyPacketReader {
     }
 }
 
-#[pyclass(
-    name = "VideoFrameReader",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "VideoFrameReader", module = "insta360_rs._native", frozen)]
 struct PyVideoFrameReader {
     reader: Mutex<CoreVideoFrameReader>,
 }
@@ -1092,12 +1012,7 @@ where
     .map_err(to_py_error)
 }
 
-#[pyclass(
-    name = "ExportProgress",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "ExportProgress", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyExportProgress {
     #[pyo3(get)]
@@ -1129,12 +1044,7 @@ impl From<CoreExportProgress> for PyExportProgress {
     }
 }
 
-#[pyclass(
-    name = "Capabilities",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "Capabilities", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 struct PyCapabilities {
     #[pyo3(get)]

@@ -6,12 +6,13 @@ import subprocess
 import sys
 
 
-def prepend_path(directory: Path, variable: str) -> str:
-    inherited = os.environ.get(variable)
+def prepend_path(directory: Path, variable: str, env: dict[str, str]) -> str:
+    inherited = env.get(variable)
     return str(directory) + (os.pathsep + inherited if inherited else "")
 
 
-def configure(root: Path) -> dict[str, str]:
+def configure(root: Path, env: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ if env is None else env
     native = sys.platform in ("darwin", "win32")
     cache = (root / ".cache" / ("wheel-native" if native else "wheel")).resolve()
     relative = Path((cache / "sdk-prefix.txt").read_text(encoding="utf-8").strip())
@@ -24,33 +25,33 @@ def configure(root: Path) -> dict[str, str]:
         lines = text.splitlines()
         previous = next(line.removeprefix("prefix=") for line in lines if line.startswith("prefix="))
         path.write_text(text.replace(previous, str(prefix)), encoding="utf-8")
-    environment = {"PKG_CONFIG_PATH": str(pkg_config)}
+    environment = {"PKG_CONFIG_PATH": prepend_path(pkg_config, "PKG_CONFIG_PATH", env)}
     if not native:
-        environment["LD_LIBRARY_PATH"] = prepend_path(prefix / "lib", "LD_LIBRARY_PATH")
+        environment["LD_LIBRARY_PATH"] = prepend_path(prefix / "lib", "LD_LIBRARY_PATH", env)
         return environment
     environment["FFMPEG_DIR"] = str(prefix)
     if sys.platform == "win32":
-        environment["PATH"] = prepend_path(prefix / "bin", "PATH")
+        environment["PATH"] = prepend_path(prefix / "bin", "PATH", env)
     else:
         # Resolve the SDK's relocatable @rpath names without replacing the
         # absolute libraries used by Homebrew's separate fixture-generator CLI.
         environment["DYLD_FALLBACK_LIBRARY_PATH"] = prepend_path(
-            prefix / "lib", "DYLD_FALLBACK_LIBRARY_PATH"
+            prefix / "lib", "DYLD_FALLBACK_LIBRARY_PATH", env
         )
-        sdk = os.environ.get("SDKROOT") or subprocess.check_output(
-            ["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True
+        sdk = env.get("SDKROOT") or subprocess.check_output(
+            ["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True, env=env
         ).strip()
-        clang = os.environ.get("LIBCLANG_PATH")
+        clang = env.get("LIBCLANG_PATH")
         if not clang:
             executable = subprocess.check_output(
-                ["xcrun", "--find", "clang"], text=True
+                ["xcrun", "--find", "clang"], text=True, env=env
             ).strip()
             clang = str(Path(executable).parent.parent / "lib")
         environment.update(
-            MACOSX_DEPLOYMENT_TARGET=os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0"),
+            MACOSX_DEPLOYMENT_TARGET=env.get("MACOSX_DEPLOYMENT_TARGET", "11.0"),
             SDKROOT=sdk,
             LIBCLANG_PATH=clang,
-            BINDGEN_EXTRA_CLANG_ARGS=os.environ.get(
+            BINDGEN_EXTRA_CLANG_ARGS=env.get(
                 "BINDGEN_EXTRA_CLANG_ARGS", f"--sysroot={sdk}"
             ),
         )

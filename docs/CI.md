@@ -200,11 +200,14 @@ prek install
 prek run --all-files --show-diff-on-failure
 ```
 
-These local commands use the distro's FFmpeg development libraries. To use the
-exact source-built Linux FFmpeg libraries, install Docker, run
-`bash scripts/ci/build-wheel.sh --prewarm`, and inspect the installation prefix
-selected by `.cache/wheel/sdk-prefix.txt`. CI downloads/extracts that archive
-and runs `use-ffmpeg.py` to export its environment through `GITHUB_ENV`.
+These local commands use the distro's FFmpeg development libraries. When none
+are discoverable, the Clippy hook can prepare the pinned SDK on Linux x86_64
+using Docker. Other Linux architectures require system development libraries or
+an explicit `FFMPEG_DIR`. To use the exact source-built Linux FFmpeg libraries,
+install Docker, run `bash scripts/ci/build-wheel.sh --prewarm`, and inspect the
+installation prefix selected by `.cache/wheel/sdk-prefix.txt`. CI
+downloads/extracts that archive and runs `use-ffmpeg.py` to export its
+environment through `GITHUB_ENV`.
 
 On macOS, install Xcode or Command Line Tools plus CMake, pkg-config and FFmpeg
 development libraries (for example, `brew install cmake pkg-config ffmpeg`). The
@@ -243,8 +246,28 @@ access, CMake and a C/C++ compiler; subsequent runs verify and reuse that
 prefix. A changed configuration selects a separate cache directory. An explicit
 `MNN_ROOT`, including CI's prepared prefix, is verified without downloading or
 rebuilding it. Invalid prefixes and setup failures stop the hook before Cargo.
-FFmpeg discovery and caller compiler/build settings are preserved. To run the
-same check directly, use `python3 scripts/ci/run-clippy.py`; raw
+FFmpeg is configured before MNN so their native target settings agree. Explicit
+`FFMPEG_DIR`, pkg-config search/tool settings and explicit vcpkg selections are
+preserved, as are system libraries discoverable through pkg-config. Otherwise,
+the hook uses the existing wheel SDK recipes (`build-native-wheel.py --prewarm`
+on macOS/Windows and `build-wheel.sh --prewarm` on Linux x86_64). It checks the
+recipe's current cache identity and reuses a completed matching SDK without
+rebuilding or archiving it. `use-ffmpeg.py` owns SDK relocation and
+compiler/runtime path exports. Preparing this environment before Cargo starts is
+necessary because `ffmpeg-sys-next` builds before this crate's own build script.
+
+The hook's isolated Python environment supplies the same pinned CMake 3 as the
+native wheel recipe; macOS also needs Ninja and pkg-config
+(`brew install ninja pkg-config`). Windows requires the MSVC developer
+environment and MSYS utilities described in `setup-native-wheel`, including
+`INSTA360_MSYS_BIN`. First-time SDK preparation downloads verified FFmpeg/x265
+sources and compiles them; subsequent runs reuse the cache. Setup errors stop
+before Cargo, and no parent application checkout or global shell configuration
+is needed.
+
+To run the same check directly, use `python3 scripts/ci/run-clippy.py` with the
+native prerequisites installed (including `cmake==3.31.10` as a Python package
+when building the macOS/Windows SDK); raw
 `cargo clippy --workspace --locked --all-targets --all-features -- -D warnings`
 still requires a prepared native environment. Runner regression tests are
 included in the `scripts/ci` unittest suite.

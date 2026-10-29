@@ -50,8 +50,11 @@ repos:
       - id: cargo-clippy
         name: cargo clippy (workspace, all features)
         entry: python3 scripts/ci/run-clippy.py
-        language: system
-        files: (\.rs$|(^|/)Cargo\.(toml|lock)$|pyproject\.toml$|^\.pre-commit-config\.yaml$|^scripts/ci/(run-clippy|build-mnn)\.py$)
+        language: python
+        additional_dependencies:
+          # The native x265 recipe needs policies removed in CMake 4.
+          - "cmake==3.31.10; sys_platform != 'linux'"
+        files: (\.rs$|(^|/)Cargo\.(toml|lock)$|pyproject\.toml$|^\.pre-commit-config\.yaml$|^scripts/ci/(run-clippy|build-mnn|build-native-wheel|use-ffmpeg)\.py$|^scripts/ci/(build-wheel|build-ffmpeg(-native)?|ffmpeg-runtime-config)\.sh$)
         pass_filenames: false
       - id: cargo-machete
         name: cargo machete (unused Rust dependencies)

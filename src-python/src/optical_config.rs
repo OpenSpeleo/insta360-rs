@@ -145,12 +145,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-#[pyclass(
-    name = "OpticalSelection",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "OpticalSelection", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyOpticalSelection {
     #[pyo3(get)]
@@ -172,12 +167,7 @@ impl From<insta360_rs::OpticalSelection> for PyOpticalSelection {
         }
     }
 }
-#[pyclass(
-    name = "OpticalInspection",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "OpticalInspection", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyOpticalInspection {
     #[pyo3(get)]
@@ -199,12 +189,7 @@ impl From<insta360_rs::optics::OpticalInspection> for PyOpticalInspection {
         }
     }
 }
-#[pyclass(
-    name = "OpticalResolution",
-    module = "insta360_rs._native",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "OpticalResolution", module = "insta360_rs._native", frozen)]
 #[derive(Clone, Debug)]
 pub(crate) struct PyOpticalResolution {
     #[pyo3(get)]

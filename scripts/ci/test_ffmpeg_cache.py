@@ -104,6 +104,27 @@ class PreparedFFmpegTests(unittest.TestCase):
         self.assertEqual(env["BINDGEN_EXTRA_CLANG_ARGS"], "--sysroot=/selected/sdk")
         self.assertEqual(env["MACOSX_DEPLOYMENT_TARGET"], "11.0")
 
+    def test_explicit_environment_is_used_without_mutating_process_settings(self):
+        prefix = self.sdk(native=True)
+        supplied = {
+            "SDKROOT": "/caller/sdk", "LIBCLANG_PATH": "/caller/clang",
+            "PKG_CONFIG_PATH": "/other/packages",
+            "DYLD_FALLBACK_LIBRARY_PATH": "/other/libraries",
+        }
+        original = supplied.copy()
+        with (
+            patch.object(ffmpeg.sys, "platform", "darwin"),
+            patch.dict(os.environ, {"SDKROOT": "/process/sdk"}, clear=True),
+            patch.object(ffmpeg.subprocess, "check_output") as output,
+        ):
+            env = ffmpeg.configure(self.root, supplied)
+            self.assertEqual(dict(os.environ), {"SDKROOT": "/process/sdk"})
+        output.assert_not_called()
+        self.assertEqual(supplied, original)
+        self.assertEqual(env["SDKROOT"], "/caller/sdk")
+        self.assertEqual(env["PKG_CONFIG_PATH"], str(prefix / "lib/pkgconfig") + os.pathsep + "/other/packages")
+        self.assertEqual(env["DYLD_FALLBACK_LIBRARY_PATH"], str(prefix / "lib") + os.pathsep + "/other/libraries")
+
     def test_prefix_cannot_escape_the_extracted_cache(self):
         prefix = self.sdk(native=True)
         cache = prefix.parents[2]
