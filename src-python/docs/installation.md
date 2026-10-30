@@ -9,8 +9,9 @@
   toolchain, and libclang for FFmpeg bindgen.
 - FFmpeg development headers/libraries for `avcodec`, `avformat`, `avutil`, and
   `swscale`, discoverable by `pkg-config` or the ffmpeg-sys build environment.
-- CMake and the pinned independent MNN CPU prefix for `underwater-ai` and
-  `ai-stitching`, enabled by the Python wheel configuration.
+- CMake for the pinned MNN source crate used by `underwater-ai` and
+  `ai-stitching`, enabled by the Python wheel configuration. Cargo builds it
+  with the same native toolchain as the adapter.
 - `ffmpeg` and `ffprobe` executables for the integration tests. Their fixture
   generator needs lavfi, MPEG-4 video, AAC, and MP4 support. Software HEVC
   export tests require a `libx265` encoder in the FFmpeg libraries linked to
@@ -29,17 +30,14 @@ From the repository root on macOS/Linux:
 python3 -m venv src-python/.venv
 . src-python/.venv/bin/activate
 python -m pip install 'maturin>=1.9,<2' build ruff
-python scripts/ci/build-mnn.py --output .cache/mnn
-export MNN_ROOT="$PWD/.cache/mnn"
 maturin develop --locked --manifest-path src-python/Cargo.toml
 python -I -X faulthandler src-python/scripts/run-tests.py
 ```
 
 On Windows, activate `src-python\.venv\Scripts\Activate.ps1` in PowerShell; the
-remaining commands use the same paths with forward slashes. Set
-`$env:MNN_ROOT = "$PWD/.cache/mnn"` instead of the shell export command. A
-virtual environment must be active for `maturin develop`. Rebuild after editing
-Rust; Python changes are immediately visible with a development install.
+remaining commands use the same paths with forward slashes. A virtual
+environment must be active for `maturin develop`. Rebuild after editing Rust;
+Python changes are immediately visible with a development install.
 
 The binding Cargo manifest depends on the Rust crate at `..` and enables its
 `media` and `gpu` features. Maturin also enables `underwater-ai` and

@@ -53,8 +53,12 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-sccache
+        with:
+          key: sdk-tests-linux-x86_64
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          prefix-key: sccache-v1
           key: wheel-${{ hashFiles('scripts/ci/*.sh') }}
           workspaces: . -> target/wheel-build
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -62,8 +66,7 @@ jobs:
           path: |
             .cache/wheel/cargo
             .cache/wheel/rustup
-            .cache/wheel/mnn-*
-          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'scripts/ci/build-mnn.py') }}
+          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: wheel-tools-linux-
       - name: Identify the compatible FFmpeg SDK
         id: ffmpeg
@@ -100,6 +103,13 @@ jobs:
             dist/*.whl
             dist/insta360*.tar.gz
           if-no-files-found: error
+      - &compiler-cache-stats
+        name: Report and flush compiler cache
+        if: always() && env.SCCACHE_PATH != ''
+        shell: bash
+        run: |
+          sccache --show-stats --stats-format=json
+          sccache --stop-server | tee -a "$GITHUB_STEP_SUMMARY"
 
   python-native:
     name: Python wheel (${{ matrix.target }})
@@ -123,13 +133,16 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-native-wheel
+      - uses: ./.github/actions/setup-sccache
+        with:
+          key: sdk-tests-${{ matrix.target }}
       - uses: ./.github/actions/prewarm-native-ffmpeg
         with:
           target: ${{ matrix.target }}
           source-ci-run: ${{ inputs.ci_run_id }}
-      - uses: ./.github/actions/setup-mnn
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          prefix-key: sccache-v1
           key: wheel-${{ matrix.target }}-${{ hashFiles('scripts/ci/*native*', 'scripts/ci/ffmpeg-runtime-config.sh') }}
           workspaces: . -> target/wheel-native
       - name: Build and repair the native wheel
@@ -139,6 +152,7 @@ jobs:
           name: python-dist-${{ matrix.target }}
           path: dist/*.whl
           if-no-files-found: error
+      - *compiler-cache-stats
 
   crates-io:
     name: Publish Rust crates
@@ -154,8 +168,12 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-sccache
+        with:
+          key: sdk-publish
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          prefix-key: sccache-v1
           key: publish
       - name: Build all seven packages and check sizes before authentication
         run: |
@@ -176,6 +194,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           cargo publish --workspace --locked
+      - *compiler-cache-stats
 
   pypi:
     name: Publish Python package

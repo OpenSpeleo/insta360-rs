@@ -34,6 +34,8 @@ PACKAGE_PATHS = (
 MODEL_REFERENCE_TESTS = (
     "underwater::ai::tests::aquavision_thread_budget_preserves_numerical_and_temporal_contracts",
     "underwater::model::tests::model_varied_tensors_match_complete_reference",
+    "underwater::model::tests::gpu_varied_tensors_match_complete_reference",
+    "seam_ai::tests::gpu_every_flow_value_matches_independent_direct_mnn_reference",
 )
 
 

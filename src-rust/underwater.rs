@@ -72,8 +72,18 @@ enum Engine {
 }
 
 impl UnderwaterColorSession {
+    /// Actual primary inference backends for the feature and preset models.
+    /// Off/Legacy return `None`. GPU sessions can still use CPU for unsupported ops.
+    pub fn inference_backends(&self) -> Result<Option<[&'static str; 2]>> {
+        match &self.engine {
+            #[cfg(feature = "underwater-ai")]
+            Engine::Ai(session) => session.backends().map(Some),
+            _ => Ok(None),
+        }
+    }
+
     /// Checks settings, verifies complete required resources, and prepares
-    /// job-owned processing buffers and, for AI, independent MNN CPU sessions.
+    /// job-owned processing buffers and, for AI, independent MNN sessions.
     pub fn prepare(
         options: UnderwaterColorOptions,
         width: u32,
@@ -264,7 +274,7 @@ impl UnderwaterColorOptions {
     pub fn validate_capabilities(&self) -> Result<()> {
         self.validate()?;
         if self.mode == UnderwaterColorMode::Ai && !cfg!(feature = "underwater-ai") {
-            return Err(Error::MissingCapability("underwater AI restoration requires the underwater-ai feature and its pinned MNN CPU build".into()));
+            return Err(Error::MissingCapability("underwater AI restoration requires the underwater-ai feature and its pinned MNN build".into()));
         }
         Ok(())
     }
@@ -444,6 +454,7 @@ mod tests {
         let options = UnderwaterColorOptions::default();
         let mut session =
             UnderwaterColorSession::prepare(options, 2, 1, 30, 1, &MissingAssets).unwrap();
+        assert_eq!(session.inference_backends().unwrap(), None);
         let original = [0, 127, 255, 5, 9, 11];
         for frame in 0..1000 {
             let mut pixels = original;
@@ -492,6 +503,7 @@ mod tests {
         );
         let mut session =
             UnderwaterColorSession::prepare(options, 64, 64, 30, 1, &BundledAssetProvider).unwrap();
+        assert_eq!(session.inference_backends().unwrap(), None);
         let original: Vec<_> = (0..64 * 64 * 3).map(|index| (index % 256) as u8).collect();
         for pts in [0.0, 1.0, 0.0, 10.0] {
             let mut pixels = original.clone();

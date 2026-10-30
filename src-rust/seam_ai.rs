@@ -1,4 +1,4 @@
-//! Verified Studio video model inference through an independent MNN CPU build.
+//! Verified Studio video model inference through an independent MNN build.
 //! Inference alone does not qualify a camera's seam extraction or compositing.
 use crate::Result;
 
@@ -26,11 +26,25 @@ pub fn unavailable_reason() -> Option<&'static str> {
     if cfg!(feature = "ai-stitching") {
         None
     } else {
-        Some("AI stitching requires the ai-stitching feature and its pinned independent MNN CPU runtime")
+        Some(
+            "AI stitching requires the ai-stitching feature and its pinned independent MNN runtime",
+        )
     }
 }
 
 impl SeamModel {
+    /// Actual primary inference backend; unsupported operations can use CPU.
+    pub fn inference_backend(&self) -> Result<&'static str> {
+        #[cfg(feature = "ai-stitching")]
+        {
+            self.model.backend()
+        }
+        #[cfg(not(feature = "ai-stitching"))]
+        Err(crate::Error::MissingCapability(
+            unavailable_reason().expect("disabled feature").into(),
+        ))
+    }
+
     pub fn new() -> Result<Self> {
         #[cfg(feature = "ai-stitching")]
         {
@@ -129,8 +143,54 @@ pub(crate) mod tests {
         plane.repeat(3)
     }
 
+    fn model_with_backend(preference: crate::mnn::BackendPreference) -> Result<SeamModel> {
+        let original = insta360_rs_data_ai_stitch_video::PAYLOADS
+            .iter()
+            .find(|(path, _)| *path == "models/ai-seam-studio-video-213/model.ins")
+            .unwrap()
+            .1;
+        Ok(SeamModel {
+            model: crate::mnn::Model::open_with_backend(original, 213, 1, preference)?,
+        })
+    }
+
     #[test]
     fn every_flow_value_matches_independent_direct_mnn_reference() {
+        let model = model_with_backend(crate::mnn::BackendPreference::Cpu).unwrap();
+        assert_eq!(model.model.backend().unwrap(), "cpu");
+        assert_complete_reference(model);
+    }
+
+    #[test]
+    #[ignore = "requires an isolated MNN GPU process; run the GPU shipping check"]
+    fn gpu_every_flow_value_matches_independent_direct_mnn_reference() {
+        for _ in 0..2 {
+            let model = match model_with_backend(crate::mnn::BackendPreference::Gpu) {
+                Ok(model) => model,
+                Err(crate::Error::MissingCapability(message))
+                    if std::env::var("INSTA360_RS_REQUIRE_MNN_GPU").as_deref() != Ok("1") =>
+                {
+                    eprintln!("SKIP MNN GPU numerical check: {message}");
+                    return;
+                }
+                Err(error) => panic!("MNN GPU seam initialization failed: {error}"),
+            };
+            let expected = if cfg!(target_vendor = "apple") {
+                "metal"
+            } else {
+                "vulkan"
+            };
+            assert_eq!(
+                model.model.backend().unwrap(),
+                expected,
+                "GPU test must not use CPU fallback"
+            );
+            eprintln!("MNN seam model: {}", model.model.backend().unwrap());
+            assert_complete_reference(model);
+        }
+    }
+
+    fn assert_complete_reference(mut model: SeamModel) {
         // The reference uses the direct MNN C++ API, without this adapter or
         // shim. See tests/reference/README.md for generation and input recipe.
         let bytes = include_bytes!("../tests/fixtures/seam-mnn-reference-v1.bin");
@@ -140,7 +200,6 @@ pub(crate) mod tests {
             .chunks_exact(4)
             .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()));
         let first = input(0, 0);
-        let mut model = SeamModel::new().unwrap();
         let session = model.model.allocation_identity();
         let cases = [
             (0, 0, false),
@@ -200,7 +259,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rejects_wrong_shapes_nonfinite_values_and_invalid_coverage() {
-        let mut model = SeamModel::new().unwrap();
+        let mut model = model_with_backend(crate::mnn::BackendPreference::Cpu).unwrap();
         let mut first = input(0, 0);
         let second = first.clone();
         let mut mask = vec![1.0; 544 * 64];

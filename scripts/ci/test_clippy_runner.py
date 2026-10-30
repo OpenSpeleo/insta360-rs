@@ -31,62 +31,33 @@ class ClippyRunnerTests(unittest.TestCase):
             context.start()
             self.addCleanup(context.stop)
 
-    def test_macos_selects_sdk_before_mnn_build_and_runs_full_clippy_scope(self):
-        events = []
-
-        def output(args, *, env, **kwargs):
-            events.append(args)
-            if args[0] == "xcrun":
-                self.assertEqual(args, ["xcrun", "--sdk", "macosx", "--show-sdk-path"])
-                return "/selected Xcode/SDKs/MacOSX.sdk\n"
-            self.assertEqual(args[-1], "--configuration")
-            self.assertEqual(env["SDKROOT"], "/selected Xcode/SDKs/MacOSX.sdk")
-            self.assertNotIn("MNN_ROOT", env)
-            self.assertEqual(kwargs["cwd"], self.root)
-            return b'{"configuration": "from authoritative builder"}\n'
-
-        def run(args, *, env, cwd, check):
-            events.append(args)
-            self.assertEqual(cwd, self.root)
-            self.assertEqual(env["SDKROOT"], "/selected Xcode/SDKs/MacOSX.sdk")
-            self.assertEqual(Path(env["MNN_ROOT"]).parent, self.root / ".cache/mnn")
-            self.assertEqual(env["PATH"], "/caller/bin")
-            if args[0] == "cargo":
-                self.assertFalse(check)
-                self.assertEqual(
-                    args,
-                    [
-                        "cargo",
-                        "clippy",
-                        "--workspace",
-                        "--locked",
-                        "--all-targets",
-                        "--all-features",
-                        "--",
-                        "-D",
-                        "warnings",
-                    ],
-                )
-                return subprocess.CompletedProcess(args, 101)
-            self.assertTrue(check)
-            self.assertEqual(args[-2:], ["--output", env["MNN_ROOT"]])
-            return subprocess.CompletedProcess(args, 0)
-
+    def test_macos_selects_sdk_before_cargo_and_runs_full_clippy_scope(self):
         with (
             patch.object(runner.sys, "platform", "darwin"),
-            patch.object(runner.subprocess, "check_output", side_effect=output),
-            patch.object(runner.subprocess, "run", side_effect=run),
+            patch.object(
+                runner.subprocess, "check_output",
+                return_value="/selected Xcode/SDKs/MacOSX.sdk\n",
+            ) as output,
+            patch.object(
+                runner.subprocess, "run",
+                return_value=subprocess.CompletedProcess([], 101),
+            ) as run,
         ):
             self.assertEqual(runner.main(), 101)
-        self.assertEqual(len(events), 4)
-        self.assertEqual(events[2][1], str(self.root / "scripts/ci/build-mnn.py"))
+        self.assertEqual(output.call_args.args[0], ["xcrun", "--sdk", "macosx", "--show-sdk-path"])
+        self.assertEqual(run.call_args.kwargs["env"]["SDKROOT"], "/selected Xcode/SDKs/MacOSX.sdk")
+        self.assertEqual(run.call_args.kwargs["env"]["PATH"], "/caller/bin")
+        self.assertEqual(run.call_args.kwargs["cwd"], self.root)
+        self.assertFalse(run.call_args.kwargs["check"])
+        self.assertEqual(run.call_args.args[0], [
+            "cargo", "clippy", "--workspace", "--locked", "--all-targets",
+            "--all-features", "--", "-D", "warnings",
+        ])
         self.assertNotIn("SDKROOT", os.environ)
-        self.assertNotIn("MNN_ROOT", os.environ)
 
-    def test_prepared_environment_is_verified_and_preserved_on_every_platform(self):
+    def test_prepared_environment_is_preserved_on_every_platform(self):
         prepared = {
             "PATH": "/caller/bin",
-            "MNN_ROOT": "/prepared MNN",
             "SDKROOT": "/explicit SDK",
             "DEVELOPER_DIR": "/selected Xcode",
             "CC": "custom-clang",
@@ -108,92 +79,32 @@ class ClippyRunnerTests(unittest.TestCase):
             ):
                 self.assertEqual(runner.prepare_environment(), prepared)
                 output.assert_not_called()
-                run.assert_called_once_with(
-                    [
-                        runner.sys.executable,
-                        str(self.root / "scripts/ci/build-mnn.py"),
-                        "--verify-only",
-                        "--output",
-                        "/prepared MNN",
-                    ],
-                    cwd=self.root,
-                    env=prepared,
-                    check=True,
-                )
-
-    def test_cache_identity_is_stable_and_changes_with_builder_configuration(self):
-        with (
-            patch.object(runner.sys, "platform", "linux"),
-            patch.object(
-                runner.subprocess,
-                "check_output",
-                side_effect=[b"first", b"first", b"changed"],
-            ),
-            patch.object(runner.subprocess, "run"),
-        ):
-            first = runner.prepare_environment()
-            self.assertEqual(runner.prepare_environment(), first)
-            self.assertNotEqual(
-                runner.prepare_environment()["MNN_ROOT"], first["MNN_ROOT"]
-            )
-        self.assertNotIn("MNN_ROOT", os.environ)
-
-    def test_discovery_failure_prevents_build_and_cargo(self):
-        for platform in ("darwin", "linux"):
-            with (
-                self.subTest(platform=platform),
-                patch.object(runner.sys, "platform", platform),
-                patch.object(
-                    runner.subprocess,
-                    "check_output",
-                    side_effect=subprocess.CalledProcessError(7, "native discovery"),
-                ),
-                patch.object(runner.subprocess, "run") as run,
-                redirect_stderr(io.StringIO()),
-            ):
-                self.assertEqual(runner.main(), 7)
                 run.assert_not_called()
 
-    def test_ffmpeg_configuration_reaches_mnn_before_cache_selection(self):
+    def test_discovery_failure_prevents_cargo(self):
+        with (
+            patch.object(runner.sys, "platform", "darwin"),
+            patch.object(
+                runner.subprocess, "check_output",
+                side_effect=subprocess.CalledProcessError(7, "native discovery"),
+            ),
+            patch.object(runner.subprocess, "run") as run,
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(runner.main(), 7)
+            run.assert_not_called()
+
+    def test_ffmpeg_configuration_reaches_cargo(self):
         def configure(env):
             env.update(FFMPEG_DIR="/prepared SDK", MACOSX_DEPLOYMENT_TARGET="11.0")
 
         with (
             patch.object(runner.sys, "platform", "linux"),
             patch.object(runner, "prepare_ffmpeg", side_effect=configure),
-            patch.object(
-                runner.subprocess, "check_output", return_value=b"configuration"
-            ) as output,
-            patch.object(runner.subprocess, "run"),
         ):
             env = runner.prepare_environment()
-        self.assertEqual(output.call_args.kwargs["env"]["FFMPEG_DIR"], "/prepared SDK")
-        self.assertEqual(
-            output.call_args.kwargs["env"]["MACOSX_DEPLOYMENT_TARGET"], "11.0"
-        )
         self.assertEqual(env["FFMPEG_DIR"], "/prepared SDK")
-
-    def test_failed_build_or_explicit_prefix_verification_prevents_cargo(self):
-        for prefix in ("", "/invalid prefix"):
-            with (
-                self.subTest(prefix=prefix),
-                patch.dict(os.environ, {"MNN_ROOT": prefix}),
-                patch.object(runner.sys, "platform", "linux"),
-                patch.object(
-                    runner.subprocess, "check_output", return_value=b"configuration"
-                ),
-                patch.object(
-                    runner.subprocess,
-                    "run",
-                    side_effect=subprocess.CalledProcessError(9, "MNN setup"),
-                ) as run,
-                redirect_stderr(io.StringIO()),
-            ):
-                self.assertEqual(runner.main(), 9)
-                self.assertEqual(run.call_count, 1)
-                args = run.call_args.args[0]
-                self.assertEqual(args[1], str(self.root / "scripts/ci/build-mnn.py"))
-                self.assertEqual("--verify-only" in args, bool(prefix))
+        self.assertEqual(env["MACOSX_DEPLOYMENT_TARGET"], "11.0")
 
     def test_missing_tool_or_empty_sdk_prevents_build_and_cargo(self):
         for response in (FileNotFoundError("xcrun"), "\n"):
@@ -384,7 +295,7 @@ class FFmpegRunnerTests(unittest.TestCase):
                         runner.prepare_ffmpeg(self.env.copy())
                 self.assertEqual(run.call_args.args[0][-1], "--prewarm")
 
-    def test_setup_failure_stops_before_mnn_and_cargo(self):
+    def test_setup_failure_stops_before_cargo(self):
         with (
             patch.dict(os.environ, self.env, clear=True),
             patch.object(runner.sys, "platform", "darwin"),

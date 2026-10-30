@@ -1,9 +1,10 @@
-//! Verified model decoding and ownership of the independent MNN CPU runtime.
+//! Verified model decoding and ownership of the independent MNN runtime.
 use crate::{assets::sha256, Error, Result};
 use aes::{
     cipher::{BlockCipherDecrypt, KeyInit},
     Aes256,
 };
+use mnn_src as _;
 use std::{
     ffi::{c_char, c_int, c_void, CStr},
     ptr::NonNull,
@@ -68,6 +69,7 @@ unsafe extern "C" {
         length: usize,
         id: c_int,
         cpu_threads: c_int,
+        preference: c_int,
         error: *mut c_char,
         capacity: usize,
     ) -> *mut c_void;
@@ -84,6 +86,7 @@ unsafe extern "C" {
     ) -> c_int;
     #[cfg(all(test, feature = "underwater-ai"))]
     fn insta360_mnn_actual_threads(native: *mut c_void) -> c_int;
+    fn insta360_mnn_backend(native: *mut c_void) -> c_int;
     fn insta360_mnn_destroy(native: *mut c_void);
 }
 
@@ -98,6 +101,16 @@ pub(crate) fn runtime_version() -> Result<&'static str> {
         .map_err(|_| Error::Media("MNN returned an invalid runtime version".into()))
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(i32)]
+pub(crate) enum BackendPreference {
+    Auto = 0,
+    #[cfg(test)]
+    Cpu = 1,
+    #[cfg(test)]
+    Gpu = 2,
+}
+
 #[derive(Debug)]
 pub(crate) struct Model {
     native: NonNull<c_void>,
@@ -109,24 +122,33 @@ unsafe impl Send for Model {}
 fn failure(bytes: &[c_char; 512]) -> Error {
     // SAFETY: zero-initialized buffer; the C shim terminates within capacity.
     let message = unsafe { CStr::from_ptr(bytes.as_ptr()) }.to_string_lossy();
-    Error::Media(format!("independent MNN: {message}"))
+    if message == "MNN requested GPU backend is unavailable" {
+        Error::MissingCapability(message.into_owned())
+    } else {
+        Error::Media(format!("independent MNN: {message}"))
+    }
 }
 
 impl Model {
     #[cfg(feature = "ai-stitching")]
     pub(crate) fn open(original: &[u8], id: u32) -> Result<Self> {
-        Self::open_with_threads(original, id, 1)
+        Self::open_with_backend(original, id, 1, BackendPreference::Auto)
     }
 
-    /// An explicit, bounded CPU budget; precision and tensor contracts are fixed.
-    pub(crate) fn open_with_threads(original: &[u8], id: u32, cpu_threads: usize) -> Result<Self> {
+    /// Preserve the CPU fallback budget and high-precision tensor contracts.
+    pub(crate) fn open_with_backend(
+        original: &[u8],
+        id: u32,
+        cpu_threads: usize,
+        preference: BackendPreference,
+    ) -> Result<Self> {
         if !(1..=4).contains(&cpu_threads) {
             return Err(Error::InvalidMedia(
                 "MNN CPU thread count must be in 1..=4".into(),
             ));
         }
-        if runtime_version()? != "3.6.1" {
-            return Err(Error::Media("independent MNN must be version 3.6.1".into()));
+        if runtime_version()? != "3.6.2" {
+            return Err(Error::Media("independent MNN must be version 3.6.2".into()));
         }
         let decoded = decode_model(original, id)?;
         let mut error = [0; 512];
@@ -137,6 +159,7 @@ impl Model {
                 decoded.len(),
                 id as c_int,
                 cpu_threads as c_int,
+                preference as c_int,
                 error.as_mut_ptr(),
                 error.len(),
             )
@@ -145,6 +168,18 @@ impl Model {
             native: NonNull::new(native).ok_or_else(|| failure(&error))?,
             id,
         })
+    }
+
+    pub(crate) fn backend(&self) -> Result<&'static str> {
+        // SAFETY: the uniquely owned native session remains alive during the query.
+        match unsafe { insta360_mnn_backend(self.native.as_ptr()) } {
+            0 => Ok("cpu"),
+            1 => Ok("metal"),
+            7 => Ok("vulkan"),
+            value => Err(Error::Media(format!(
+                "MNN reported unexpected backend {value}"
+            ))),
+        }
     }
 
     #[cfg(all(test, feature = "underwater-ai"))]

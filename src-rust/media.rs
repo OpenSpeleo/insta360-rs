@@ -83,7 +83,7 @@ pub struct VideoPreflight {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaCapabilities {
-    /// Independent MNN CPU inference is compiled into this build.
+    /// Independent MNN inference is compiled into this build.
     pub underwater_ai_compiled: bool,
     pub image_export: bool,
     pub video_export: bool,

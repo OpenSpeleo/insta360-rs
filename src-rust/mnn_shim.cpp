@@ -1,4 +1,4 @@
-// Private C ABI around the independently built MNN 3.6.1 CPU interpreter.
+// Private C ABI around the independently built MNN 3.6.2 interpreter.
 // No Insta360 executable code is loaded or linked.
 #include <MNN/Interpreter.hpp>
 #include <MNN/Tensor.hpp>
@@ -26,22 +26,56 @@ struct Model {
     MNN::Session* session = nullptr;
     std::vector<TensorBuffer> inputs;
     std::vector<TensorBuffer> outputs;
-    static void initialize(Model* self, const void* bytes, size_t length, int cpu_threads) {
-        self->interpreter.reset(MNN::Interpreter::createFromBuffer(bytes, length));
-        if (!self->interpreter) throw std::runtime_error("MNN rejected model data");
+    int backend_type = MNN_FORWARD_CPU;
+    bool ready() const {
+        int status = -1;
+        return session && interpreter->getSessionInfo(session, MNN::Interpreter::RESIZE_STATUS, &status)
+            && status == 0;
+    }
+    void initialize(const void* bytes, size_t length, int cpu_threads, int preference) {
+        interpreter.reset(MNN::Interpreter::createFromBuffer(bytes, length));
+        if (!interpreter) throw std::runtime_error("MNN rejected model data");
         MNN::BackendConfig backend;
         backend.precision = MNN::BackendConfig::Precision_High;
         backend.power = MNN::BackendConfig::Power_Normal;
-        MNN::ScheduleConfig config;
-        config.type = MNN_FORWARD_CPU;
-        config.numThread = cpu_threads;
-        config.backendConfig = &backend;
-        self->session = self->interpreter->createSession(config);
-        if (!self->session) throw std::runtime_error("MNN could not create a CPU session");
-
+        MNN::ScheduleConfig cpu;
+        cpu.type = MNN_FORWARD_CPU;
+        cpu.numThread = cpu_threads;
+        cpu.backendConfig = &backend;
+        MNN::ScheduleConfig gpu = cpu;
+#if defined(__APPLE__)
+        gpu.type = MNN_FORWARD_METAL;
+#elif defined(__linux__) || defined(_WIN32)
+        gpu.type = MNN_FORWARD_VULKAN;
+#else
+        gpu.type = MNN_FORWARD_CPU;
+#endif
+        // The GPU mode shares storage with numThread. Keep CPU budgets separate.
+        gpu.mode = MNN_GPU_TUNING_WIDE;
+        gpu.backupType = MNN_FORWARD_CPU;
+        auto runtime = MNN::Interpreter::createRuntime(preference == 1
+            ? std::vector<MNN::ScheduleConfig>{cpu}
+            : std::vector<MNN::ScheduleConfig>{cpu, gpu});
+        const bool available = gpu.type != MNN_FORWARD_CPU && runtime.first.count(gpu.type) != 0;
+        if (preference == 2 && !available)
+            throw std::runtime_error("MNN requested GPU backend is unavailable");
+        const bool use_gpu = preference != 1 && available;
+        session = interpreter->createSession(use_gpu ? gpu : cpu, runtime);
+        if (!ready() && use_gpu && preference == 0) {
+            if (session) interpreter->releaseSession(session);
+            session = interpreter->createSession(cpu, runtime);
+        }
+        if (!ready()) throw std::runtime_error("MNN could not initialize the requested session");
+        int backends[2] = {-1, -1};
+        if (!interpreter->getSessionInfo(session, MNN::Interpreter::BACKENDS, backends))
+            throw std::runtime_error("MNN did not report the session backend");
+        // MNN exposes optimized x86/ARM CPU kernels as CPU_EXTENSION.
+        backend_type = backends[0] == MNN_FORWARD_CPU_EXTENSION ? MNN_FORWARD_CPU : backends[0];
+        if (preference == 2 && backend_type != gpu.type)
+            throw std::runtime_error("MNN did not select the requested GPU backend");
     }
-    Model(const void* bytes, size_t length, int id, int cpu_threads) {
-        initialize(this, bytes, length, cpu_threads);
+    Model(const void* bytes, size_t length, int id, int cpu_threads, int preference) {
+        initialize(bytes, length, cpu_threads, preference);
         const std::vector<const char*> names = id == 197
             ? std::vector<const char*>{"ctt_h_img", "ctt_l_img", "sty_l_img"}
             : id == 198 ? std::vector<const char*>{"input"}
@@ -85,7 +119,7 @@ struct Model {
                 throw std::runtime_error("MNN output buffer length mismatch");
         }
         if (interpreter->runSession(session) != MNN::NO_ERROR)
-            throw std::runtime_error("MNN CPU inference failed");
+            throw std::runtime_error("MNN inference failed");
         // Validate every result before publishing any caller-owned tensor.
         for (auto& output : outputs) {
             if (!output.device->copyToHostTensor(output.host.get()))
@@ -113,16 +147,18 @@ const char* insta360_mnn_version() noexcept {
     return MNN::getVersion();
 }
 
-void* insta360_mnn_create(const unsigned char* bytes, size_t length, int id, int cpu_threads,
+void* insta360_mnn_create(const unsigned char* bytes, size_t length, int id, int cpu_threads, int preference,
                          char* message, size_t capacity) noexcept {
     try {
-        if (std::strcmp(MNN::getVersion(), "3.6.1") != 0)
-            throw std::runtime_error("Linked MNN runtime must be version 3.6.1");
+        if (std::strcmp(MNN::getVersion(), "3.6.2") != 0)
+            throw std::runtime_error("Linked MNN runtime must be version 3.6.2");
         if (!bytes || !length || (id != 197 && id != 198 && id != 213))
             throw std::runtime_error("Invalid MNN model arguments");
         if (cpu_threads < 1 || cpu_threads > 4)
             throw std::runtime_error("MNN CPU thread count must be in 1..=4");
-        return new Model(bytes, length, id, cpu_threads);
+        if (preference < 0 || preference > 2)
+            throw std::runtime_error("Invalid MNN backend preference");
+        return new Model(bytes, length, id, cpu_threads, preference);
     } catch (const std::exception& e) { error(message, capacity, e.what()); }
       catch (...) { error(message, capacity, "Unknown MNN initialization failure"); }
     return nullptr;
@@ -142,12 +178,16 @@ int insta360_mnn_run(void* opaque, const float* const* inputs,
       catch (...) { error(message, capacity, "Unknown MNN inference failure"); }
     return -1;
 }
+int insta360_mnn_backend(void* opaque) noexcept {
+    return opaque ? static_cast<Model*>(opaque)->backend_type : -1;
+}
 // Used by numerical tests and isolated phase diagnostics. The public MNN query
 // reads runtime-adjusted pipeline info, including process-global pool clamping.
 int insta360_mnn_actual_threads(void* opaque) noexcept {
     if (!opaque) return 0;
     try {
         auto& model = *static_cast<Model*>(opaque);
+        if (model.backend_type != MNN_FORWARD_CPU) return 0;
         int threads = 0;
         if (!model.interpreter->getSessionInfo(model.session, MNN::Interpreter::THREAD_NUMBER, &threads))
             return 0;

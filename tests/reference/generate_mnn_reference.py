@@ -1,13 +1,15 @@
 """Regenerate complete adapter references with a separate C++ MNN executable.
 
-Requires MNN_ROOT, a C++17 compiler and the OpenSSL command-line tool. This is
+Requires --mnn-prefix, a C++17 compiler and the OpenSSL command-line tool. This is
 maintenance tooling, never imported or executed by production or normal tests.
 """
 
+import argparse
 import hashlib
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -68,7 +70,9 @@ def unwrap(original, expected):
 
 
 def main():
-    prefix = pathlib.Path(os.environ["MNN_ROOT"])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mnn-prefix", type=pathlib.Path, required=True)
+    prefix = parser.parse_args().mnn_prefix
     part0 = ROOT / "data/underwater-model-a/assets/underwater/model197.ins.part0"
     part1 = ROOT / "data/underwater-model-b/assets/underwater/model197.ins.part1"
     model198 = ROOT / "data/underwater-resources/assets/underwater/model198.ins"
@@ -88,27 +92,31 @@ def main():
             )
         )
         executable = temporary / "reference"
-        subprocess.run(
-            [
-                os.environ.get("CXX", "c++"),
-                "-std=c++17",
-                "-O2",
-                str(ROOT / "tests/reference/mnn_reference.cpp"),
-                "-I",
-                str(prefix / "include"),
-                str(prefix / "lib/libMNN.a"),
-                "-pthread",
-                "-o",
-                str(executable),
-            ],
-            check=True,
-        )
+        command = [
+            os.environ.get("CXX", "c++"),
+            "-std=c++17",
+            "-O2",
+            str(ROOT / "tests/reference/mnn_reference.cpp"),
+            "-I",
+            str(prefix / "include"),
+            str(prefix / "lib/libMNN.a"),
+            "-pthread",
+            "-o",
+            str(executable),
+        ]
+        if sys.platform == "darwin":
+            command.extend(["-framework", "Foundation", "-framework", "Metal",
+                            "-framework", "CoreGraphics"])
+        else:
+            command.append("-ldl")
+        subprocess.run(command, check=True)
         output = ROOT / "tests/fixtures/underwater-mnn-reference-v1.bin"
         subprocess.run(
             [str(executable), str(first), str(second), str(output)], check=True
         )
         print(
-            f"{output.name}: {len(output.read_bytes())} bytes, sha256 {hashlib.sha256(output.read_bytes()).hexdigest()}"
+            f"MNN 3.6.2 CPU, Precision_High, one thread: {output.name}: "
+            f"{len(output.read_bytes())} bytes, sha256 {hashlib.sha256(output.read_bytes()).hexdigest()}"
         )
 
 

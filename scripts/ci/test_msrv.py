@@ -32,7 +32,6 @@ class MsrvCheckTests(unittest.TestCase):
             "CARGO_TARGET_DIR": "caller-target",
             "CARGO_PROFILE_DEV_OPT_LEVEL": "caller-profile",
             "FFMPEG_DIR": "prepared-ffmpeg",
-            "MNN_ROOT": "prepared-mnn",
             "PKG_CONFIG_PATH": "caller-pkgconfig",
             "MACOSX_DEPLOYMENT_TARGET": "caller-macos-target",
         }

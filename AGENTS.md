@@ -170,12 +170,14 @@ See [architecture](docs/architecture.md), [public API](docs/public-api.md),
 
 ## Testing Requirements
 
-Use the compiler in `rust-toolchain.toml`. All-feature builds require the pinned
-independent MNN CPU prefix in `MNN_ROOT`; see `scripts/ci/build-mnn.py` and
-`docs/CI.md`. The optional `underwater-ai` and `ai-stitching` features enable
-that engine; non-AI modes have no native engine dependency. Run Cargo checks
-with `--locked` except when intentionally updating versions or dependency
-resolution.
+Use the compiler in `rust-toolchain.toml`. Optional `underwater-ai` and
+`ai-stitching` features build the pinned engine through `mnn-src`, with Metal on
+macOS and Vulkan on Linux/Windows; CMake and a C/C++ compiler are required. Keep
+CPU thread-budget checks explicitly CPU. GPU numerical checks must assert the
+actual session backend; CPU fallback does not qualify GPU inference. Read
+`docs/CI.md` for discovery, redistribution and isolated numerical checks. Non-AI
+modes have no MNN dependency. Run Cargo checks with `--locked` except when
+intentionally updating versions or dependency resolution.
 
 The separate compatibility check `python3 scripts/ci/check-msrv.py` reads
 `workspace.package.rust-version` and checks published targets/features with that
@@ -318,10 +320,11 @@ Windows jobs build and repair wheels without runtime test suites. The shared
 source-built Linux FFmpeg SDK uses an exact native/image cache key, then falls
 back to the verified CI run's SDK artifact, then compilation if unavailable.
 macOS and Windows prewarm matching SDKs for CI and reuse the same cache/artifact
-fallback during release, rechecking the current host fingerprint. Native wheels
-reuse the verified MNN prefix prepared for the job. Keep the existing Rust
-profiles and Maturin build settings unchanged unless explicitly requested. The
-Python extension keeps `publish = false` for crates.io.
+fallback during release, rechecking the current host fingerprint. Cargo owns the
+MNN source build; wheel builders preserve notices from its locked source
+package. Keep the existing Rust profiles and Maturin build settings unchanged
+unless explicitly requested. The Python extension keeps `publish = false` for
+crates.io.
 
 `[workspace.package].version` is the package-version authority. All eight crates
 inherit it and Maturin derives the Python version dynamically. The seven exact

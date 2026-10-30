@@ -46,10 +46,10 @@ equal the public manifest with no duplicate payload paths.
 Every data package includes its own license and notice. The data bytes remain
 unchanged, including line endings and both complete CoreML groups. The optional
 underwater AI processor executes its verified models through an independent MNN
-CPU build. The `ai-stitching` feature shares that engine for model-213 inference
-with qualified cylindrical belt preparation, bidirectional confidence checks and
-shared CPU/GPU flow compositing. Other bundled learned models remain
-unavailable.
+3.6.2 build with Metal on macOS or Vulkan on Linux/Windows and CPU fallback. The
+`ai-stitching` feature shares that engine for model-213 inference with qualified
+cylindrical belt preparation, bidirectional confidence checks and shared CPU/GPU
+flow compositing. Other bundled learned models remain unavailable.
 
 `BundledAssetProvider::manifest()` validates descriptors and complete model
 groups. The existing `load_verified` methods check payload length and SHA-256.
@@ -121,11 +121,12 @@ metadata needed to rebuild independently.
 
 The Python extension enables `insta360-rs/media` and `gpu`; wheel builds also
 enable `underwater-ai` and `ai-stitching` and statically link the pinned
-independent MNN CPU engine. `ProcessingBackend.AUTO` therefore attempts the
-target platform's portable GPU provider and reruns the complete operation on CPU
-after a typed GPU failure. Do not label a wheel release-qualified for GPU until
-its Metal, D3D12, or Vulkan path passes the corresponding real-X5 and clean
-GPU-less-host matrix.
+independent MNN engine, using Metal on macOS or Vulkan on Linux/Windows with CPU
+fallback at initialization. `ProcessingBackend.AUTO` separately controls the
+image renderer and reruns the complete operation with CPU rendering after a
+typed renderer GPU failure. It does not select the MNN inference backend. Do not
+label a wheel release-qualified for GPU until its Metal, D3D12, or Vulkan path
+passes the corresponding real-X5 and clean GPU-less-host matrix.
 
 Release wheels must bundle the same capability-pruned shared FFmpeg runtime used
 at link time and repair loader paths with the platform-native wheel tool:

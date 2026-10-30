@@ -164,11 +164,19 @@ verified source CI run; if that artifact is absent or expired, the builder
 compiles the SDK. macOS and Windows use the shared native prewarm action:
 restore the matching platform cache, fall back to `ffmpeg-<platform>` from the
 verified CI run, then verify or build the current host fingerprint. Their SDK
-archives retain complete prefixes and verified sources, and MNN is reused from
-the platform's separate verified cache. Native caches created on a release tag
-are available to same-tag reruns, not other release tags; matching
-default-branch caches may also be restored. See
+archives retain complete prefixes and verified sources. Cargo builds MNN from
+its locked source dependency. Native caches created on a release tag are
+available to same-tag reruns, not other release tags; matching default-branch
+caches may also be restored. See
 [cache scope](CI.md#github-setup-and-maintenance).
+
+Wheel and Rust-publication jobs also use the same sccache setup as CI. Rust, the
+native adapter and MNN compilation are cached; linking and archiving remain
+uncached. Linux wheel compilation uses a separate manylinux cache and a verified
+Linux musl sccache executable. Each job reports and flushes compiler statistics
+before saving its cache snapshot. See
+[compiler caching](CI.md#github-setup-and-maintenance) for the native language
+coverage and cache-migration boundary.
 
 Rust packages and verifies all seven crates and checks their sizes before
 requesting its temporary credential. It then uses one
@@ -218,11 +226,13 @@ omit either engine. Both wheel builders build from the source distribution, with
 the same feature declarations and pinned MNN runtime as the tested commit.
 
 The release also includes a Linux-produced sdist. Source builds need Rust,
-libclang, pkg-config, compatible shared FFmpeg development libraries, and the
-pinned static MNN 3.6.1 prefix in `MNN_ROOT` for the default wheel features. Use
-the source distribution's `scripts/ci/build-mnn.py` builder as described in
-[CI.md](CI.md#optional-ai-native-prerequisite). The sdist does not install
-system prerequisites automatically.
+libclang, pkg-config, compatible shared FFmpeg development libraries, CMake and
+a C/C++ compiler. Cargo builds static MNN 3.6.2 from the exact registry source
+crate (`mnn-src = "=3.6.2"`) for the default wheel features, including Metal on
+macOS and Vulkan on Linux/Windows. Vulkan execution requires the system GPU
+driver; standalone Linux installations also need the unversioned `libvulkan.so`
+loader. See [CI.md](CI.md#optional-ai-native-prerequisite). The sdist does not
+install system prerequisites automatically.
 
 Each wheel includes its shared FFmpeg/x265 runtime, license texts, build
 configuration/provenance, and corresponding source material. Windows also builds

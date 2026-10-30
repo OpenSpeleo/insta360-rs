@@ -771,6 +771,14 @@ mod tests {
             let expected = global
                 .prepare(&lenses, &calibration, &motion, mode)
                 .unwrap();
+            // Hold the native session fixed: Metal tunes convolution kernels
+            // independently per session, with small FP32 rounding differences.
+            // This test isolates the CPU scheduling change and remains bit-exact;
+            // separate-session GPU accuracy is checked against full model references.
+            #[cfg(feature = "ai-stitching")]
+            if mode == SeamMode::Ai {
+                interactive.ai_model = global.ai_model.take();
+            }
             let actual = interactive
                 .prepare(&lenses, &calibration, &motion, mode)
                 .unwrap();

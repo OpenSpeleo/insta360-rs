@@ -1,10 +1,10 @@
 """Generate independent, full-tensor model-213 references with pinned CPU MNN.
 
-Run through FrameForge's `make reference-insv-stitch`, or the independent
-repository's prepared MNN_ROOT environment. No vendor runtime is executed.
+Pass the installed prefix reported by Cargo for mnn-src through --mnn-prefix. No vendor runtime is executed.
 """
 
 from array import array
+import argparse
 import hashlib
 import json
 import os
@@ -50,7 +50,9 @@ def floats(values: list[float]) -> bytes:
 
 
 def generate() -> None:
-    prefix = Path(os.environ["MNN_ROOT"])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mnn-prefix", type=Path, required=True)
+    prefix = parser.parse_args().mnn_prefix
     asset = ROOT / "data/ai-stitch-video/assets/models/ai-seam-studio-video-213/model.ins"
     original = asset.read_bytes()
     assert hashlib.sha256(original).hexdigest() == ORIGINAL_SHA
@@ -74,7 +76,8 @@ def generate() -> None:
                    "-I", str(prefix / "include"), str(ROOT / "tests/reference/seam-model-reference.cpp"),
                    str(prefix / "lib/libMNN.a"), "-o", str(executable)]
         if sys.platform == "darwin":
-            command.extend(["-framework", "Accelerate", "-framework", "Foundation"])
+            command.extend(["-framework", "Foundation", "-framework", "Metal",
+                            "-framework", "CoreGraphics"])
         else:
             command.extend(["-pthread", "-ldl"])
         subprocess.run(command, check=True)
@@ -100,7 +103,7 @@ def generate() -> None:
                                     for y in range(16, 120) for x in range(4, 12))
                    for channel in range(4)]
         measurements.append({"dx": dx, "dy": dy, "masked": masked, "interior_medians_fx_fy_bx_by": medians})
-    metadata = {"runtime": "MNN 3.6.1 CPU, Precision_High, one thread", "platform": sys.platform,
+    metadata = {"runtime": "MNN 3.6.2 CPU, Precision_High, one thread", "platform": sys.platform,
                 "original_sha256": ORIGINAL_SHA, "decoded_sha256": DECODED_SHA,
                 "fixture_sha256": hashlib.sha256(fixture).hexdigest(), "cases": measurements}
     (destination.with_suffix(".json")).write_text(json.dumps(metadata, indent=2) + "\n")

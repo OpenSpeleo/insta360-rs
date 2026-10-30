@@ -2,7 +2,7 @@
 
 import importlib.util
 import hashlib
-import os
+import subprocess
 from pathlib import Path
 import tempfile
 import tomllib
@@ -30,13 +30,23 @@ class PythonPackagingTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.mnn_root = self.root / "mnn"
-        self.mnn_root.mkdir()
-        for filename in runner.MNN_NOTICES:
-            (self.mnn_root / filename).write_bytes(b"pinned runtime bytes\r\n" + filename.encode())
-        environment = patch.dict(os.environ, {"MNN_ROOT": str(self.mnn_root)})
-        environment.start()
-        self.addCleanup(environment.stop)
+        self.native_notices = {
+            filename: b"pinned runtime bytes\r\n" + filename.encode()
+            for filename in runner.MNN_NOTICES
+        }
+
+        def stage(*command, **kwargs):
+            if Path(command[1]).name == "stage-mnn-licenses.py":
+                for filename, contents in self.native_notices.items():
+                    destination = Path(command[2]).parent / filename
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(contents)
+            else:
+                subprocess.run(list(map(str, command)), check=True, **kwargs)
+
+        context = patch.object(runner, "run", side_effect=stage)
+        context.start()
+        self.addCleanup(context.stop)
 
     def test_vendor_chunks_reconstruct_the_original_identity(self):
         key = ("Studio/Contents/model.ins", hashlib.sha256(b"original bytes").hexdigest())
@@ -79,7 +89,10 @@ class PythonPackagingTests(unittest.TestCase):
                     )
                     patterns = ["python/insta360_rs/_licenses/project/*.md"]
                     if runtime:
-                        patterns.append("python/insta360_rs/_licenses/*.txt")
+                        patterns.extend([
+                            "python/insta360_rs/_licenses/*.txt",
+                            "python/insta360_rs/_licenses/mnn/**/*",
+                        ])
                     self.assertEqual(metadata["project"]["license-files"], patterns)
                     self.assertEqual(metadata["project"]["license"], "Apache-2.0")
                     self.assertEqual(
@@ -139,24 +152,8 @@ class PythonPackagingTests(unittest.TestCase):
         for filename in runner.MNN_NOTICES:
             self.assertEqual(
                 (staged / "python/insta360_rs/_licenses" / filename).read_bytes(),
-                (self.mnn_root / filename).read_bytes(),
+                self.native_notices[filename],
             )
-
-    def test_snapshot_requires_complete_runtime_notices_before_copying(self):
-        package = self.package("incomplete")
-        destination = self.root / "staged"
-        with patch.dict(os.environ, {"MNN_ROOT": ""}):
-            with self.assertRaisesRegex(RuntimeError, "MNN_ROOT must identify"):
-                runner.stage_source(package.parent, destination)
-        for filename in runner.MNN_NOTICES:
-            notice = self.mnn_root / filename
-            content = notice.read_bytes()
-            notice.unlink()
-            with self.subTest(filename=filename):
-                with self.assertRaisesRegex(RuntimeError, f"MNN_ROOT lacks {filename}"):
-                    runner.stage_source(package.parent, destination)
-                self.assertFalse(destination.exists())
-            notice.write_bytes(content)
 
     def test_wheel_requires_each_runtime_notice_in_distribution_licenses(self):
         files = {

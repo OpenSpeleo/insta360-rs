@@ -14,8 +14,8 @@
 int main(int argc, char** argv) {
     try {
         if (argc != 5) throw std::runtime_error("model inputs outputs case-count required");
-        if (std::string(MNN::getVersion()) != "3.6.1")
-            throw std::runtime_error("MNN 3.6.1 required");
+        if (std::string(MNN::getVersion()) != "3.6.2")
+            throw std::runtime_error("MNN 3.6.2 required");
         std::unique_ptr<MNN::Interpreter> net(MNN::Interpreter::createFromFile(argv[1]));
         if (!net) throw std::runtime_error("model rejected");
         MNN::BackendConfig backend;

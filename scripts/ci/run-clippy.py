@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Prepare native prerequisites and run the complete workspace Clippy check."""
+"""Prepare FFmpeg discovery and run the complete workspace Clippy check."""
 
-import hashlib
 import os
 import platform
 import re
@@ -96,7 +95,7 @@ def prepare_ffmpeg(env: dict[str, str]) -> None:
 
 
 def prepare_environment() -> dict[str, str]:
-    """Prepare FFmpeg before MNN so both use the same native configuration."""
+    """Preserve caller settings and prepare FFmpeg for the Cargo-owned build."""
     env = os.environ.copy()
     if sys.platform == "darwin" and not env.get("SDKROOT"):
         # An implicit SDK can come from newer Command Line Tools while the
@@ -110,18 +109,6 @@ def prepare_environment() -> dict[str, str]:
             raise RuntimeError("xcrun did not return a macOS SDK path")
 
     prepare_ffmpeg(env)
-    builder = [sys.executable, str(ROOT / "scripts/ci/build-mnn.py")]
-    if env.get("MNN_ROOT"):
-        # Prepared CI/application prefixes must never be replaced or rebuilt.
-        args = ["--verify-only", "--output", env["MNN_ROOT"]]
-    else:
-        configuration = subprocess.check_output(
-            [*builder, "--configuration"], cwd=ROOT, env=env
-        )  # nosec B603
-        identity = hashlib.sha256(configuration).hexdigest()
-        env["MNN_ROOT"] = str(ROOT / ".cache/mnn" / identity)
-        args = ["--output", env["MNN_ROOT"]]
-    subprocess.run([*builder, *args], cwd=ROOT, env=env, check=True)  # nosec B603
     return env
 
 

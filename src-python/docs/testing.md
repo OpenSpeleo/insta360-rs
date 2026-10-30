@@ -20,11 +20,11 @@ The runner:
 1. Requires Cargo, `ffmpeg`, and `ffprobe`, then snapshots the workspace into a
    temporary directory. It stages byte-identical project notices at the same
    distinct package paths used by release builders, avoiding collisions with
-   root Cargo notices. It requires the pinned CPU prefix in `MNN_ROOT`, copies
-   its original MNN license and third-party notices, and builds a wheel and
-   source archive using PEP 517 build isolation.
+   root Cargo notices. It stages original MNN notices from the exact Cargo
+   source package and builds a wheel and source archive using PEP 517 isolation;
+   Cargo owns the native MNN build.
 2. Verifies stable ABI tags, distribution metadata, license/notice files, native
-   module, type stubs, and `py.typed`; requires both MNN notices under the
+   module, type stubs, and `py.typed`; requires the MNN notice tree under the
    distribution's licenses directory and rejects leaked development artifacts.
 3. Checks that the source archive includes docs, tests, build scripts, core Rust
    sources, and byte-identical embedded assets.
@@ -180,7 +180,7 @@ available. The runner reports adapter availability in the job summary, so a
 successful macOS run without an adapter does not establish GPU execution.
 Installation alone is not the matrix test.
 
-Source and all-feature builds need the pinned MNN prefix in `MNN_ROOT`; see
+Source and all-feature builds need CMake and a C/C++ compiler for MNN; see
 [installation](installation.md). Plain Rust binding tests omit wheel-only
 `extension-module`, as before.
 

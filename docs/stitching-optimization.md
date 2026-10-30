@@ -89,10 +89,11 @@ still does not establish better reconstruction or temporal quality.
 
 ## AI input and displacement contract
 
-AI uses the original model bytes and an independent MNN CPU engine. It does not
-load Studio or SDK runtime libraries. Asset integrity and full output tensors
-are checked against a separate direct-MNN reference harness; execution alone is
-not treated as proof of correct stitching.
+AI uses the original model bytes and independent MNN inference through Metal on
+macOS or Vulkan on Linux/Windows, with CPU initialization/operator fallback. It
+does not load Studio or SDK runtime libraries. Asset integrity and full output
+tensors are checked against a separate direct-MNN reference harness; execution
+alone is not treated as proof of correct stitching.
 
 Native producer evidence establishes a cylindrical belt rather than uniform
 latitude rows or guessed periodic padding. The portable implementation uses the

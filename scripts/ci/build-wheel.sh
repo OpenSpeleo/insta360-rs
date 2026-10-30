@@ -29,6 +29,22 @@ if [[ "${1:-}" != "--container" && "${1:-}" != "--container-prewarm" ]]; then
         *) printf 'Usage: bash scripts/ci/build-wheel.sh [--prewarm|--cache-key|--image]\n' >&2; exit 2 ;;
     esac
     mkdir -p "$repo_dir/dist" "$repo_dir/.cache/wheel" "$repo_dir/target/wheel-build"
+    compiler_cache_args=()
+    if [[ "$container_mode" == --container && -n "${INSTA360_SCCACHE_ROOT:-}" ]]; then
+        # setup-sccache pins the checksum-verified Linux musl executable, which
+        # runs on this older manylinux image without inheriting host glibc.
+        if [[ $(uname -s) != Linux || $(uname -m) != x86_64 || ! -x ${SCCACHE_PATH:-} ]]; then
+            echo 'Cached manylinux builds require setup-sccache on a Linux x86_64 host.' >&2
+            exit 2
+        fi
+        mkdir -p "$INSTA360_SCCACHE_ROOT/manylinux"
+        compiler_cache_args=(
+            --mount "type=bind,source=$SCCACHE_PATH,target=/usr/local/bin/sccache,readonly"
+            --mount "type=bind,source=$INSTA360_SCCACHE_ROOT/manylinux,target=/compiler-cache"
+            --env INSTA360_SCCACHE_ENABLED=1
+            --env "SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-1G}"
+        )
+    fi
     exec docker run --rm --platform linux/amd64 \
         --mount "type=bind,source=$repo_dir,target=/source,readonly" \
         --mount "type=bind,source=$repo_dir/dist,target=/dist" \
@@ -38,13 +54,26 @@ if [[ "${1:-}" != "--container" && "${1:-}" != "--container-prewarm" ]]; then
         --env "INSTA360_WHEEL_UID=$(id -u)" \
         --env "INSTA360_WHEEL_GID=$(id -g)" \
         --env "INSTA360_WHEEL_JOBS=${INSTA360_WHEEL_JOBS:-2}" \
+        "${compiler_cache_args[@]}" \
         "$wheel_image" bash -c \
         'cp /source/scripts/ci/build-wheel.sh /tmp/build-wheel.sh; exec bash /tmp/build-wheel.sh "$1"' \
         -- "$container_mode"
 fi
 
 [[ $(uname -m) == x86_64 ]]
-trap 'chown -R "$INSTA360_WHEEL_UID:$INSTA360_WHEEL_GID" /dist /wheel-cache /wheel-target' EXIT
+finish() {
+    local status=$?
+    if [[ ${compiler_cache_started:-0} == 1 ]]; then
+        sccache --show-stats --stats-format=json || status=1
+        sccache --stop-server || status=1
+    fi
+    if [[ ${INSTA360_SCCACHE_ENABLED:-0} == 1 ]]; then
+        chown -R "$INSTA360_WHEEL_UID:$INSTA360_WHEEL_GID" /compiler-cache || status=1
+    fi
+    chown -R "$INSTA360_WHEEL_UID:$INSTA360_WHEEL_GID" /dist /wheel-cache /wheel-target || status=1
+    exit "$status"
+}
+trap finish EXIT
 
 # Keep toolchains and Cargo artifacts separate from native host builds.
 export CARGO_HOME=/wheel-cache/cargo
@@ -104,6 +133,15 @@ fi
 rustup toolchain install "$toolchain" --profile minimal --no-self-update
 
 python -m pip install -r /build/source/scripts/ci/requirements-wheel.txt
+if [[ ${INSTA360_SCCACHE_ENABLED:-0} == 1 ]]; then
+    python -m pip install ninja==1.13.0
+    export RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
+    export SCCACHE_DIR=/compiler-cache SCCACHE_DIRECT=false SCCACHE_GHA_ENABLED=false
+    export SCCACHE_BASEDIRS=/build:/wheel-target:/wheel-cache
+    export CMAKE_GENERATOR=Ninja CMAKE_TOOLCHAIN_FILE=/build/source/scripts/ci/sccache.cmake
+    sccache --start-server
+    compiler_cache_started=1
+fi
 
 notices=/build/source/src-python/python/insta360_rs/_licenses
 mkdir -p "$notices/sources" /dist/sources
@@ -124,9 +162,8 @@ cp "$notices/sources/"* /dist/sources/
 
 # These files exist only in the release staging directory. Register their
 # licenses in wheel metadata without imposing generated files on local builds.
-export MNN_ROOT="/wheel-cache/mnn-$(sha256sum /build/source/scripts/ci/build-mnn.py | cut -d ' ' -f 1)"
-python /build/source/scripts/ci/build-mnn.py --output "$MNN_ROOT" --jobs "${INSTA360_WHEEL_JOBS:-2}"
-cp "$MNN_ROOT/MNN-LICENSE.txt" "$MNN_ROOT/MNN-THIRD-PARTY-NOTICES.txt" "$notices/"
+python /build/source/src-python/scripts/stage-mnn-licenses.py "$notices/mnn" \
+    --manifest-path /build/source/Cargo.toml
 python /build/source/src-python/scripts/stage-project-licenses.py /build/source/src-python --runtime
 cd /build/source/src-python
 # --sdist builds the wheel from the generated source archive, verifying that
@@ -151,7 +188,10 @@ with zipfile.ZipFile(wheels[0]) as archive:
     for library in ("libavcodec", "libavformat", "libavutil", "libswscale", "libx265"):
         assert any(".libs/" in name and library in name for name in names), library
     for filename in ("FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt",
-                     "MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt"):
+                     "mnn/MNN-LICENSE.txt", "mnn/mnn/3rd_party/half/LICENSE.txt",
+                     "mnn/mnn/3rd_party/lic/flatbuffer_license",
+                     "mnn/mnn/3rd_party/lic/skia_license",
+                     "mnn/mnn/3rd_party/lic/tensorflow_license"):
         assert any(".dist-info/licenses/" in name and name.endswith(filename)
                    for name in names), filename
     for filename in (*sys.argv[1:], "ffmpeg-runtime-config.sh"):

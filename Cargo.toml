@@ -23,6 +23,7 @@ insta360-rs-data-underwater-resources = { version = "=0.2.1", path = "data/under
 
 [package]
 name = "insta360-rs"
+links = "insta360_mnn"
 version.workspace = true
 authors.workspace = true
 description = "Portable Rust library for reading and stitching Insta360 media"
@@ -41,7 +42,6 @@ include = [
     "docs/**",
     "/Cargo.toml",
     "/build.rs",
-    "scripts/ci/build-mnn.py",
     "/README.md",
     "/CHANGELOG.md",
     "/LICENSE.md",
@@ -67,8 +67,8 @@ default = []
 media = ["dep:crossbeam-channel", "dep:ffmpeg-next", "dep:image", "dep:tempfile"]
 gpu = ["dep:bytemuck", "dep:pollster", "dep:wgpu"]
 cli = ["media", "dep:clap"]
-underwater-ai = ["dep:aes", "dep:base64", "dep:cc"]
-ai-stitching = ["dep:aes", "dep:cc"]
+underwater-ai = ["dep:aes", "dep:base64", "dep:cc", "dep:mnn-src"]
+ai-stitching = ["dep:aes", "dep:cc", "dep:mnn-src"]
 
 [dependencies]
 aes = { version = "0.9", optional = true }
@@ -84,6 +84,7 @@ insta360-rs-data-enhancement.workspace = true
 insta360-rs-data-underwater-model-a.workspace = true
 insta360-rs-data-underwater-model-b.workspace = true
 insta360-rs-data-underwater-resources.workspace = true
+mnn-src = { version = "=3.6.2", optional = true, default-features = false, features = ["static"] }
 pollster = { version = "1.0", optional = true }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
@@ -96,15 +97,18 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl"], o
 cc = { version = "1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+mnn-src = { version = "=3.6.2", optional = true, default-features = false, features = ["static", "metal"] }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "metal"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+mnn-src = { version = "=3.6.2", optional = true, default-features = false, features = ["static", "vulkan"] }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12"], optional = true }
 
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["static-dxc"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+mnn-src = { version = "=3.6.2", optional = true, default-features = false, features = ["static", "vulkan"] }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan"], optional = true }
 
 [dev-dependencies]

@@ -51,13 +51,18 @@ impl AiSession {
         style_index: u32,
         provider: &dyn AssetProvider,
     ) -> Result<Self> {
-        // The pinned MNN pool spin/yields between small convolution tasks.
-        // Independent 1/2/4-thread processes show large scheduling stalls with
-        // multiple workers under contention. Keep inference on its owner thread;
-        // pixel work runs on the GPU or the separate bounded CPU pixel kernels.
-        Self::new_with_threads(width, height, strength, style_index, provider, 1)
+        Self::new_with_backend(
+            width,
+            height,
+            strength,
+            style_index,
+            provider,
+            1,
+            crate::mnn::BackendPreference::Auto,
+        )
     }
 
+    #[cfg(test)]
     fn new_with_threads(
         width: u32,
         height: u32,
@@ -65,6 +70,26 @@ impl AiSession {
         style_index: u32,
         provider: &dyn AssetProvider,
         cpu_threads: usize,
+    ) -> Result<Self> {
+        Self::new_with_backend(
+            width,
+            height,
+            strength,
+            style_index,
+            provider,
+            cpu_threads,
+            crate::mnn::BackendPreference::Cpu,
+        )
+    }
+
+    fn new_with_backend(
+        width: u32,
+        height: u32,
+        strength: f32,
+        style_index: u32,
+        provider: &dyn AssetProvider,
+        cpu_threads: usize,
+        preference: crate::mnn::BackendPreference,
     ) -> Result<Self> {
         let manifest = BundledAssetProvider::manifest()?;
         // Validate the whole resource group, including style previews, so a
@@ -86,10 +111,10 @@ impl AiSession {
         let mut load = |id| resources.remove(id).expect("complete verified group");
         let mut original = load("underwater-model197-part0");
         original.extend_from_slice(&load("underwater-model197-part1"));
-        let preset_model = Model::open_with_threads(&original, 197, cpu_threads)?;
+        let preset_model = Model::open_with_backend(&original, 197, cpu_threads, preference)?;
         drop(original);
         let feature_model =
-            Model::open_with_threads(&load("underwater-model198"), 198, cpu_threads)?;
+            Model::open_with_backend(&load("underwater-model198"), 198, cpu_threads, preference)?;
         let database = Database::parse(&load("underwater-style-database"))?;
         let style = Style::parse(&load("underwater-style-manifest"), style_index)?;
         let mut identity = vec![0.0; ENTRIES * 3];
@@ -128,6 +153,10 @@ impl AiSession {
             frame: 0,
             preview_clock: PreviewClock::default(),
         })
+    }
+
+    pub(super) fn backends(&self) -> Result<[&'static str; 2]> {
+        Ok([self.feature_model.backend()?, self.preset_model.backend()?])
     }
 
     /// Input dimensions do not affect either fixed-shape inference graph.

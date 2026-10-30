@@ -56,6 +56,10 @@ reinterpreted as 8-bit NV12.
   Attempt-owned image outputs or the video temporary file are removed before
   retry; non-GPU errors are returned without fallback.
 
+The rendering backend is independent of MNN inference backend selection. A CPU
+renderer can consume AI corrections computed through Metal or Vulkan; inspect
+the model/session inference-backend methods for that separate capability.
+
 `StitchConfig::seam_mode` selects `SeamMode::{Fixed,Dynamic,OpticalFlow,Ai}`.
 `Fixed` is the default; it retains calibrated projection, housing exclusion and
 the fixed seam. The other modes request adaptive alignment within the overlap,
@@ -415,10 +419,18 @@ Its test checks the documentation equals the code-generated table.
 rational frame rate and an `AssetProvider`. `process_rgb8` operates in place on
 packed RGB8 and a finite timestamp; `reset` clears temporal history while
 retaining prepared resources. Legacy works without native dependencies; AI
-requires `underwater-ai` and `MNN_ROOT` during build. Off is the default and
-does not load assets. Invalid frame lengths/timestamps fail before mutating
-pixels or state. See [housings](housings.md) for limits, defaults and source
-evidence.
+requires `underwater-ai`, CMake and a C/C++ compiler for its Cargo-owned native
+build. The pinned MNN 3.6.2 adapter prefers Metal on macOS and Vulkan on
+Linux/Windows, with high precision and CPU fallback when GPU initialization is
+unavailable or an operator is unsupported. This inference selection is
+independent of `ProcessingBackend`, which controls stitching. Execution errors
+remain errors. `UnderwaterColorSession::inference_backends()` returns `None` for
+Off/Legacy or the feature/preset main backend names for AI, in that order.
+`SeamModel::inference_backend()` reports the seam model's main backend. Names
+are `cpu`, `metal` or `vulkan`; unsupported operators may still use CPU. Off is
+the default and does not load assets. Invalid frame lengths/timestamps fail
+before mutating pixels or state. See [housings](housings.md) for limits,
+defaults and source evidence.
 
 ## Continuous preview rendering
 

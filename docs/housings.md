@@ -237,13 +237,15 @@ strength 1.
 ### AI models and execution
 
 The optional `underwater-ai` feature executes independent, source-built MNN
-3.6.1 CPU sessions. It never loads or links an Insta360 runtime library.
-Original encrypted model bytes and the complete style group are integrity
-checked before native parsing. Model 197 is split across two publishable data
-crates; reconstruction checks the whole original identity before decoding. All
-original bytes, licenses, source-relative paths and hashes remain in the asset
-manifests. Camera/platform qualification stays `Unqualified`: explicit
-processing does not imply physical-camera or Studio-export qualification.
+3.6.2 sessions with Metal on macOS or Vulkan on Linux/Windows, with CPU
+initialization and operator fallback. It never loads or links an Insta360
+runtime library. Original encrypted model bytes and the complete style group are
+integrity checked before native parsing. Model 197 is split across two
+publishable data crates; reconstruction checks the whole original identity
+before decoding. All original bytes, licenses, source-relative paths and hashes
+remain in the asset manifests. Camera/platform qualification stays
+`Unqualified`: explicit processing does not imply physical-camera or
+Studio-export qualification.
 
 | Studio model       | Original bytes | Original SHA-256                                                   | Selected output          |
 | ------------------ | -------------: | ------------------------------------------------------------------ | ------------------------ |
@@ -337,8 +339,9 @@ With `media,gpu,underwater-ai`, the media renderer uses the same prepared neural
 session for GPU and CPU restoration. GPU stitching retains its quantized RGB
 pixels, applies the exact integer tetrahedral LUT, and then packs RGB or
 converts to encoder-ready BT.709 YUV. Only model-update frames read back the
-exact 224×224 analysis image (150,528 bytes). MNN inference and LUT preparation
-remain on CPU; selecting a GPU renderer does not imply neural GPU execution.
+exact 224×224 analysis image (150,528 bytes). LUT preparation remains on CPU.
+MNN independently selects its inference backend; selecting a GPU renderer does
+not establish which backend executes the neural models.
 
 The GPU resize uses the same CPU-generated 11-bit axis weights as the reference
 resize. Its integer shader preserves tetrahedral branch ties, signed division

@@ -15,7 +15,12 @@ def stage_project_licenses(package, *, runtime=False):
         raise RuntimeError("Expected a project metadata table")
     licenses = ["python/insta360_rs/_licenses/project/*.md"]
     if runtime:
-        licenses.append("python/insta360_rs/_licenses/*.txt")
+        licenses.extend(
+            [
+                "python/insta360_rs/_licenses/*.txt",
+                "python/insta360_rs/_licenses/mnn/**/*",
+            ]
+        )
     replacement = "license-files = " + json.dumps(licenses)
     body, count = re.subn(
         r"(?m)^license-files\s*=\s*\[[^\]]*\]",

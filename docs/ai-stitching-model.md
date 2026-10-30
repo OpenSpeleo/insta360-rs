@@ -1,11 +1,15 @@
 # Video AI stitching model
 
 The optional `ai-stitching` feature executes Studio's original video model 213
-through the independently built, pinned MNN 3.6.1 CPU engine. It shares model
+through the independently built, pinned MNN 3.6.2 engine. It shares model
 decoding, tensor ownership, validation and native error handling with
 `underwater-ai`. Neither feature loads Insta360 executable code. A model session
-belongs to one render planner and is reused; inference is single threaded and
-uses high precision. GPU rendering does not change the model execution backend.
+belongs to one render planner and is reused. Inference prefers Metal on macOS
+and Vulkan on Linux/Windows, with high precision and a one-thread CPU fallback
+for unavailable initialization and unsupported operators. The stitch-renderer
+choice does not control the model backend. The adapter queries the actual main
+session backend through `SeamModel::inference_backend()` (`cpu`, `metal` or
+`vulkan`); individual unsupported operators may still execute on CPU.
 
 `seam_ai::SeamModel::new()` verifies the original and decoded model identities
 before creating a session. `infer()` accepts four NCHW float32 tensors and
@@ -143,7 +147,12 @@ translation and unequal masks. The checked-in fixture contains every output
 float. Rust compares all values with absolute and relative tolerances, verifies
 session reuse, tests known flow directions, and exercises invalid tensors and
 corrupt/unknown model identities. Existing underwater full-tensor references
-also cover regression of the shared engine.
+also cover regression of the shared engine. The isolated
+`seam_ai::tests::gpu_every_flow_value_matches_independent_direct_mnn_reference`
+test repeats the same complete comparison on a strict GPU session and recreates
+it to check lifecycle. `INSTA360_RS_REQUIRE_MNN_GPU=1` makes missing GPU support
+a failure; otherwise the test reports a skip. Numerical tolerances and fixture
+provenance are unchanged.
 
 The AI producer tests independently check cylindrical coordinates, half-pixel
 resize sampling, quarter-grid flow scaling, directional conversion, occlusion

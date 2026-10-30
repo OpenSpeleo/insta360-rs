@@ -25,22 +25,6 @@ class NativeWheelTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
 
-    def test_explicit_mnn_prefix_is_verified_and_reused(self):
-        prefix = self.root / "prepared mnn"
-        env = {"MNN_ROOT": str(prefix)}
-        with patch.object(native, "run") as run:
-            self.assertEqual(native.prepare_mnn(self.root, env), prefix.resolve())
-        run.assert_called_once_with(
-            native.sys.executable, native.ROOT / "scripts/ci/build-mnn.py",
-            "--output", prefix.resolve(), "--verify-only", env=env,
-        )
-
-    def test_invalid_explicit_mnn_prefix_does_not_trigger_a_rebuild(self):
-        with patch.object(native, "run", side_effect=RuntimeError("invalid SDK")) as run:
-            with self.assertRaisesRegex(RuntimeError, "invalid SDK"):
-                native.prepare_mnn(self.root, {"MNN_ROOT": str(self.root / "bad")})
-        self.assertEqual(run.call_count, 1)
-
     def prepare_native_sources(self):
         scripts = self.root / "scripts/ci"
         scripts.mkdir(parents=True)
@@ -82,7 +66,7 @@ class NativeWheelTests(unittest.TestCase):
             output.return_value = "cmake 3.32"
             self.assertNotEqual(native.native_cache_key(env, Path("cmake")), original)
 
-    def test_cache_key_and_prewarm_never_build_mnn_or_wheels(self):
+    def test_cache_key_and_prewarm_only_prepare_ffmpeg(self):
         self.prepare_native_sources()
         cache = self.root / ".cache/wheel-native"
 
@@ -108,11 +92,9 @@ class NativeWheelTests(unittest.TestCase):
                 patch.dict(native.sys.modules, {"cmake": types.SimpleNamespace(CMAKE_BIN_DIR="/cmake")}),
                 patch.object(native.sys, "argv", ["build-native-wheel.py", option, "--out", str(self.root / "sdk")]),
                 patch.object(native, "run", side_effect=build_sdk) as run,
-                patch.object(native, "prepare_mnn") as mnn,
                 redirect_stdout(io.StringIO()) as stdout,
             ):
                 native.main()
-                mnn.assert_not_called()
                 if option == "--cache-key":
                     run.assert_not_called()
                     self.assertRegex(stdout.getvalue(), r"^[a-f0-9]{64}\n$")
@@ -136,35 +118,17 @@ class NativeWheelTests(unittest.TestCase):
             native.archive_sdk(self.root, self.root / "prefix", self.root / "out")
         self.assertFalse((self.root / "out").exists())
 
-    def test_mnn_inherits_prepared_wheel_target_and_compiler_environment(self):
-        env = {
-            "MACOSX_DEPLOYMENT_TARGET": "11.0",
-            "SDKROOT": "/selected-sdk",
-            "CC": "selected-clang",
-            "CXXFLAGS": "-fvisibility=hidden",
-            "PATH": "/selected-build-tools",
-        }
-        with patch.object(native, "run") as run:
-            prefix = native.prepare_mnn(self.root, env)
-        run.assert_called_once_with(
-            native.sys.executable,
-            native.ROOT / "scripts/ci/build-mnn.py",
-            "--output",
-            prefix,
-            env=env,
-        )
-        self.assertEqual(env["MNN_ROOT"], str(prefix))
-        self.assertEqual(env["MACOSX_DEPLOYMENT_TARGET"], "11.0")
-        self.assertEqual(env["SDKROOT"], "/selected-sdk")
-
-    def test_native_wheel_requires_both_independent_mnn_notices(self):
+    def test_native_wheel_requires_original_mnn_notices(self):
         target = "macosx_11_0_arm64"
         wheel = self.root / f"insta360_rs-0.1.0-cp310-abi3-{target}.whl"
         notices = (
             "FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt",
-            "MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt",
+            "mnn/MNN-LICENSE.txt", "mnn/mnn/3rd_party/half/LICENSE.txt",
+            "mnn/mnn/3rd_party/lic/flatbuffer_license",
+            "mnn/mnn/3rd_party/lic/skia_license",
+            "mnn/mnn/3rd_party/lic/tensorflow_license",
         )
-        for missing in (None, *notices[-2:]):
+        for missing in (None, *notices[3:]):
             with self.subTest(missing=missing):
                 with zipfile.ZipFile(wheel, "w") as archive:
                     for library in ("avcodec", "avformat", "avutil", "swscale", "x265"):

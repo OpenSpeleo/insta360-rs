@@ -45,7 +45,10 @@ def verify_archive(wheel, target):
                 raise RuntimeError("Wheel is missing the bundled zlib DLL")
         for filename in (
             "FFMPEG-LICENSE.txt", "X265-LICENSE.txt", "SOURCES.txt",
-            "MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt",
+            "mnn/MNN-LICENSE.txt", "mnn/mnn/3rd_party/half/LICENSE.txt",
+            "mnn/mnn/3rd_party/lic/flatbuffer_license",
+            "mnn/mnn/3rd_party/lic/skia_license",
+            "mnn/mnn/3rd_party/lic/tensorflow_license",
         ):
             if not any(
                 ".dist-info/licenses/" in name and name.endswith(filename)
@@ -66,20 +69,6 @@ def verify_archive(wheel, target):
             if f"insta360_rs/{filename}" not in names:
                 raise RuntimeError(f"Wheel is missing {filename}")
     print(f"Verified repaired wheel contents: {wheel.name}")
-
-
-def prepare_mnn(cache, env):
-    """Build MNN with the same target and compiler environment as the wheel."""
-    builder = ROOT / "scripts/ci/build-mnn.py"
-    if env.get("MNN_ROOT"):
-        prefix = Path(env["MNN_ROOT"]).resolve()
-        run(sys.executable, builder, "--output", prefix, "--verify-only", env=env)
-        env["MNN_ROOT"] = str(prefix)
-        return prefix
-    prefix = cache / "mnn" / hashlib.sha256(builder.read_bytes()).hexdigest()
-    run(sys.executable, builder, "--output", prefix, env=env)
-    env["MNN_ROOT"] = str(prefix)
-    return prefix
 
 
 def native_cache_key(env, cmake_executable):
@@ -191,7 +180,6 @@ def main():
         archive_sdk(cache, prefix, destination)
         return
     destination.mkdir(parents=True, exist_ok=True)
-    mnn_prefix = prepare_mnn(cache, env)
 
     with tempfile.TemporaryDirectory(prefix="insta360-wheel-") as directory:
         temporary = Path(directory)
@@ -207,8 +195,10 @@ def main():
         notices = package / "python" / "insta360_rs" / "_licenses"
         sources = notices / "sources"
         notices.mkdir(parents=True, exist_ok=True)
-        for notice in ("MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt"):
-            shutil.copy2(mnn_prefix / notice, notices)
+        run(
+            sys.executable, package / "scripts/stage-mnn-licenses.py",
+            notices / "mnn", "--manifest-path", source / "Cargo.toml", env=env,
+        )
         sources.mkdir(parents=True)
         for path in (prefix / "share" / "insta360-rs").glob("*.txt"):
             shutil.copy2(path, notices)

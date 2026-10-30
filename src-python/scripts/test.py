@@ -19,7 +19,13 @@ from email.parser import BytesParser
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parents[1]
-MNN_NOTICES = ("MNN-LICENSE.txt", "MNN-THIRD-PARTY-NOTICES.txt")
+MNN_NOTICES = (
+    "mnn/MNN-LICENSE.txt",
+    "mnn/mnn/3rd_party/half/LICENSE.txt",
+    "mnn/mnn/3rd_party/lic/flatbuffer_license",
+    "mnn/mnn/3rd_party/lic/skia_license",
+    "mnn/mnn/3rd_party/lic/tensorflow_license",
+)
 
 
 def run(*command, cwd=None, env=None, timeout=None):
@@ -35,11 +41,6 @@ def require(condition, message):
 
 
 def stage_source(workspace, destination):
-    mnn_root = os.environ.get("MNN_ROOT")
-    require(mnn_root, "MNN_ROOT must identify the pinned MNN CPU prefix")
-    mnn_root = Path(mnn_root)
-    for filename in MNN_NOTICES:
-        require((mnn_root / filename).is_file(), f"MNN_ROOT lacks {filename}")
     development = shutil.ignore_patterns(
         ".git", "target", ".cache", "dist", ".venv", "__pycache__", ".DS_Store"
     )
@@ -59,8 +60,13 @@ def stage_source(workspace, destination):
     package = destination / "src-python"
     notices = package / "python" / "insta360_rs" / "_licenses"
     notices.mkdir(parents=True, exist_ok=True)
-    for filename in MNN_NOTICES:
-        shutil.copy2(mnn_root / filename, notices / filename)
+    run(
+        sys.executable,
+        Path(__file__).with_name("stage-mnn-licenses.py"),
+        notices / "mnn",
+        "--manifest-path",
+        destination / "Cargo.toml",
+    )
     # Use the same notice paths as release builders. Root Cargo and Python
     # LICENSE.md files otherwise collide in Maturin's workspace source archive.
     run(

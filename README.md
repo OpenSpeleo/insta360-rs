@@ -81,7 +81,7 @@ conversion, and real-recording qualification are separate contracts.
 | X5 Pro correction                        | State 10/11 selects lens 119/120, native physical curves and distinct radial masks                                 | Corrected geometry supersedes earlier results using 117/118                                       |
 | Stabilization/readout                    | Supported X5 sensor and timing profiles                                                                            | Other cameras use stabilization Off unless their motion profile is established                    |
 | I-Log conversion                         | Identified X5 I-Log to Rec.709; explicit low-level LUT APIs                                                        | No HDR tone mapping or 10-bit stitched output                                                     |
-| Underwater restoration                   | Opt-in scalar Legacy; optional independent MNN CPU AI engine                                                       | Formula/resource/inference tests, without Studio pixel-equivalence or scene-quality qualification |
+| Underwater restoration                   | Opt-in scalar Legacy; optional independent MNN AI engine                                                           | Formula/resource/inference tests, without Studio pixel-equivalence or scene-quality qualification |
 
 Input layout is validated from the actual streams and metadata, never inferred
 solely from the camera name. Extraction leaves packed fisheyes packed. Decoded
@@ -640,9 +640,14 @@ camera, lens ID, and Rust target.
 Bundling is not algorithm qualification. Every copied model is **unqualified by
 default**. The crate can parse OpenCV linear-SVM payloads and validate complete
 CoreML/Espresso groups. Explicit underwater AI restoration and video AI
-stitching execute their verified resources through independently built MNN.
-Video AI stitching includes cylindrical belt preparation, bidirectional
-confidence checks and shared CPU/GPU flow compositing; see
+stitching execute their verified resources through independently built MNN 3.6.2
+(`mnn-src = "=3.6.2"`). Inference prefers Metal on macOS and Vulkan on
+Linux/Windows, with high precision and CPU initialization/operator fallback.
+This choice is independent of the stitch renderer. Standalone Linux consumers
+need an available `libvulkan.so` loader and a compatible driver; see
+[native prerequisites](docs/CI.md#optional-ai-native-prerequisite). Video AI
+stitching includes cylindrical belt preparation, bidirectional confidence checks
+and shared CPU/GPU flow compositing; see
 [model qualification](docs/ai-stitching-model.md). Camera/platform release
 qualification remains separate from these opt-in paths. The camera-specific SVM
 feature extractor, ColorPlus, deflicker, defringe, denoise and CoreML execution
@@ -744,8 +749,8 @@ repository, edition, and minimum Rust version; all members use one `Cargo.lock`.
 
 From the repository root:
 
-The all-features configuration requires the pinned MNN CPU prefix in `MNN_ROOT`;
-see [CI setup](docs/CI.md).
+The all-features configuration builds the pinned MNN 3.6.2 engine through Cargo
+and requires CMake and a C/C++ compiler; see [CI setup](docs/CI.md).
 
 ```sh
 cargo fmt --all -- --check

@@ -21,8 +21,8 @@ static float sample(int model, int input, size_t index, int pattern) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 4 || std::strcmp(MNN::getVersion(), "3.6.1") != 0)
-            throw std::runtime_error("requires decoded model paths and linked MNN 3.6.1");
+        if (argc != 4 || std::strcmp(MNN::getVersion(), "3.6.2") != 0)
+            throw std::runtime_error("requires decoded model paths and linked MNN 3.6.2");
         std::ofstream output(argv[3], std::ios::binary);
         output.write("MNNREF1\0", 8);
         for (int model : {197, 198}) {
