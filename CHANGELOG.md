@@ -6,6 +6,11 @@ details are intentionally omitted.
 
 ## Unreleased
 
+### Features
+
+- Use available graphics hardware for AI underwater color restoration and
+  stitching. f97b7fa
+
 ## v0.2.1 - 2026-10-28
 
 ### Performance
