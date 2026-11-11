@@ -46,4 +46,4 @@ runs:
           .cache/wheel
           .cache/wheel-native
 
-    - uses: cargo-bins/cargo-binstall@v1.25.3
+    - uses: cargo-bins/cargo-binstall@v1.26.2
