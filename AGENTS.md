@@ -35,9 +35,9 @@ Keep these support boundaries explicit.
 - Persist Cargo downloads, workspace and native build outputs, prepared SDKs,
   and package/tool caches through the existing automatic cache tooling. Never
   disable target caching or intentionally discard a native build tree.
-- Keep independent workspace cache roots disjoint so cache cleanup cannot
-  prune another workspace's outputs. Verify actual warm compiler hits and
-  preserve caches when diagnosing failures.
+- Keep independent workspace cache roots disjoint so cache cleanup cannot prune
+  another workspace's outputs. Verify actual warm compiler hits and preserve
+  caches when diagnosing failures.
 
 ## Core Principles
 

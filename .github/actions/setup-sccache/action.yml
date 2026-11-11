@@ -7,14 +7,27 @@ runs:
     - name: Read the selected Python version
       id: python
       shell: bash
-      run: python -c 'import platform; print("version=" + platform.python_version())' >> "$GITHUB_OUTPUT"
+      env:
+        CACHE_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python - <<'PYTHON' >> "$GITHUB_OUTPUT"
+        import os
+        from pathlib import Path
+        import platform
+
+        action = Path(os.environ['CACHE_ACTION_PATH']).resolve()
+        sdk = action.parents[2]
+        print('version=' + platform.python_version())
+        print('requirements=' + (sdk / 'scripts/ci/requirements-wheel.txt').as_posix())
+        print('action=' + (action / 'action.yml').as_posix())
+        PYTHON
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ steps.python.outputs.version }}
         cache: pip
         cache-dependency-path: |
-          ${{ github.action_path }}/../../../scripts/ci/requirements-wheel.txt
-          ${{ github.action_path }}/action.yml
+          ${{ steps.python.outputs.requirements }}
+          ${{ steps.python.outputs.action }}
     - name: Install Ninja for cached native builds
       shell: bash
       run: python -m pip install ninja==1.13.0
