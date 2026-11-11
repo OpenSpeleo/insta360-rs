@@ -401,9 +401,11 @@ declared pin.
 
 Standalone FFmpeg prewarming routes configure probes and codec compilation
 through the same compiler cache. Its native zlib and x265 builds use the shared
-CMake launcher. Cache activation preserves the requested sources, features,
-profiles and explicit toolchains; custom toolchains must provide equivalent
-compiler-wrapper coverage.
+CMake launcher. Windows resource compilation, including CMake's `cmcldeps` RC
+helper, runs unchanged because sccache does not support resource compilers; the
+retained native build trees preserve those outputs. Cache activation preserves
+the requested sources, features, profiles and explicit toolchains; custom
+toolchains must provide equivalent compiler-wrapper coverage.
 
 Compiler results use sccache's GitHub Actions backend directly. Its own hashes
 separate compiler binaries, sources and flags; workflows supply no manual
@@ -411,6 +413,17 @@ compiler-cache keys or per-job snapshots. The pinned Mozilla action exports the
 runtime credentials before the server starts. Direct mode remains disabled. The
 configured disk directories remain available when ordinary local builds select
 the local backend.
+
+Setup sets `SCCACHE_SKIP_CACHE_CHECK=true` on hosts and forwards it into wheel
+containers. The startup capability probe writes the fixed `.sccache_check`
+entry. GitHub entries are immutable, and the pinned backend can report a
+duplicate reservation as an unexpected error instead of an existing entry;
+sccache then stays read-only for that server's lifetime. Skipping this probe
+retains the configured read/write mode without changing compiler identities or
+discarding caches. Actual compilation, cache-hit and changed-flag checks remain
+the verification authority; skipping the probe does not repair service outages
+or grant missing permissions. See sccache's
+[configuration documentation](https://github.com/mozilla/sccache/blob/v0.19.0/docs/Configuration.md).
 
 The Linux wheel builder mounts the action's checksum-verified Linux musl binary
 and forwards the backend selection and runtime credentials by environment name.

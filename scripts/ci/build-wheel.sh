@@ -45,6 +45,7 @@ if [[ "${1:-}" != "--container" && "${1:-}" != "--container-prewarm" ]]; then
             --env SCCACHE_PATH=/usr/local/bin/sccache
             --env "SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-1G}"
             --env SCCACHE_GHA_ENABLED
+            --env SCCACHE_SKIP_CACHE_CHECK
             --env ACTIONS_CACHE_SERVICE_V2
             --env ACTIONS_RESULTS_URL
             --env ACTIONS_RUNTIME_TOKEN

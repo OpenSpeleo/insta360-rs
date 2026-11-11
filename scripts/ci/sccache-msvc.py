@@ -11,6 +11,21 @@ def embedded_debug(flags):
     return re.sub(r'(?<!\S)[/-]Z[iI](?!\S)', '/Z7', flags)
 
 
+def resource_compilation(command):
+    executable = command[0].replace('\\', '/').rsplit('/', 1)[-1].lower()
+    if executable.endswith('.exe'):
+        executable = executable[:-4]
+    return executable in ('rc', 'llvm-rc', 'windres') or (
+        executable == 'cmcldeps' and len(command) > 1 and command[1] == 'RC'
+    )
+
+
+# CMake's compile launcher also covers Windows resources. Its dependency helper
+# and resource compiler are unsupported by sccache; preserve that command as-is.
+if resource_compilation(sys.argv[2:]):
+    sys.exit(subprocess.run(sys.argv[2:], check=False).returncode)
+
+
 temporary = []
 try:
     args = []

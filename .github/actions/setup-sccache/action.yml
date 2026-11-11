@@ -52,6 +52,9 @@ runs:
             "SCCACHE_CACHE_SIZE": "1G",
             "SCCACHE_DIRECT": "false",
             "SCCACHE_GHA_ENABLED": "true",
+            # GHA entries are immutable: a duplicate .sccache_check reservation
+            # can incorrectly make sccache read-only. Check actual cache hits.
+            "SCCACHE_SKIP_CACHE_CHECK": "true",
             "SCCACHE_BASEDIRS": os.pathsep.join([str(workspace), os.environ["RUNNER_TEMP"]]),
             "CMAKE_GENERATOR": "Ninja",
             "CMAKE_TOOLCHAIN_FILE": str(sdk / "scripts/ci/sccache.cmake"),
