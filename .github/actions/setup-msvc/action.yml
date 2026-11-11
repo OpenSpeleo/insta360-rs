@@ -1,0 +1,22 @@
+---
+name: Set up MSVC for native and Cargo builds
+description: Export the x64 developer environment and an unambiguous Cargo linker.
+runs:
+  using: composite
+  steps:
+    - uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9  # v4.1.0
+      with:
+        arch: x64
+
+    - name: Pin the MSVC linker for Cargo
+      shell: pwsh
+      run: |
+        if (-not $env:VCToolsInstallDir) {
+          throw 'MSVC developer environment did not export VCToolsInstallDir'
+        }
+        $linker = Join-Path $env:VCToolsInstallDir 'bin/Hostx64/x64/link.exe'
+        if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) {
+          throw "MSVC linker not found: $linker"
+        }
+        # Git Bash prepends its own Unix link.exe even after MSVC setup.
+        Add-Content $env:GITHUB_ENV "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker"

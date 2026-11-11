@@ -14,9 +14,7 @@ runs:
 
     - name: Export MSVC environment (Windows)
       if: runner.os == 'Windows'
-      uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9  # v4.1.0
-      with:
-        arch: x64
+      uses: ./.github/actions/setup-msvc
 
     - name: Install MSYS build utilities (Windows)
       if: runner.os == 'Windows'

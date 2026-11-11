@@ -52,6 +52,15 @@ flags, profile, and target directory; the main compiler remains pinned. This is
 a compile check on the minimum compiler, while runtime tests and release builds
 use the primary compiler.
 
+Windows setup uses the shared `setup-msvc` action to export the x64 developer
+environment and pin `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER` to the absolute
+MSVC linker under `VCToolsInstallDir`. Git Bash can otherwise resolve its Unix
+`link.exe` first, breaking Cargo build scripts and executables. The native wheel
+setup and FrameForge's native SDK/backend setup reuse this action so PowerShell
+and Bash builds select the same linker. Action lint checks wiring; a Windows CI
+run is required to qualify actual linking. Compiler flags, profiles and packaged
+runtimes are unchanged.
+
 One Prepare FFmpeg matrix covers Linux, macOS ARM64/x86_64 and Windows. Each row
 identifies, restores or builds, and uploads its platform's SDK. The Linux row
 calls `scripts/ci/build-wheel.sh --prewarm`, which runs Docker with the pinned

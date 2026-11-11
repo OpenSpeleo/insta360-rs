@@ -106,7 +106,9 @@ class PackageChecksTests(unittest.TestCase):
                 references = [
                     call.args for call in run.call_args_list if "--ignored" in call.args[0]
                 ]
-                self.assertEqual(len(references), 2 if all_features else 0)
+                self.assertEqual(
+                    len(references), len(packages.MODEL_REFERENCE_TESTS) if all_features else 0
+                )
                 for (command, cwd, environment), reference in zip(
                     references, packages.MODEL_REFERENCE_TESTS
                 ):
