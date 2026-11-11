@@ -61,6 +61,16 @@ and Bash builds select the same linker. Action lint checks wiring; a Windows CI
 run is required to qualify actual linking. Compiler flags, profiles and packaged
 runtimes are unchanged.
 
+Native wheel setup installs MSYS2 packages before exporting that developer
+environment. The MSYS2 action uses `path-type: minimal` for package management:
+its `paccache` housekeeping invokes `xargs`, which can abort when a large
+inherited environment exhausts MSYS argument headroom. Package caching remains
+enabled. Afterwards the shared MSVC action still exports the complete compiler
+environment and pinned linker; the wheel builder constructs its own native
+compiler PATH and uses the action-provided MSYS tools directory. FrameForge's
+native SDK setup follows the same order. Actual Windows package-cache saving and
+downstream compilation must be qualified on a hosted Windows runner.
+
 One Prepare FFmpeg matrix covers Linux, macOS ARM64/x86_64 and Windows. Each row
 identifies, restores or builds, and uploads its platform's SDK. The Linux row
 calls `scripts/ci/build-wheel.sh --prewarm`, which runs Docker with the pinned

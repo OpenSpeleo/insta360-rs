@@ -12,18 +12,21 @@ runs:
         python -m pip install -r scripts/ci/requirements-wheel.txt
         echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
 
-    - name: Export MSVC environment (Windows)
-      if: runner.os == 'Windows'
-      uses: ./.github/actions/setup-msvc
-
     - name: Install MSYS build utilities (Windows)
       if: runner.os == 'Windows'
       id: msys
       uses: msys2/setup-msys2@v2.33.0
       with:
         msystem: MSYS
-        path-type: inherit
+        # Package management must not inherit the expanded developer PATH.
+        path-type: minimal
         install: diffutils gawk make nasm perl pkgconf
+
+    # MSVC exports a large developer environment. Keep it out of paccache/xargs
+    # during MSYS2 setup; native compilation still receives it afterwards.
+    - name: Export MSVC environment (Windows)
+      if: runner.os == 'Windows'
+      uses: ./.github/actions/setup-msvc
 
     - name: Configure native tools (Windows)
       if: runner.os == 'Windows'
