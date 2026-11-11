@@ -39,6 +39,7 @@ if [[ -f "$prefix/share/insta360-rs/complete" ]]; then
     exit 0
 fi
 
+configure_native_compiler_cache "$wheel_platform"
 tar -xf "$downloads/$ffmpeg_archive" -C "$build_dir"
 tar -xf "$downloads/$x265_archive" -C "$build_dir"
 if [[ $wheel_platform == windows ]]; then

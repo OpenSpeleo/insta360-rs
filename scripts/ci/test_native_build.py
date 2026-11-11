@@ -42,6 +42,7 @@ x265_options=()
 ffmpeg_options=()
 fetch_runtime_sources() { :; }
 fetch_source() { :; }
+configure_native_compiler_cache() { :; }
 write_runtime_notices() { mkdir -p "$prefix/share/insta360-rs"; }
 """)
         self.executable(self.tools / "uname", 'printf "%s\\n" "$TEST_PLATFORM"\n')

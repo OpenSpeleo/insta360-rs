@@ -365,12 +365,12 @@ pushes run Full prek, every platform's full Tests job, and the additional Linux
 Python compatibility jobs. PR checks are not started automatically, so requiring
 them for merging would require a manual CI run on the PR's current commit.
 
-`Swatinem/rust-cache` caches Rust dependencies and build outputs with separate
-keys for each platform and each wheel target. Its `sccache-v1` prefix separates
-Ninja build trees from older Makefile/Visual Studio caches; local caches are not
-deleted or migrated. `actions/cache` stores prek environments, completed SDKs,
-and tool downloads. The Linux wheel tools cache contains Cargo and rustup
-directories, avoiding another copy of the FFmpeg SDK and native build trees.
+`Swatinem/rust-cache` automatically validates Rust dependencies and build
+outputs, retaining workspace artifacts and downloaded crate sources without
+manual job/compiler keys. Its additional directories retain prek environments,
+native source/build trees, completed SDK copies and container Cargo/rustup
+homes. No native build tree is deliberately discarded. Compiler results are
+stored directly through sccache's GitHub backend; local caches remain intact.
 Build artifacts transfer prepared libraries between CI jobs and provide each
 release platform's cache fallback. GitHub scopes cache access by ref: releases
 can restore the Linux SDK populated on the default branch, but a native cache
@@ -384,27 +384,45 @@ prewarm job as a compiler problem.
 
 Every Cargo build job also uses the shared `setup-sccache` action, including
 Clippy, extracted-package checks, the minimum-Rust check, wheels and Rust
-publication. It pins sccache 0.19.0 and Ninja 1.13.0, sets `RUSTC_WRAPPER` and
-disables incremental compilation in CI. `cc` uses that wrapper for the adapter;
-MNN's CMake build uses a compile-rule launcher covering C/C++, assembly and
-Metal Objective-C++. On Windows the launcher converts `/Zi` and `/ZI` to `/Z7`,
-including response files, so debug information remains in cacheable objects.
-Linking and archiving are not wrapped. Normal local Make/Cargo settings and the
-completed FFmpeg SDK cache identity remain unchanged.
+publication. It pins sccache and Ninja in
+[`setup-sccache`](../.github/actions/setup-sccache/action.yml), sets
+`RUSTC_WRAPPER` and disables incremental compilation in CI. `cc` uses that
+wrapper for the adapter; MNN's CMake build uses a compile-rule launcher covering
+C/C++, assembly and Metal Objective-C++. On Windows the launcher converts `/Zi`
+and `/ZI` to `/Z7`, including response files, so debug information remains in
+cacheable objects. Linking and archiving are not wrapped. Normal local
+Make/Cargo settings and the completed FFmpeg SDK cache identity remain
+unchanged.
 
-Compiler objects use local disk caches with direct mode disabled. Actions saves
-one snapshot per OS, architecture, build case and run attempt; subsequent runs
-restore the same case's latest snapshot. Release wheels share their platform's
-CI case key so tag jobs can restore default-branch snapshots. This avoids one
-network request per compiler invocation. Host and manylinux servers use separate
-directories in the snapshot. The Linux wheel builder mounts the action's
-checksum-verified Linux musl binary, rebases source/toolchain paths inside the
-container, and flushes its server before restoring output ownership. It never
-forwards a macOS or Windows binary into Linux. Ordinary local wheel builds
-without the CI setup retain their existing behavior. Jobs report compiler
-statistics and stop the host server before the cache save; container statistics
-are reported separately in its build log. A restored Cargo target directory or
-successful backend compile does not prove compiler-cache hits or GPU execution.
+Setup also enables pip's automatic download cache before installing Ninja,
+retaining the already-selected Python version. The wheel requirements file and
+shared action supply the package-cache dependency inventory, including Ninja's
+declared pin.
+
+Standalone FFmpeg prewarming routes configure probes and codec compilation
+through the same compiler cache. Its native zlib and x265 builds use the shared
+CMake launcher. Cache activation preserves the requested sources, features,
+profiles and explicit toolchains; custom toolchains must provide equivalent
+compiler-wrapper coverage.
+
+Compiler results use sccache's GitHub Actions backend directly. Its own hashes
+separate compiler binaries, sources and flags; workflows supply no manual
+compiler-cache keys or per-job snapshots. The pinned Mozilla action exports the
+runtime credentials before the server starts. Direct mode remains disabled. The
+configured disk directories remain available when ordinary local builds select
+the local backend.
+
+The Linux wheel builder mounts the action's checksum-verified Linux musl binary
+and forwards the backend selection and runtime credentials by environment name.
+Both native prewarming and full wheel builds start the container cache before
+compilation. They rebase source/toolchain paths inside the container, report
+compiler statistics and flush the server before restoring output ownership. The
+mounted wheel cache also retains pip downloads and DNF packages between
+container builds. Ordinary local wheel builds without CI setup retain their
+existing behavior. Host statistics are reported separately. Service limits can
+prevent remote cache writes while compilation continues, so restored Cargo
+outputs or a successful build alone do not prove compiler-cache hits or GPU
+execution.
 
 To qualify cache changes, use isolated temporary source/target/cache paths and
 rebuild the same inputs twice, retaining only the compiler cache between builds.

@@ -17,8 +17,10 @@ if [[ -f "$prefix/share/insta360-rs/complete" ]]; then
     exit 0
 fi
 
+configure_native_compiler_cache linux
 printf 'Building FFmpeg SDK: %s\n' "$prefix"
-dnf install -y --setopt=install_weak_deps=False cmake nasm
+dnf install -y --setopt=install_weak_deps=False \
+    --setopt=keepcache=True --setopt=cachedir=/wheel-cache/dnf cmake nasm
 tar -xf "$downloads/$ffmpeg_archive" -C "$build_dir"
 tar -xf "$downloads/$x265_archive" -C "$build_dir"
 

@@ -25,6 +25,20 @@ metadata-proven packed panoramas. V1 sensor-crop conversion remains unavailable;
 real-recording qualification is narrower than synthetic camera/layout coverage.
 Keep these support boundaries explicit.
 
+## Mandatory build caching
+
+**Cache every reusable build input and output. Do not opt out.**
+
+- Use shared sccache storage for every CI compiler invocation, including native
+  prewarming and container builds. Let sccache distinguish compilers, sources
+  and flags; do not add manual compiler-cache keys or per-job snapshots.
+- Persist Cargo downloads, workspace and native build outputs, prepared SDKs,
+  and package/tool caches through the existing automatic cache tooling. Never
+  disable target caching or intentionally discard a native build tree.
+- Keep independent workspace cache roots disjoint so cache cleanup cannot
+  prune another workspace's outputs. Verify actual warm compiler hits and
+  preserve caches when diagnosing failures.
+
 ## Core Principles
 
 - **Simplicity First**: Use the smallest clear change that solves the problem.

@@ -1,10 +1,6 @@
 ---
 name: Set up Linux
 description: Rust, Python, FFmpeg, and software Vulkan for library checks
-inputs:
-  cache-key:
-    description: Separate caches for different build jobs
-    required: true
 runs:
   using: composite
   steps:
@@ -24,6 +20,7 @@ runs:
         # Loader filters support wildcards only at the start or end.
         echo 'VK_LOADER_DRIVERS_SELECT=lvp_icd*' >> "$GITHUB_ENV"
     - uses: ./.github/actions/setup-rust
+    - uses: ./.github/actions/setup-sccache
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
         name: ffmpeg-linux-x86_64
@@ -39,8 +36,14 @@ runs:
       run: pkg-config --modversion libavcodec libavformat libavutil libswscale
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       with:
-        prefix-key: sccache-v1
-        key: ${{ inputs.cache-key }}
-        workspaces: . -> target
+        add-job-id-key: false
+        cache-workspace-crates: true
+        cache-all-crates: true
         cache-on-failure: true
+        workspaces: . -> target/sdk-tests
+        cache-directories: |
+          ~/.cache/prek
+          .cache/wheel
+          .cache/wheel-native
+
     - uses: cargo-bins/cargo-binstall@v1.25.3

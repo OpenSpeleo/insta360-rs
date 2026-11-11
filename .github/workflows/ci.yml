@@ -38,6 +38,19 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-sccache
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          add-job-id-key: false
+          cache-workspace-crates: true
+          cache-all-crates: true
+          cache-on-failure: true
+          workspaces: . -> target
+          cache-directories: |
+            .cache/wheel
+            .cache/wheel-native
+
       - name: Identify the Linux FFmpeg SDK
         if: runner.os == 'Linux'
         id: spec
@@ -72,10 +85,6 @@ jobs:
             echo "FFmpeg SDK built after a cache miss." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "Cache key: $CACHE_KEY" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: runner.os != 'Linux'
-        with:
-          python-version: '3.14'
       - uses: ./.github/actions/setup-native-wheel
         if: runner.os != 'Linux'
       - uses: ./.github/actions/prewarm-native-ffmpeg
@@ -88,8 +97,16 @@ jobs:
           path: dist/ffmpeg-sdk.tar.gz
           if-no-files-found: error
           compression-level: 0
+      - name: Report and flush compiler cache
+        if: always() && env.SCCACHE_PATH != ''
+        shell: bash
+        run: |
+          sccache --show-stats --stats-format=json
+          sccache --stop-server
 
   prek:
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/sdk-tests
     needs: ffmpeg-prewarm
     name: Full prek
     runs-on: ubuntu-24.04
@@ -97,15 +114,6 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-linux
-        with:
-          cache-key: prek
-      - uses: ./.github/actions/setup-sccache
-        with:
-          key: sdk-prek
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/prek
-          key: prek-linux-${{ hashFiles('.pre-commit-config.yaml', 'src-python/.pre-commit-config.yaml') }}
       - name: Install tools with cargo-binstall
         run: cargo binstall --no-confirm prek@0.4.14 cargo-machete@0.9.1
       - name: Test release version and package checks
@@ -137,6 +145,7 @@ jobs:
           - os: windows-2025
             target: windows-x86_64
     env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/sdk-tests
       INSTA360_RS_REQUIRE_UNDERWATER_AI: '1'
       INSTA360_RS_REQUIRE_AI_STITCHING: '1'
       PYO3_PYTHON: python
@@ -144,15 +153,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: ./.github/actions/setup-linux
         if: runner.os == 'Linux'
-        with:
-          cache-key: tests-${{ matrix.target }}
       - uses: ./.github/actions/setup-rust
         if: runner.os != 'Linux'
       - uses: ./.github/actions/setup-native-wheel
         if: runner.os != 'Linux'
       - uses: ./.github/actions/setup-sccache
-        with:
-          key: sdk-tests-${{ matrix.target }}
+        if: runner.os != 'Linux'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: runner.os != 'Linux'
         with:
@@ -167,11 +173,18 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         if: runner.os != 'Linux'
         with:
-          prefix-key: sccache-v1
-          key: tests-${{ matrix.target }}
+          add-job-id-key: false
+          cache-workspace-crates: true
+          cache-all-crates: true
+          cache-on-failure: true
           workspaces: |
-            . -> target
+            . -> target/sdk-tests
             . -> target/wheel-native
+          cache-directories: |
+            ~/.cache/prek
+            .cache/wheel
+            .cache/wheel-native
+
       - uses: ./.github/actions/setup-test-tools
         if: runner.os != 'Linux'
       - name: Require Linux software Vulkan execution
@@ -233,17 +246,16 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         if: runner.os == 'Linux'
         with:
-          prefix-key: sccache-v1
-          key: wheel-${{ hashFiles('scripts/ci/*.sh') }}
+          add-job-id-key: false
+          cache-workspace-crates: true
+          cache-all-crates: true
+          cache-on-failure: true
           workspaces: . -> target/wheel-build
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: runner.os == 'Linux'
-        with:
-          path: |
-            .cache/wheel/cargo
-            .cache/wheel/rustup
-          key: wheel-tools-linux-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
-          restore-keys: wheel-tools-linux-
+          cache-directories: |
+            ~/.cache/prek
+            .cache/wheel
+            .cache/wheel-native
+
       - name: Restore container paths in the Linux SDK
         if: runner.os == 'Linux'
         # Rust's host setup relocated pkg-config files. The manylinux builder

@@ -30,7 +30,7 @@ if [[ "${1:-}" != "--container" && "${1:-}" != "--container-prewarm" ]]; then
     esac
     mkdir -p "$repo_dir/dist" "$repo_dir/.cache/wheel" "$repo_dir/target/wheel-build"
     compiler_cache_args=()
-    if [[ "$container_mode" == --container && -n "${INSTA360_SCCACHE_ROOT:-}" ]]; then
+    if [[ -n "${INSTA360_SCCACHE_ROOT:-}" ]]; then
         # setup-sccache pins the checksum-verified Linux musl executable, which
         # runs on this older manylinux image without inheriting host glibc.
         if [[ $(uname -s) != Linux || $(uname -m) != x86_64 || ! -x ${SCCACHE_PATH:-} ]]; then
@@ -42,7 +42,12 @@ if [[ "${1:-}" != "--container" && "${1:-}" != "--container-prewarm" ]]; then
             --mount "type=bind,source=$SCCACHE_PATH,target=/usr/local/bin/sccache,readonly"
             --mount "type=bind,source=$INSTA360_SCCACHE_ROOT/manylinux,target=/compiler-cache"
             --env INSTA360_SCCACHE_ENABLED=1
+            --env SCCACHE_PATH=/usr/local/bin/sccache
             --env "SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-1G}"
+            --env SCCACHE_GHA_ENABLED
+            --env ACTIONS_CACHE_SERVICE_V2
+            --env ACTIONS_RESULTS_URL
+            --env ACTIONS_RUNTIME_TOKEN
         )
     fi
     exec docker run --rm --platform linux/amd64 \
@@ -78,6 +83,7 @@ trap finish EXIT
 # Keep toolchains and Cargo artifacts separate from native host builds.
 export CARGO_HOME=/wheel-cache/cargo
 export RUSTUP_HOME=/wheel-cache/rustup
+export PIP_CACHE_DIR=/wheel-cache/pip
 export CARGO_TARGET_DIR=/wheel-target
 export CARGO_BUILD_JOBS=$INSTA360_WHEEL_JOBS
 export PATH="$CARGO_HOME/bin:/opt/python/cp311-cp311/bin:$PATH"
@@ -98,6 +104,13 @@ downloads=/wheel-cache/downloads
 build_dir=$(dirname "$prefix")/build
 # shellcheck source=scripts/ci/ffmpeg-runtime-config.sh
 source /build/source/scripts/ci/ffmpeg-runtime-config.sh
+if [[ ${INSTA360_SCCACHE_ENABLED:-0} == 1 ]]; then
+    export SCCACHE_DIR=/compiler-cache SCCACHE_DIRECT=false
+    export SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-false}
+    export SCCACHE_BASEDIRS=/build:/wheel-target:/wheel-cache
+    sccache --start-server
+    compiler_cache_started=1
+fi
 bash /build/source/scripts/ci/build-ffmpeg.sh
 python - <<'PY'
 import ctypes
@@ -117,7 +130,8 @@ if [[ "${1:-}" == "--container-prewarm" ]]; then
     exit 0
 fi
 
-dnf install -y --setopt=install_weak_deps=False clang clang-libs cmake
+dnf install -y --setopt=install_weak_deps=False --setopt=keepcache=True \
+    --setopt=cachedir=/wheel-cache/dnf clang clang-libs cmake
 toolchain=$(python - <<'PY'
 from pathlib import Path
 import tomllib
@@ -136,11 +150,7 @@ python -m pip install -r /build/source/scripts/ci/requirements-wheel.txt
 if [[ ${INSTA360_SCCACHE_ENABLED:-0} == 1 ]]; then
     python -m pip install ninja==1.13.0
     export RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
-    export SCCACHE_DIR=/compiler-cache SCCACHE_DIRECT=false SCCACHE_GHA_ENABLED=false
-    export SCCACHE_BASEDIRS=/build:/wheel-target:/wheel-cache
     export CMAKE_GENERATOR=Ninja CMAKE_TOOLCHAIN_FILE=/build/source/scripts/ci/sccache.cmake
-    sccache --start-server
-    compiler_cache_started=1
 fi
 
 notices=/build/source/src-python/python/insta360_rs/_licenses

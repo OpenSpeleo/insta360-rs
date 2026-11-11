@@ -71,6 +71,67 @@ ffmpeg_options=(
     --enable-encoder=libx265
 )
 
+configure_native_compiler_cache() {
+    local platform=$1
+    if [[ -z ${INSTA360_SCCACHE_ROOT:-} && ${INSTA360_SCCACHE_ENABLED:-0} != 1 ]]; then
+        return
+    fi
+
+    local cache=${SCCACHE_PATH:-} cache_dir cache_program script_dir toolchain commands option
+    if [[ -z $cache ]]; then
+        cache=$(command -v sccache)
+    fi
+    if [[ $platform == windows ]]; then
+        cache=$(cygpath -u "$cache")
+    fi
+    "$cache" --version >/dev/null
+    cache_dir=$(cd "$(dirname "$cache")" && pwd)
+    cache_program=$(basename "$cache")
+    export PATH="$cache_dir:$PATH"
+
+    # FFmpeg accepts a compiler launcher before the compiler command. Keep the
+    # launcher on PATH so a tool-cache directory containing spaces is safe.
+    local cc=gcc cxx=g++
+    if [[ $platform == windows ]]; then
+        cc=cl
+        cxx=cl
+    fi
+    cc=${CC:-$cc}
+    cxx=${CXX:-$cxx}
+    mkdir -p "$build_dir"
+    commands="$build_dir/sccache-compilers"
+    python - "$cache_program" "$platform" "$cc" "$cxx" "${HOST_CC:-$cc}" "${OBJC:-$cc}" > "$commands" <<'PYTHON'
+import shlex
+import sys
+
+cache, platform, *commands = sys.argv[1:]
+for flag, command in zip(('cc', 'cxx', 'host-cc', 'objcc'), commands):
+    arguments = shlex.split(command, posix=platform != 'windows')
+    if not arguments:
+        raise ValueError(f'Empty compiler command for {flag}')
+    executable = arguments[0].strip('"\'').replace('\\', '/').rsplit('/', 1)[-1].lower()
+    if executable not in ('sccache', 'sccache.exe'):
+        command = cache + ' ' + command
+    # Preserve caller quoting and arguments; parse only to detect an existing
+    # launcher. NUL separators also preserve whitespace in the option value.
+    sys.stdout.buffer.write(f'--{flag}={command}'.encode() + b'\0')
+PYTHON
+    while IFS= read -r -d '' option; do
+        ffmpeg_options+=("$option")
+    done < "$commands"
+
+    # The shared launcher covers native C/C++ and assembly and embeds MSVC
+    # debug information per object. Preserve explicitly selected toolchains.
+    if [[ -z ${CMAKE_TOOLCHAIN_FILE:-} ]]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+        toolchain="$script_dir/sccache.cmake"
+        if [[ $platform == windows ]]; then
+            toolchain=$(cygpath -w "$toolchain")
+        fi
+        export CMAKE_TOOLCHAIN_FILE=$toolchain
+    fi
+}
+
 write_runtime_notices() {
     local notices="$prefix/share/insta360-rs"
     mkdir -p "$notices"
