@@ -8,6 +8,8 @@ details are intentionally omitted.
 
 ### Features
 
+- Consolidate recording metadata alongside continuous camera streams.
+
 - Use available graphics hardware for AI underwater color restoration and
   stitching. f97b7fa
 
