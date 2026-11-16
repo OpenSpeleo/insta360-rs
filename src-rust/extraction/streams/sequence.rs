@@ -80,7 +80,7 @@ impl SequenceCopies {
                         files.push(muxer.relative.clone());
                     }
                     Err(error) => {
-                        self.warnings.push(format!("Continuous stream {input_index}:{stream_index} could not finalize: {error}; raw chapters are preserved."));
+                        self.warnings.push(format!("Continuous stream {input_index}:{stream_index} could not finalize: {error}; original packets are preserved in the metadata archive."));
                         muxer.discard(output_dir)?;
                     }
                 }
@@ -184,7 +184,7 @@ impl SequenceInput<'_> {
             }
             let Some(track) = self.copies.tracks.get_mut(&key) else {
                 self.copies.warnings.push(format!(
-                    "Chapter {} adds stream {}:{}; only its original archive is available.",
+                    "Chapter {} adds stream {}:{}; its packets remain available in the metadata archive.",
                     self.chapter_index + 1,
                     self.input_index,
                     stream.index()
@@ -305,7 +305,7 @@ fn disable(
     reason: &str,
 ) -> Result<()> {
     if let Some(muxer) = track.muxer.take() {
-        warnings.push(format!("Continuous {} unavailable: {reason}; every original packet is preserved in its chapter archive.", muxer.relative.display()));
+        warnings.push(format!("Continuous {} unavailable: {reason}; every original packet is preserved in the metadata archive.", muxer.relative.display()));
         muxer.discard(output)?;
     }
     Ok(())

@@ -112,38 +112,129 @@ to one every 100 ms. `completed` becomes true only after publication.
 
 `extract_sequence(sequence, target, cancelled, callback)` processes validated
 available chapters without claiming complete recording coverage. Split sequences
-retain `complete = false` in the manifest. It archives every original file under
-`parts/0001/input-00`, `parts/0002/input-00`, and so on. These directories
-retain all container bytes, ExtraInfo records, raw encoded packets, packet
-indexes, codec configuration, and stream metadata described below. They do not
-include redundant playable copies. Compatible video/audio streams instead get
+retain `complete = false` in the manifest. Compatible video/audio streams get
 one continuous playable file at the root. Declared lens ordering yields
 `camera_A.mp4` and `camera_B.mp4`; unknown lens ordering uses neutral
 `video_001` names. Audio copies use `audio_001.m4a` or a compatible Matroska
 extension.
 
-The sequence manifest uses schema version 2 and records every chapter's source,
-timeline start, preserved component paths, and continuous stream mapping. All
-raw packet PTS/DTS values remain unchanged. Continuous files use one video-based
-time origin shared with audio per input, then add the chapter's timeline start
-using rational timestamp rescaling. Repeated audio priming before subsequent
-chapters and audio packets beginning beyond the chapter's video duration are
-omitted from playable copies and counted in the manifest; the complete packets
-remain in the raw archive. No packet is decoded or re-encoded. Boundary trimming
-is packet-granular, so the last retained audio packet may extend beyond the
-video boundary by less than one packet duration.
+All original components are consolidated into five categories under `metadata/`.
+There are no published `parts/` or per-input directories:
+
+```text
+extracted/
+  manifest.json
+  camera_A.mp4
+  camera_B.mp4
+  audio_001.m4a                   when present and compatible
+  metadata/
+    calibration/
+      payload.bin
+      artifacts.jsonl
+    container/
+      payload.bin
+      artifacts.jsonl
+    extra-info/
+      payload.bin
+      artifacts.jsonl
+      records.jsonl
+    metadata/
+      payload.bin
+      artifacts.jsonl
+      recording.json
+      motion.jsonl
+      exposure.jsonl
+    streams/
+      payload.bin
+      artifacts.jsonl
+```
+
+Every category exists, even when it has no source artifacts. Each `payload.bin`
+contains the original artifact bytes from every source input. Each
+`artifacts.jsonl` entry records `original_path`, `chapter_index`, `input_index`,
+`timeline_start_ns`, `duration_ns`, and `slice` with `path`, `offset` and
+`size`. Container boxes, proprietary tails and calibration profiles may differ
+between chapters; a shared payload is an indexed bundle, not a new standalone
+container or calibration file. No original artifact is overwritten by a later
+chapter.
+
+The sequence manifest uses schema version 3. Its input descriptions retain the
+source identity, timeline start, container and media properties, but artifact
+references are objects with `path`, `offset` and `size`. Paths are relative to
+the export root; offsets and sizes identify bytes within that category's shared
+payload. The manifest also describes the category indexes and continuous stream
+mapping. Consumers should use these references instead of inferring filenames.
+
+Packet indexes remain byte-for-byte original artifacts. Their packet and
+side-data offsets are local to the corresponding packet-payload or side-data
+artifact slice, not absolute offsets into the shared bundle. Likewise, original
+path strings inside archived JSON resolve by chapter/input and original relative
+name through the category indexes. Manifest and recording metadata references
+already use explicit slices; they never depend on a removed source directory.
+
+### Recording-wide metadata
+
+The directly readable recording view is under `metadata/metadata/`:
+
+- `recording.json` contains recording duration/completeness, continuous stream
+  mappings, common settings, and time-ranged settings for every source input.
+  Apply interval settings over `common` to recover each input's values. A
+  setting that changes between parts is not promoted to a common value.
+- `motion.jsonl` and `exposure.jsonl` contain supported samples from the entire
+  recording. Rows retain chapter/input/record/sample provenance, original camera
+  timestamps, and signed `timeline_timestamp_ns` values on the continuous export
+  timeline. Nanosecond timestamps are decimal strings to preserve precision.
+- `metadata/extra-info/records.jsonl`, relative to the export root, indexes the
+  proprietary records, including repeated and unknown IDs. Each record's
+  `raw_path` is a slice reference into that category's `payload.bin`; no
+  separate duplicate record payload is written.
+
+The recording schema is version 2, independent of the sequence manifest. This is
+readable recording-wide metadata, not a rewritten proprietary INSV trailer or an
+embedded metadata track in the camera MP4s. Negative preroll samples and overlap
+at chapter boundaries remain explicit rather than being discarded or
+deduplicated. Rows are in source traversal order; consumers must use timestamps
+and provenance rather than assume strict global timestamp ordering.
+
+Telemetry alignment requires a supported declared clock mapping. Unknown or
+unsupported mappings retain original records and available camera-clock samples,
+with null timeline timestamps and warnings rather than fabricated video
+alignment. This includes exposure-file and timelapse mappings until those
+transformations are qualified for this export. Metadata interpretation does not
+require camera calibration, supported stitching profiles, video decoding or
+re-encoding.
+
+All raw packet PTS/DTS values remain unchanged. Continuous files use one
+video-based time origin shared with audio per input, then add the chapter's
+timeline start using rational timestamp rescaling. Repeated audio priming before
+subsequent chapters and audio packets beginning beyond the chapter's video
+duration are omitted from playable copies and counted in the manifest; complete
+packets remain in the shared archive. No packet is decoded or re-encoded.
+Boundary trimming is packet-granular, so the last retained audio packet may
+extend beyond the video boundary by less than one packet duration.
 
 Codec-configuration changes, missing timestamps/streams, and non-increasing
 decode timestamps make that continuous copy unavailable. Extraction records a
-warning and preserves all per-chapter original artifacts. A compatible copy
-never silently changes codecs to force a join. Camera-split discovery and exact
-frame pairing have their own validation contracts; convenience remuxing is not
-evidence of physical camera synchronization.
+warning and preserves all original artifacts in the category bundles. A
+compatible copy never silently changes codecs to force a join. Camera-split
+discovery and exact frame pairing have their own validation contracts;
+convenience remuxing is not evidence of physical camera synchronization.
 
-Sequence copying writes the archive and continuous file during the same demux
-pass, using bounded muxer fragments and no decoded frames. Cancellation removes
-the entire job-owned staging directory, including incomplete continuous files,
-while leaving the sources and any pre-existing empty destination intact.
+Sequence extraction demuxes each input once into temporary original artifacts
+and continuous copies, then appends the artifacts to the category bundles with
+bounded reads and buffered writes. Only one input's temporary artifacts exist at
+a time; its staging-only directory is removed before the next input. Muxer
+fragments and telemetry sample processing are bounded, and no decoded frames are
+allocated. Bundling adds a sequential read/write pass over the original
+artifacts. Cancellation checks apply throughout and remove the entire job-owned
+staging directory, including incomplete bundles and continuous files, while
+leaving sources and any pre-existing empty destination intact.
+
+Generated fixtures recover original artifact bytes from indexed slices, verify
+all published references and the five-category layout, and cover independent
+camera epochs, changing settings, opaque records, unsupported mappings,
+continuous-copy fallback and cancellation. Tests must not merely assert the
+absence of `parts/`: every original artifact must remain recoverable.
 
 The destination must be absent or an empty directory. Symlink destinations and
 nonempty directories are rejected. Extraction runs in an owned sibling staging
@@ -151,7 +242,9 @@ directory; errors remove that directory, and successful completion publishes the
 complete result. `ExtractionReport` contains absolute output paths,
 input/stream/ record counts, generated files, and warnings.
 
-## Output structure
+## Single-input output structure
+
+`extract` and `extract_controlled` retain their existing per-input layout:
 
 ```text
 extracted/

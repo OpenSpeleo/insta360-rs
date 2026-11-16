@@ -1,6 +1,6 @@
 #![cfg(feature = "media")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -17,6 +17,17 @@ use serde_json::Value;
 use tempfile::tempdir;
 
 fn fixture(path: &Path) -> Option<Vec<u8>> {
+    fixture_with_records(
+        path,
+        &[
+            (1, 1, b"\x12\x0eUnknown Camera".to_vec()),
+            (0xee, 7, b"opaque first".to_vec()),
+            (0xee, 9, b"opaque second".to_vec()),
+        ],
+    )
+}
+
+fn fixture_with_records(path: &Path, records: &[(u8, u8, Vec<u8>)]) -> Option<Vec<u8>> {
     let result = Command::new("ffmpeg")
         .args([
             "-v",
@@ -72,20 +83,15 @@ fn fixture(path: &Path) -> Option<Vec<u8>> {
         String::from_utf8_lossy(&result.stderr)
     );
 
-    let metadata = b"\x12\x0eUnknown Camera";
     let mut payload = Vec::new();
     // Real indexed tails reserve all-zero slots for absent record IDs.
     let mut directory = vec![0; 10];
-    for (id, format, bytes) in [
-        (1_u8, 1_u8, metadata.as_slice()),
-        (0xee, 7, b"opaque first".as_slice()),
-        (0xee, 9, b"opaque second".as_slice()),
-    ] {
-        directory.extend([id, format]);
+    for (id, format, bytes) in records {
+        directory.extend([*id, *format]);
         directory.extend((bytes.len() as u32).to_le_bytes());
         directory.extend((payload.len() as u32).to_le_bytes());
         payload.extend(bytes);
-        payload.extend([format, id]);
+        payload.extend([*format, *id]);
         payload.extend((bytes.len() as u32).to_le_bytes());
     }
     directory.extend([0; 10]);
@@ -107,6 +113,183 @@ fn fixture(path: &Path) -> Option<Vec<u8>> {
         .write_all(&tail)
         .expect("write tail");
     Some(tail)
+}
+
+fn protobuf_varint(output: &mut Vec<u8>, mut value: u64) {
+    while value >= 128 {
+        output.push(value as u8 | 128);
+        value >>= 7;
+    }
+    output.push(value as u8);
+}
+
+fn protobuf_integer(output: &mut Vec<u8>, tag: u32, value: u64) {
+    protobuf_varint(output, u64::from(tag) * 8);
+    protobuf_varint(output, value);
+}
+
+fn telemetry_records(epoch_micros: i64, blend_angle: u64, mapping: u64) -> Vec<(u8, u8, Vec<u8>)> {
+    let mut metadata = b"\x12\x0eUnknown Camera".to_vec();
+    protobuf_integer(&mut metadata, 24, epoch_micros as u64);
+    protobuf_integer(&mut metadata, 29, 0);
+    protobuf_integer(&mut metadata, 62, 1);
+    protobuf_integer(&mut metadata, 64, mapping);
+    protobuf_integer(&mut metadata, 128, blend_angle);
+    // 32 g and 2000 degrees/s; no camera calibration is needed for extraction.
+    let range = [8, 32, 16, 0xd0, 0x0f];
+    protobuf_varint(&mut metadata, 65 * 8 + 2);
+    protobuf_varint(&mut metadata, range.len() as u64);
+    metadata.extend(range);
+    let mut motion = Vec::new();
+    let mut exposure = Vec::new();
+    for delta in [-20_000_i64, 50_000, 150_000] {
+        let timestamp = epoch_micros + delta;
+        motion.extend(timestamp.to_le_bytes());
+        for value in [33_792_u16, 32_768, 32_768, 32_768, 33_792, 32_768] {
+            motion.extend(value.to_le_bytes());
+        }
+        exposure.extend(timestamp.to_le_bytes());
+        exposure.extend(0.01_f64.to_le_bytes());
+    }
+    vec![
+        (1, 1, metadata),
+        (3, 0, motion),
+        (4, 0, exposure),
+        (0xee, 7, format!("opaque first {epoch_micros}").into_bytes()),
+        (
+            0xee,
+            9,
+            format!("opaque second {epoch_micros}").into_bytes(),
+        ),
+    ]
+}
+
+fn json_lines(path: &Path) -> Vec<Value> {
+    fs::read_to_string(path)
+        .expect("JSONL output")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("JSONL row"))
+        .collect()
+}
+
+const ARCHIVE_CATEGORIES: [&str; 5] = [
+    "calibration",
+    "container",
+    "extra-info",
+    "metadata",
+    "streams",
+];
+
+fn artifact_bytes(output: &Path, reference: &Value) -> Vec<u8> {
+    let path = Path::new(reference["path"].as_str().expect("artifact payload path"));
+    assert!(path.is_relative());
+    assert!(path.starts_with("metadata"));
+    assert!(!path
+        .components()
+        .any(|component| component == std::path::Component::ParentDir));
+    let bytes = fs::read(output.join(path)).expect("consolidated payload");
+    let offset = usize::try_from(reference["offset"].as_u64().expect("artifact offset"))
+        .expect("offset fits");
+    let size =
+        usize::try_from(reference["size"].as_u64().expect("artifact size")).expect("size fits");
+    assert!(
+        offset <= bytes.len() && size <= bytes.len() - offset,
+        "artifact slice bounds: {reference}"
+    );
+    bytes[offset..offset + size].to_vec()
+}
+
+fn artifact_json_lines(output: &Path, reference: &Value) -> Vec<Value> {
+    String::from_utf8(artifact_bytes(output, reference))
+        .expect("artifact JSONL")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("artifact JSONL row"))
+        .collect()
+}
+
+fn archived_artifact(output: &Path, category: &str, chapter: usize, original_path: &str) -> Value {
+    let entries = json_lines(&output.join(format!("metadata/{category}/artifacts.jsonl")));
+    let found = entries
+        .iter()
+        .filter(|entry| {
+            entry["chapter_index"] == chapter
+                && entry["input_index"] == 0
+                && entry["original_path"] == original_path
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found.len(),
+        1,
+        "one artifact for chapter {chapter} {original_path}"
+    );
+    found[0]["slice"].clone()
+}
+
+fn assert_artifact_references(output: &Path, value: &Value) {
+    match value {
+        Value::Object(object)
+            if object.contains_key("path")
+                && object.contains_key("offset")
+                && object.contains_key("size") =>
+        {
+            artifact_bytes(output, value);
+        }
+        Value::Object(object) => {
+            for (key, value) in object {
+                assert_ne!(
+                    key, "source_directory",
+                    "no stale source directory references"
+                );
+                assert_artifact_references(output, value);
+            }
+        }
+        Value::Array(array) => {
+            for value in array {
+                assert_artifact_references(output, value);
+            }
+        }
+        Value::String(string) => {
+            assert!(!string.starts_with("parts/"), "stale part path: {string}")
+        }
+        _ => {}
+    }
+}
+
+fn assert_merged_layout(output: &Path) {
+    let root_dirs = fs::read_dir(output)
+        .expect("output entries")
+        .map(|entry| entry.expect("entry"))
+        .filter(|entry| entry.file_type().expect("entry type").is_dir())
+        .map(|entry| entry.file_name().into_string().expect("directory name"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(root_dirs, BTreeSet::from(["metadata".to_owned()]));
+    let categories = fs::read_dir(output.join("metadata"))
+        .expect("metadata categories")
+        .map(|entry| entry.expect("category"))
+        .map(|entry| {
+            assert!(entry.file_type().expect("category type").is_dir());
+            entry.file_name().into_string().expect("category name")
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        categories,
+        ARCHIVE_CATEGORIES.map(str::to_owned).into_iter().collect()
+    );
+    for category in ARCHIVE_CATEGORIES {
+        let directory = output.join("metadata").join(category);
+        assert!(directory.join("payload.bin").is_file());
+        assert!(directory.join("artifacts.jsonl").is_file());
+        assert!(
+            fs::read_dir(directory)
+                .expect("category entries")
+                .all(|entry| entry
+                    .expect("entry")
+                    .file_type()
+                    .expect("entry type")
+                    .is_file()),
+            "no per-part subdirectories inside {category}"
+        );
+    }
 }
 
 fn packet_payloads(path: &Path) -> BTreeMap<usize, Vec<Vec<u8>>> {
@@ -180,7 +363,7 @@ fn controlled_unpack_reports_bytes_and_cancel_keeps_the_empty_target() {
 }
 
 #[test]
-fn sequence_unpack_preserves_each_archive_and_joins_video_without_reencoding() {
+fn sequence_unpack_consolidates_all_artifacts_and_joins_video_without_reencoding() {
     let temp = tempdir().expect("tempdir");
     let first = temp.path().join("first.insv");
     let Some(tail) = fixture(&first) else {
@@ -198,21 +381,117 @@ fn sequence_unpack_preserves_each_archive_and_joins_video_without_reencoding() {
     assert_eq!(report.record_count, 6);
     let manifest: Value =
         serde_json::from_slice(&fs::read(&report.manifest_path).expect("manifest")).expect("json");
-    assert_eq!(manifest["schema_version"], 2);
-    for part in ["0001", "0002"] {
-        let base = output.join(format!("parts/{part}/input-00"));
+    assert_eq!(manifest["schema_version"], 3);
+    assert_merged_layout(&output);
+    assert_artifact_references(&output, &manifest);
+    // The standalone extractor is an independent reference for every original
+    // artifact, including stream indexes, codec configuration and unknown data.
+    let reference = temp.path().join("reference");
+    let reference_report = extract(
+        &InputSet::new(vec![first.clone()]).expect("reference input"),
+        &reference,
+    )
+    .expect("reference extraction");
+    let reference_base = fs::canonicalize(reference.join("input-00")).expect("reference base");
+    let expected_artifacts = reference_report
+        .files
+        .iter()
+        .filter_map(|path| path.strip_prefix(&reference_base).ok())
+        .filter(|path| {
+            !path
+                .file_name()
+                .expect("artifact name")
+                .to_string_lossy()
+                .starts_with("media.")
+        })
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .collect::<BTreeSet<_>>();
+    let mut archived_paths = [BTreeSet::new(), BTreeSet::new()];
+    for category in ARCHIVE_CATEGORIES {
+        let artifacts = json_lines(&output.join(format!("metadata/{category}/artifacts.jsonl")));
+        for artifact in &artifacts {
+            let chapter = artifact["chapter_index"].as_u64().expect("chapter") as usize;
+            assert!(chapter < sequence.chapters.len());
+            assert_eq!(artifact["input_index"], 0);
+            assert_eq!(
+                artifact["timeline_start_ns"],
+                sequence.chapters[chapter]
+                    .timeline_start
+                    .as_nanos()
+                    .to_string()
+            );
+            assert_eq!(
+                artifact["duration_ns"],
+                sequence.chapters[chapter].duration.as_nanos().to_string()
+            );
+            let original_path = artifact["original_path"]
+                .as_str()
+                .expect("original artifact name");
+            assert!(
+                archived_paths[chapter].insert(original_path.to_owned()),
+                "artifact indexed once per source"
+            );
+            let actual = artifact_bytes(&output, &artifact["slice"]);
+            let expected = fs::read(reference.join("input-00").join(original_path))
+                .expect("reference artifact");
+            if original_path.starts_with("streams/") && original_path.ends_with("/metadata.json") {
+                let actual: Value =
+                    serde_json::from_slice(&actual).expect("merged stream description");
+                let mut expected: Value =
+                    serde_json::from_slice(&expected).expect("original stream description");
+                expected
+                    .as_object_mut()
+                    .expect("stream object")
+                    .remove("media_file");
+                assert_eq!(
+                    actual, expected,
+                    "original stream description except standalone playable copy"
+                );
+            } else {
+                assert_eq!(
+                    actual, expected,
+                    "chapter {chapter} artifact {original_path}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        archived_paths,
+        [expected_artifacts.clone(), expected_artifacts]
+    );
+    for chapter in 0..2 {
+        let source = &manifest["inputs"][chapter];
+        assert!(
+            source.get("directory").is_none(),
+            "no per-input output path"
+        );
         assert_eq!(
-            fs::read(base.join("extra-info/tail.bin")).expect("complete tail"),
+            artifact_bytes(&output, &source["container"]["trailer"]["raw_path"]),
             tail
         );
-        for (stream, packets) in &expected {
-            assert_eq!(
-                fs::read(base.join(format!("streams/{stream:03}/packets.bin")))
-                    .expect("raw payload"),
-                packets.concat()
-            );
+        for stream in source["media"]["streams"].as_array().expect("streams") {
+            let index = stream["index"].as_u64().expect("stream index") as usize;
+            let payload = artifact_bytes(&output, &stream["packet_payload"]);
+            assert_eq!(payload, expected[&index].concat());
+            let packet_index = artifact_json_lines(&output, &stream["packet_index"]);
+            assert_eq!(packet_index.len(), expected[&index].len());
+            let side_data = artifact_bytes(&output, &stream["side_data_payload"]);
+            for (packet, expected_payload) in packet_index.iter().zip(&expected[&index]) {
+                let offset = packet["offset"].as_u64().expect("packet offset") as usize;
+                let size = packet["size"].as_u64().expect("packet size") as usize;
+                assert_eq!(
+                    &payload[offset..offset + size],
+                    expected_payload,
+                    "packet offsets are relative to the referenced artifact slice"
+                );
+                for side in packet["side_data"].as_array().expect("side data") {
+                    let offset = side["offset"].as_u64().expect("side-data offset") as usize;
+                    let size = side["size"].as_u64().expect("side-data size") as usize;
+                    assert!(offset <= side_data.len() && size <= side_data.len() - offset);
+                }
+            }
             assert!(
-                !base.join(format!("streams/{stream:03}/media.mp4")).exists(),
+                stream.get("media_file").is_none(),
                 "no redundant chapter playable copy"
             );
         }
@@ -340,6 +619,226 @@ fn sequence_unpack_preserves_each_archive_and_joins_video_without_reencoding() {
 }
 
 #[test]
+fn sequence_metadata_and_telemetry_share_the_continuous_video_timeline() {
+    let temp = tempdir().expect("tempdir");
+    let first = temp.path().join("first.insv");
+    let second = temp.path().join("second.insv");
+    let originals = [
+        telemetry_records(1_000_000, 10, 1),
+        telemetry_records(9_000_000, 20, 1),
+    ];
+    let Some(first_tail) = fixture_with_records(&first, &originals[0]) else {
+        return;
+    };
+    let second_tail = fixture_with_records(&second, &originals[1]).expect("second fixture");
+    let sequence = two_part_sequence(&first, &second);
+    let second_start_ns = sequence.chapters[1].timeline_start.as_nanos() as i128;
+    let output = temp.path().join("output");
+    let report = extract_sequence(&sequence, &output, &AtomicBool::new(false), |_| {})
+        .expect("unified metadata extraction");
+    let metadata: Value = serde_json::from_slice(
+        &fs::read(output.join("metadata/metadata/recording.json")).expect("recording metadata"),
+    )
+    .expect("metadata JSON");
+    assert_eq!(metadata["schema_version"], 2);
+    assert_eq!(
+        metadata["timeline"]["duration_ns"],
+        sequence.duration.as_nanos().to_string()
+    );
+    assert_eq!(metadata["timeline"]["complete"], sequence.complete);
+    assert_eq!(metadata["common"]["camera_name"], "Unknown Camera");
+    assert!(
+        metadata["common"].get("blend_angle").is_none(),
+        "changing settings must retain their time ranges"
+    );
+    assert_eq!(metadata["settings"].as_array().expect("settings").len(), 2);
+    for (chapter, angle) in [(0, 10), (1, 20)] {
+        let settings = &metadata["settings"][chapter];
+        assert_eq!(settings["chapter_index"], chapter);
+        assert_eq!(settings["input_index"], 0);
+        assert_eq!(settings["metadata"]["blend_angle"], angle);
+        assert!(settings.get("source_directory").is_none());
+        for stream in settings["media"]["streams"]
+            .as_array()
+            .expect("stream metadata")
+        {
+            for key in [
+                "packet_payload",
+                "packet_index",
+                "side_data_payload",
+                "extradata",
+            ] {
+                artifact_bytes(&output, &stream[key]);
+            }
+        }
+        assert_artifact_references(&output, &settings["decoded_records"]);
+        assert_eq!(
+            settings["timeline_start_ns"],
+            sequence.chapters[chapter]
+                .timeline_start
+                .as_nanos()
+                .to_string()
+        );
+        assert_eq!(
+            settings["duration_ns"],
+            sequence.chapters[chapter].duration.as_nanos().to_string()
+        );
+    }
+    for (filename, kind) in [("motion.jsonl", "motion"), ("exposure.jsonl", "exposure")] {
+        assert_eq!(
+            metadata["telemetry"][kind]["path"],
+            format!("metadata/metadata/{filename}")
+        );
+        assert_eq!(metadata["telemetry"][kind]["samples"], 6);
+        let rows = json_lines(&output.join("metadata/metadata").join(filename));
+        assert_eq!(rows.len(), 6);
+        for (index, row) in rows.iter().enumerate() {
+            let chapter = index / 3;
+            let local_ns = [-20_000_000_i128, 50_000_000, 150_000_000][index % 3];
+            let global_ns = local_ns + if chapter == 0 { 0 } else { second_start_ns };
+            assert_eq!(row["chapter_index"], chapter);
+            assert_eq!(row["input_index"], 0);
+            assert_eq!(row["sample_index"], index % 3);
+            assert_eq!(
+                row["timeline_timestamp_ns"],
+                global_ns.to_string(),
+                "{filename} row {index}"
+            );
+            let epoch_ns = if chapter == 0 {
+                1_000_000_000
+            } else {
+                9_000_000_000
+            };
+            assert_eq!(
+                row["camera_timestamp_ns"],
+                (epoch_ns + local_ns).to_string()
+            );
+            if kind == "motion" {
+                assert_eq!(row["acceleration_g"], serde_json::json!([1.0, 0.0, 0.0]));
+                assert!(row["angular_velocity_rad_s"].is_array());
+            } else {
+                assert_eq!(row["shutter_ns"], "10000000");
+            }
+        }
+    }
+    assert_eq!(
+        metadata["records"]["index"],
+        "metadata/extra-info/records.jsonl"
+    );
+    assert!(
+        metadata["records"].get("payload").is_none(),
+        "raw records use archive slices"
+    );
+    assert_eq!(metadata["records"]["count"], 10);
+    let records = json_lines(&output.join("metadata/extra-info/records.jsonl"));
+    assert_eq!(records.len(), 10);
+    for row in &records {
+        let chapter = row["chapter_index"].as_u64().expect("chapter") as usize;
+        let index = row["record_index"].as_u64().expect("record") as usize;
+        let original = &originals[chapter][index];
+        assert_eq!(row["record"]["id"], original.0);
+        assert_eq!(row["record"]["format"], original.1);
+        assert!(row.get("source_directory").is_none());
+        assert_eq!(
+            artifact_bytes(&output, &row["record"]["raw_path"]),
+            original.2
+        );
+        if let Some(decoded) = row["record"].pointer("/decoded/path") {
+            let decoded = artifact_bytes(&output, decoded);
+            serde_json::from_slice::<Value>(&decoded)
+                .expect("decoded metadata remains readable JSON");
+        }
+        assert_artifact_references(&output, row);
+    }
+    assert_eq!(
+        records
+            .iter()
+            .filter(|row| row["record"]["id"] == 0xee)
+            .count(),
+        4,
+        "repeated opaque records retain their separate payloads and provenance"
+    );
+    for (chapter, tail) in [(0, first_tail), (1, second_tail)] {
+        let artifact = archived_artifact(&output, "extra-info", chapter, "extra-info/tail.bin");
+        assert_eq!(artifact_bytes(&output, &artifact), tail);
+    }
+    assert_merged_layout(&output);
+    for filename in [
+        "metadata/metadata/recording.json",
+        "metadata/metadata/motion.jsonl",
+        "metadata/metadata/exposure.jsonl",
+        "metadata/extra-info/records.jsonl",
+        "metadata/extra-info/payload.bin",
+    ] {
+        assert!(
+            report
+                .files
+                .contains(&fs::canonicalize(output.join(filename)).expect("published file")),
+            "report lists {filename}"
+        );
+    }
+    assert!(report.files.iter().all(|path| path.is_file()));
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(report.manifest_path).expect("manifest"))
+            .expect("manifest JSON");
+    assert_eq!(
+        metadata["continuous_streams"],
+        manifest["continuous_streams"]
+    );
+    assert!(output.join("camera_A.mp4").is_file());
+    assert!(output.join("camera_B.mp4").is_file());
+}
+
+#[test]
+fn unsupported_metadata_clock_mapping_preserves_consolidated_original_records() {
+    let temp = tempdir().expect("tempdir");
+    let source = temp.path().join("source.insv");
+    let originals = telemetry_records(1_000_000, 10, 99);
+    let Some(tail) = fixture_with_records(&source, &originals) else {
+        return;
+    };
+    let sequence =
+        RecordingSequence::single(InputSet::new(vec![source]).expect("input")).expect("sequence");
+    let output = temp.path().join("output");
+    let report = extract_sequence(&sequence, &output, &AtomicBool::new(false), |_| {})
+        .expect("unsupported mapping does not prevent unpacking");
+    for filename in ["motion.jsonl", "exposure.jsonl"] {
+        let rows = json_lines(&output.join("metadata/metadata").join(filename));
+        assert_eq!(rows.len(), 3);
+        assert!(rows
+            .iter()
+            .all(|row| row.get("timeline_timestamp_ns") == Some(&Value::Null)));
+        assert!(rows
+            .iter()
+            .all(|row| row["camera_timestamp_ns"].is_string()));
+    }
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("mapping") || warning.contains("timeline")),
+        "unsupported alignment must be visible: {:?}",
+        report.warnings
+    );
+    let records = json_lines(&output.join("metadata/extra-info/records.jsonl"));
+    assert_eq!(records.len(), originals.len());
+    for (row, original) in records.iter().zip(&originals) {
+        assert_eq!(
+            artifact_bytes(&output, &row["record"]["raw_path"]),
+            original.2
+        );
+    }
+    assert_eq!(
+        artifact_bytes(
+            &output,
+            &archived_artifact(&output, "extra-info", 0, "extra-info/tail.bin")
+        ),
+        tail
+    );
+    assert_merged_layout(&output);
+}
+
+#[test]
 fn incompatible_continuous_cameras_preserve_the_complete_original_archives() {
     let temp = tempdir().expect("tempdir");
     let first = temp.path().join("first.insv");
@@ -396,18 +895,22 @@ fn incompatible_continuous_cameras_preserve_the_complete_original_archives() {
         .iter()
         .any(|warning| warning.contains("codec configuration changes")));
     for (index, packets) in expected {
-        assert_eq!(
-            fs::read(output.join(format!(
-                "parts/0002/input-00/streams/{index:03}/packets.bin"
-            )))
-            .expect("raw packets"),
-            packets.concat()
+        let artifact = archived_artifact(
+            &output,
+            "streams",
+            1,
+            &format!("streams/{index:03}/packets.bin"),
         );
+        assert_eq!(artifact_bytes(&output, &artifact), packets.concat());
     }
     assert_eq!(
-        fs::read(output.join("parts/0002/input-00/extra-info/tail.bin")).expect("raw metadata"),
+        artifact_bytes(
+            &output,
+            &archived_artifact(&output, "extra-info", 1, "extra-info/tail.bin")
+        ),
         tail
     );
+    assert_merged_layout(&output);
 }
 
 #[test]

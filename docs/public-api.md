@@ -340,6 +340,19 @@ end lies on its sampling grid; at most one million targets are accepted.
 
 ## Original streams and component extraction
 
+Sequence extraction emits continuous camera/audio copies and one consolidated
+`metadata/` tree with calibration, container, ExtraInfo, decoded metadata and
+stream categories. Each category has an indexed payload combining all source
+inputs; no per-part directories are published. The sequence manifest uses schema
+3 with explicit artifact byte ranges, while recording metadata uses schema 2.
+`metadata/metadata/recording.json` retains changing settings over timeline
+intervals; adjacent motion/exposure sidecars use supported recording-relative
+timestamps and explicitly identify unsupported clock mappings. Original binary
+records and packet indexes remain recoverable without fabricating a combined
+proprietary format. The ordinary `extract` and `extract_controlled` per-input
+layout is unchanged. See [extraction](extraction.md) for the artifact and offset
+contract.
+
 The `media` feature also exposes `MediaSource`, `MediaStream`, and `extract`.
 These operations do not construct an `Exporter` and do not require camera or
 calibration validation. `MediaSource::open(InputSet)` enumerates file-backed

@@ -12,7 +12,9 @@ use serde_json::{json, Value};
 use crate::error::io_error;
 use crate::{Error, InputSet, RecordingSequence, Result};
 
+mod archive;
 mod container;
+mod metadata;
 mod streams;
 
 /// Current work in a lossless extraction.
@@ -176,7 +178,9 @@ pub fn extract_controlled(
 }
 
 /// Unpacks every chapter and makes continuous compatible camera/audio copies.
-/// Original packets, timestamp indexes and all metadata remain in per-part archives.
+/// Recording-wide metadata and timed telemetry accompany the continuous copies.
+/// Original packets, timestamp indexes and metadata share indexed category bundles
+/// under `metadata/`; no per-part directories are published.
 /// Processes available original chapters without claiming whole-recording coverage.
 pub fn extract_sequence(
     sequence: &RecordingSequence,
@@ -223,6 +227,11 @@ fn extract_impl(
             .ok_or_else(|| Error::InvalidMedia("input size overflow".into()))?;
     }
     let mut progress = ProgressTracker::new(cancelled, callback, input_count, bytes);
+    if sequence.is_some() {
+        // Original artifacts are copied once into scratch, then into the shared
+        // bundles; compatible playable copies account for the third media pass.
+        progress.progress.total_bytes_estimate = bytes.saturating_mul(3);
+    }
     progress.check()?;
     let output = prepare_output(output_dir)?;
     let staging = StagingDirectory::create(&output)?;
@@ -232,17 +241,20 @@ fn extract_impl(
     let mut stream_count = 0;
     let mut record_count = 0;
 
+    let mut archive = sequence
+        .map(|_| archive::SequenceArchive::new(&staging.path))
+        .transpose()?;
     let mut continuous = sequence.map(|_| streams::SequenceCopies::new());
+    let mut metadata = sequence
+        .map(|_| metadata::SequenceMetadata::new(&staging.path))
+        .transpose()?;
     let mut index = 0;
     for (chapter_index, (inputs, timeline_start)) in chapters.iter().enumerate() {
         for (input_index, path) in inputs.paths().iter().enumerate() {
             let source = fs::canonicalize(path).map_err(|error| io_error(path, error))?;
             let before = fs::metadata(&source).map_err(|error| io_error(&source, error))?;
             let directory = if sequence.is_some() {
-                PathBuf::from(format!(
-                    "parts/{:04}/input-{input_index:02}",
-                    chapter_index + 1
-                ))
+                PathBuf::from(".input")
             } else {
                 PathBuf::from(format!("input-{index:02}"))
             };
@@ -250,10 +262,10 @@ fn extract_impl(
             fs::create_dir_all(&destination).map_err(|error| io_error(&destination, error))?;
 
             progress.phase(ExtractionPhase::Container, index)?;
-            let container =
+            let mut container =
                 container::extract_container_controlled(&source, &destination, &mut progress)?;
             progress.phase(ExtractionPhase::Streams, index)?;
-            let media = streams::extract_streams_controlled(
+            let mut media = streams::extract_streams_controlled(
                 &source,
                 &destination,
                 &mut progress,
@@ -279,6 +291,54 @@ fn extract_impl(
                     },
                 }),
             )?;
+            let references = archive
+                .as_mut()
+                .map(|archive| {
+                    let files = container
+                        .files
+                        .iter()
+                        .chain(&media.files)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    archive.append(
+                        &destination,
+                        chapter_index,
+                        input_index,
+                        *timeline_start,
+                        sequence
+                            .map(|s| s.chapters[chapter_index].duration)
+                            .unwrap_or_default(),
+                        &files,
+                        &mut progress,
+                    )
+                })
+                .transpose()?;
+            if let (Some(metadata), Some(references)) = (metadata.as_mut(), references.as_ref()) {
+                let input_metadata = File::open(&source)
+                    .map_err(|error| io_error(&source, error))
+                    .and_then(crate::InsvReader::new)
+                    .and_then(|mut reader| reader.metadata())
+                    .unwrap_or_else(|error| {
+                        warnings.push(format!(
+                            "input-{index:02}: metadata timing could not be interpreted: {error}; original records are preserved"
+                        ));
+                        crate::container::InsvMetadata::default()
+                    });
+                metadata.append(
+                    chapter_index,
+                    input_index,
+                    *timeline_start,
+                    sequence
+                        .map(|s| s.chapters[chapter_index].duration)
+                        .unwrap_or_default(),
+                    &destination,
+                    references,
+                    &container.description,
+                    &media.description,
+                    &input_metadata,
+                    &mut progress,
+                )?;
+            }
             let after = fs::metadata(&source).map_err(|error| io_error(&source, error))?;
             if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
                 return Err(Error::InvalidMedia(format!(
@@ -290,7 +350,9 @@ fn extract_impl(
             stream_count += media.item_count;
             record_count += container.item_count;
             for component in [&container, &media] {
-                relative_files.extend(component.files.iter().map(|file| directory.join(file)));
+                if sequence.is_none() {
+                    relative_files.extend(component.files.iter().map(|file| directory.join(file)));
+                }
                 warnings.extend(
                     component
                         .warnings
@@ -298,15 +360,24 @@ fn extract_impl(
                         .map(|warning| format!("input-{index:02}: {warning}")),
                 );
             }
-            descriptions.push(json!({
+            if let Some(references) = &references {
+                references.rewrite(&mut container.description);
+                references.rewrite(&mut media.description);
+                fs::remove_dir_all(&destination).map_err(|error| io_error(&destination, error))?;
+            }
+            let mut description = json!({
                 "source": source,
                 "size": before.len(),
-                "directory": directory,
                 "chapter_index": chapter_index,
+                "input_index": input_index,
                 "timeline_start_ns": timeline_start.as_nanos().to_string(),
                 "container": container.description,
                 "media": media.description,
-            }));
+            });
+            if sequence.is_none() {
+                description["directory"] = json!(directory);
+            }
+            descriptions.push(description);
             index += 1;
         }
     }
@@ -322,10 +393,30 @@ fn extract_impl(
         None => Value::Null,
     };
 
+    let metadata_description = match (metadata, sequence) {
+        (Some(metadata), Some(sequence)) => {
+            let component = metadata.finish(sequence, &continuous_description)?;
+            relative_files.extend(component.files);
+            warnings.extend(component.warnings);
+            component.description
+        }
+        _ => Value::Null,
+    };
+
+    let archive_description = match archive {
+        Some(archive) => {
+            let component = archive.finish()?;
+            relative_files.extend(component.files);
+            component.description
+        }
+        None => Value::Null,
+    };
     let manifest = json!({
-        "schema_version": if sequence.is_some() { 2 } else { 1 },
+        "schema_version": if sequence.is_some() { 3 } else { 1 },
+        "archive": archive_description,
         "inputs": descriptions,
         "continuous_streams": continuous_description,
+        "metadata": metadata_description,
         "recording": sequence.map(|sequence| json!({
             "chapter_count": sequence.chapters.len(),
             "duration_ns": sequence.duration.as_nanos().to_string(),
