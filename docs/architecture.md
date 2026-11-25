@@ -110,8 +110,7 @@ Radiometric statistics and gain ramps live on a sphere whose north pole is the
 first calibrated lens's optical axis. Rendering converts the rotated camera ray
 into that same sphere and interpolates cyclic longitude, so stabilization
 carries color correction with the scene and the ramps stay neutral near each
-lens axis. Low-frequency blending also respects the source masks and normalizes
-valid filter support.
+lens axis.
 
 ## Performance
 
@@ -127,7 +126,7 @@ buffers, and bindings across equal-size frames. Its current data flow is:
 ```text
 FFmpeg decode to retained AVFrames (software export / optional hardware preview)
   -> direct YUV420P or NV12 plane upload, or CPU RGB conversion for another format
-  -> GPU radiometric passes + projection/mask/seam/two-band blend
+  -> GPU radiometric passes + projection/mask/seam blend
   -> GPU RGB24 byte packing + bulk RGB readback for stills/preview
      or GPU RGB-to-YUV420 + YUV readback/copy into an FFmpeg frame for video
   -> software or hardware HEVC encoder selected by MediaAcceleration

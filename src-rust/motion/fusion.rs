@@ -15,6 +15,8 @@ const MAX_POSES: usize = 5_000_000;
 const MAX_STEP_SECONDS: f64 = 0.01;
 const MAX_STEP_RADIANS: f64 = 0.1;
 const INITIAL_DIRECTION_TOLERANCE: f64 = 0.08726646259971647; // Five degrees.
+const ROBUST_GRAVITY_ITERATIONS: usize = 8;
+const ROBUST_GRAVITY_SETTLED: f64 = 1.0e-5; // Radians between successive estimates.
 const STATIONARY_WINDOW: Duration = Duration::from_secs(1);
 const STATIONARY_MAX_SPEED: f64 = 0.003490658503988659; // 0.2 degrees/second.
 const STATIONARY_GYRO_STDDEV: f64 = 0.00015;
@@ -98,9 +100,9 @@ impl FusionOptions {
 pub struct FusionDiagnostics {
     /// Qualified observations used to establish initial gravity.
     pub initialization_samples: usize,
-    /// Start of the coherent initialization interval, on the shared camera clock.
+    /// First gravity observation the initial estimate kept, on the shared camera clock.
     pub initialization_start: Duration,
-    /// End of the coherent initialization interval, on the shared camera clock.
+    /// Last gravity observation the initial estimate kept, on the shared camera clock.
     pub initialization_end: Duration,
     /// Integration substeps whose gravity measurement passed both gates.
     pub gravity_updates: usize,
@@ -178,7 +180,6 @@ impl AttitudeTrack {
             heading,
             bias,
             InitialGravityWindow {
-                reference: UP,
                 sum: UP,
                 start: samples[0].timestamp,
                 end: samples[0].timestamp,
@@ -252,7 +253,7 @@ impl AttitudeTrack {
                 );
                 let predicted_mid = current * rotation(omega, seconds * 0.5)?;
                 let acceleration = lerp(pair[0].acceleration, pair[1].acceleration, fraction);
-                // Initialization may use a later coherent pre-roll interval.
+                // Initialization may reject an early interval as inconsistent.
                 // Earlier transients must not perturb the gravity estimate that
                 // was transported back into this initial body orientation.
                 let correction = (previous_time >= initialization.start)
@@ -378,7 +379,6 @@ fn validate_samples(samples: &[MotionSample], options: FusionOptions) -> Result<
 
 #[derive(Clone, Copy)]
 struct InitialGravityWindow {
-    reference: [f64; 3],
     sum: [f64; 3],
     start: Duration,
     end: Duration,
@@ -386,24 +386,34 @@ struct InitialGravityWindow {
 }
 
 impl InitialGravityWindow {
-    fn new(direction: [f64; 3], timestamp: Duration) -> Self {
-        Self {
-            reference: direction,
-            sum: direction,
-            start: timestamp,
-            end: timestamp,
-            samples: 1,
-        }
+    /// Sums the observations that `accept` admits, keeping their time span.
+    fn collect(
+        observations: &[(Duration, [f64; 3])],
+        accept: impl Fn([f64; 3]) -> bool,
+    ) -> Option<Self> {
+        let mut accepted = observations
+            .iter()
+            .filter(|(_, direction)| accept(*direction));
+        let &(first, direction) = accepted.next()?;
+        Some(accepted.fold(
+            Self {
+                sum: direction,
+                start: first,
+                end: first,
+                samples: 1,
+            },
+            |window, &(time, direction)| Self {
+                sum: add(window.sum, direction),
+                end: time,
+                samples: window.samples + 1,
+                ..window
+            },
+        ))
     }
 
-    fn retain_longer(self, best: &mut Option<Self>, minimum_duration: Duration) {
-        let span = self.end - self.start;
-        if self.samples >= 2
-            && span >= minimum_duration
-            && best.is_none_or(|previous| span > previous.end - previous.start)
-        {
-            *best = Some(self);
-        }
+    fn direction(self) -> Option<[f64; 3]> {
+        let length = vector_length(self.sum);
+        (length > 1.0e-9).then(|| scale(self.sum, 1.0 / length))
     }
 }
 
@@ -411,9 +421,11 @@ fn initialize(
     samples: &[MotionSample],
     options: FusionOptions,
 ) -> Result<(Orientation, InitialGravityWindow)> {
+    // Transport each qualified measurement into the first body frame. A turning
+    // camera can therefore use the whole window without mistaking rotation for
+    // acceleration, and rejected readings need not interrupt it.
     let mut relative = Orientation::IDENTITY;
-    let mut candidate: Option<InitialGravityWindow> = None;
-    let mut best = None;
+    let mut observations = Vec::new();
     for (index, sample) in samples.iter().enumerate() {
         if sample.timestamp - samples[0].timestamp > options.initialization_window {
             break;
@@ -431,38 +443,16 @@ fn initialize(
                 relative = relative * rotation(omega, interval.as_secs_f64() / steps as f64)?;
             }
         }
-        let Some(direction) = qualified_acceleration(sample.acceleration, options) else {
-            if let Some(window) = candidate.take() {
-                window.retain_longer(&mut best, options.minimum_initialization_duration);
-            }
-            continue;
-        };
-        // Transport each measurement into the first body frame. A turning camera
-        // can therefore use pre-roll without mistaking rotation for acceleration.
-        let direction = relative.rotate_vector(direction);
-        if let Some(window) = candidate.as_mut() {
-            if dot(window.reference, direction) >= INITIAL_DIRECTION_TOLERANCE.cos() {
-                window.sum = add(window.sum, direction);
-                window.end = sample.timestamp;
-                window.samples += 1;
-            } else {
-                window.retain_longer(&mut best, options.minimum_initialization_duration);
-                candidate = Some(InitialGravityWindow::new(direction, sample.timestamp));
-            }
-        } else {
-            candidate = Some(InitialGravityWindow::new(direction, sample.timestamp));
+        if let Some(direction) = qualified_acceleration(sample.acceleration, options) {
+            observations.push((sample.timestamp, relative.rotate_vector(direction)));
         }
     }
-    if let Some(window) = candidate {
-        window.retain_longer(&mut best, options.minimum_initialization_duration);
-    }
-    // Select the longest coherent contiguous interval, so a startup shock does
-    // not pin initialization to the first reading. Keep the magnitude, angular,
-    // and minimum-duration gates, and never bridge a rejected observation.
-    let initialization = best.ok_or_else(|| {
+    let initialization = robust_gravity(&observations, options).ok_or_else(|| {
         invalid("cannot initialize gravity from a sufficiently long, consistent initial interval")
     })?;
-    let direction = scale(initialization.sum, 1.0 / vector_length(initialization.sum));
+    let direction = initialization
+        .direction()
+        .expect("qualified initialization has a direction");
     let tilt = if direction[2] < -1.0 + 1.0e-12 {
         // Cross products vanish for antiparallel vectors; choose a deterministic
         // 180-degree rotation around body X instead of falling back to identity.
@@ -479,6 +469,54 @@ fn initialize(
         Orientation::from_axis_angle(UP, -heading)? * tilt,
         initialization,
     ))
+}
+
+/// Estimates initial gravity from transported specific-force directions.
+///
+/// Handheld motion adds linear acceleration that passes the magnitude gate, so
+/// any single short steady interval is biased by it; averaging over the whole
+/// window cancels most of it. Each pass re-averages the observations within
+/// three median deviations of the current mean, clamped between five degrees
+/// and the innovation gate: a steady camera rejects brief false-up intervals,
+/// while handheld spread keeps the wide gate instead of locking onto one
+/// motion phase. Most observations must agree with the estimate.
+fn robust_gravity(
+    observations: &[(Duration, [f64; 3])],
+    options: FusionOptions,
+) -> Option<InitialGravityWindow> {
+    let mut mean = InitialGravityWindow::collect(observations, |_| true)?.direction()?;
+    let mut deviations = Vec::with_capacity(observations.len());
+    let mut estimate = None;
+    for _ in 0..ROBUST_GRAVITY_ITERATIONS {
+        deviations.clear();
+        deviations.extend(
+            observations
+                .iter()
+                .map(|(_, direction)| dot(mean, *direction).clamp(-1.0, 1.0).acos()),
+        );
+        deviations.sort_unstable_by(f64::total_cmp);
+        let gate = (3.0 * deviations[deviations.len() / 2]).clamp(
+            INITIAL_DIRECTION_TOLERANCE,
+            options.max_acceleration_innovation_radians,
+        );
+        let window = InitialGravityWindow::collect(observations, |direction| {
+            dot(mean, direction) >= gate.cos()
+        })?;
+        if window.samples < 2
+            || window.end - window.start < options.minimum_initialization_duration
+            || window.samples * 2 <= observations.len()
+        {
+            return None;
+        }
+        let next = window.direction()?;
+        let settled = dot(mean, next) >= ROBUST_GRAVITY_SETTLED.cos();
+        mean = next;
+        estimate = Some(window);
+        if settled {
+            break;
+        }
+    }
+    estimate
 }
 
 fn qualified_acceleration(acceleration: [f64; 3], options: FusionOptions) -> Option<[f64; 3]> {
@@ -877,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn initialization_search_never_bridges_rejections_or_exceeds_its_window() {
+    fn initialization_bridges_rejections_but_never_exceeds_its_window() {
         let interrupted: Vec<_> = (0..=100)
             .map(|index| {
                 sample(
@@ -887,7 +925,15 @@ mod tests {
                 )
             })
             .collect();
-        assert!(AttitudeTrack::new(&interrupted, FusionOptions::default()).is_err());
+        // Handheld recordings reject readings throughout; transported
+        // observations on either side of a rejection still share one frame.
+        let track = AttitudeTrack::new(&interrupted, FusionOptions::default())
+            .expect("interleaved rejections do not prevent initialization");
+        assert_vector(
+            track.pose_at(Duration::ZERO).unwrap().rotate_vector(UP),
+            UP,
+            1.0e-12,
+        );
         let late: Vec<_> = (0..=100)
             .map(|index| {
                 sample(
@@ -906,6 +952,60 @@ mod tests {
             }
         )
         .is_ok());
+    }
+
+    #[test]
+    fn handheld_linear_acceleration_averages_out_of_initial_gravity() {
+        let rates = [0.3, -0.2, 0.5];
+        // World-frame linear acceleration that passes the magnitude gate: a
+        // 150 ms forward lean at the start, then zero-mean hand shake. A short
+        // coherent interval at the start would inherit the lean.
+        let linear = |time: f64| {
+            if time < 0.15 {
+                [0.12, 0.0, 0.0]
+            } else {
+                let phase = TAU * 1.7 * time;
+                [0.1 * phase.sin(), 0.08 * (1.3 * phase).cos(), 0.0]
+            }
+        };
+        let samples: Vec<_> = (0..=4000)
+            .map(|index| {
+                let time = index as f64 * 0.001;
+                let mut sample = analytic_sample(time, rates);
+                let specific_force = add(UP, linear(time));
+                sample.acceleration =
+                    analytic_axes(time, rates).map(|body_axis| dot(body_axis, specific_force));
+                sample
+            })
+            .collect();
+        let options = FusionOptions {
+            initialization_window: Duration::from_secs(4),
+            ..FusionOptions::default()
+        };
+        let track = AttitudeTrack::new(&samples, options).unwrap();
+        let expected = analytic_axes(0.0, rates);
+        let measured_up = track
+            .pose_at(Duration::ZERO)
+            .unwrap()
+            .inverse()
+            .rotate_vector(UP);
+        let true_up = [expected[0][2], expected[1][2], expected[2][2]];
+        let error = dot(measured_up, true_up)
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees();
+        assert!(error < 0.3, "initial tilt error {error} degrees");
+        let short = AttitudeTrack::new(&samples, FusionOptions::default()).unwrap();
+        let short_up = short
+            .pose_at(Duration::ZERO)
+            .unwrap()
+            .inverse()
+            .rotate_vector(UP);
+        let short_error = dot(short_up, true_up).clamp(-1.0, 1.0).acos().to_degrees();
+        assert!(
+            short_error > 5.0,
+            "the lean should bias a 250 ms window ({short_error})"
+        );
     }
 
     #[test]

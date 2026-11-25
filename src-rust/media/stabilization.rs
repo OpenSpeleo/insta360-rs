@@ -16,8 +16,11 @@ use crate::telemetry::{decode_camera_exposure_record, CameraExposureSample};
 use crate::timing::{validate_camera_timestamp, ExposureTimeline};
 use crate::{Error, InsvReader, Result, RollingShutterCorrection, Stabilization, StitchConfig};
 
-/// Gravity initialization window used when the pre-roll has no steady interval.
-const GRAVITY_FALLBACK_WINDOW: Duration = Duration::from_secs(2);
+/// Span from the first IMU sample over which initial gravity is averaged: the
+/// pre-roll plus the start of the recording. Handheld clips rarely hold still
+/// during a short pre-roll, and readings transported through the gyro let the
+/// whole span average out linear acceleration without delaying the first pose.
+const GRAVITY_INITIALIZATION_WINDOW: Duration = Duration::from_secs(4);
 
 const MAX_GYRO_BYTES: u64 = 5_000_000 * 20;
 const MAX_EXPOSURE_BYTES: u64 = 10_000_000 * 16;
@@ -394,11 +397,9 @@ impl FileStabilizer {
             let (timestamp, shutter) = clocks[lens].exposure_at(pts, camera_origin_micros)?;
             Ok(timestamp + gyro_adjust_micros - shutter.as_secs_f64() * 500_000.0)
         };
-        let mut first_capture = f64::INFINITY;
         let mut last_capture_micros = [0.0; 2];
         for lens in 0..2 {
             let first = capture_at(lens, presentation[lens][0])?;
-            first_capture = first_capture.min(first);
             last_capture_micros[lens] = capture_at(
                 lens,
                 *presentation[lens].last().expect("validated video PTS"),
@@ -418,9 +419,7 @@ impl FileStabilizer {
         let initialization_window = if previous.is_some() {
             FusionOptions::default().initialization_window
         } else {
-            Duration::try_from_secs_f64((first_capture / 1_000_000.0).min(2.0)).map_err(|_| {
-                Error::InvalidMedia("no gyro pre-roll precedes the first capture".into())
-            })?
+            GRAVITY_INITIALIZATION_WINDOW
         };
         let options = FusionOptions {
             initialization_window,
@@ -435,21 +434,7 @@ impl FileStabilizer {
         let attitude = if let Some(previous) = previous {
             previous.continue_attitude(&mut samples, camera_origin_micros, options)?
         } else {
-            AttitudeTrack::new(&samples, options).or_else(|error| {
-                // Handheld recordings can start mid-motion, leaving no steady
-                // interval in the pre-roll. Later observations are transported
-                // into the first body frame through the gyro, so a longer
-                // window still yields the initial gravity. Keep the original
-                // error when even that finds none.
-                let extended = FusionOptions {
-                    initialization_window: GRAVITY_FALLBACK_WINDOW,
-                    ..options
-                };
-                if options.initialization_window >= GRAVITY_FALLBACK_WINDOW {
-                    return Err(error);
-                }
-                AttitudeTrack::new(&samples, extended).map_err(|_| error)
-            })?
+            AttitudeTrack::new(&samples, options)?
         };
         let mut warnings = Vec::new();
         let readout = if config.rolling_shutter == RollingShutterCorrection::Off {
@@ -492,7 +477,7 @@ impl FileStabilizer {
         }
         let diagnostics = attitude.diagnostics();
         let report = format!(
-            "X5 gravity fusion: {} IMU samples, {} gravity observations initialized from {:.3}..{:.3}s of retained pre-roll, {} gravity updates, {} rejected updates; {}; {}; rolling shutter {}",
+            "X5 gravity fusion: {} IMU samples, {} gravity observations initialized from {:.3}..{:.3}s of retained telemetry, {} gravity updates, {} rejected updates; {}; {}; rolling shutter {}",
             samples.len(), diagnostics.initialization_samples,
             diagnostics.initialization_start.as_secs_f64(), diagnostics.initialization_end.as_secs_f64(), diagnostics.gravity_updates,
             diagnostics.gravity_rejections,

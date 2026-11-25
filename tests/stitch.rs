@@ -30,7 +30,9 @@ fn prepared_corrections_are_source_deterministic_and_reject_stale_geometry() {
     };
     let cpu = CpuStitcher::new();
     let fixed = cpu.stitch(&lenses, &calibration, projection).unwrap();
-    let (aligned, _) = correspondence::chart(0.0);
+    // The correction moves each lens half way, so the seam lands where both
+    // lenses agree at the midpoint of the 0.8 degree offset.
+    let (aligned, _) = correspondence::chart_shifted([0.4, 0.4]);
     let reference = cpu.stitch(&aligned, &calibration, projection).unwrap();
     let error = |frame: &PanoramaFrame| {
         (120..136)

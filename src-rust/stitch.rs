@@ -32,8 +32,6 @@ use crate::{Error, Result};
 
 const RGB_CHANNELS: usize = 3;
 const DEFAULT_FEATHER_FRACTION: f64 = 0.08;
-const LOW_FREQUENCY_OFFSETS: [f64; 5] = [-64.0, -32.0, 0.0, 32.0, 64.0];
-const LOW_FREQUENCY_WEIGHTS: [f64; 5] = [1.0, 4.0, 6.0, 4.0, 1.0];
 const COLOR_ADJUSTMENT_SAMPLE_STRIDE: usize = 8;
 const COLOR_ADJUSTMENT_LONGITUDE_DIVISOR: usize = 5;
 const COLOR_ADJUSTMENT_SMOOTH_RADIUS: isize = 10;
@@ -44,8 +42,6 @@ const COLOR_ADJUSTMENT_RATE: f64 = 0.5;
 #[derive(Clone, Copy, Debug)]
 struct ProjectedSample {
     color: [f64; RGB_CHANNELS],
-    source_x: f64,
-    source_y: f64,
     detail_weight: f64,
     illumination_weight: f64,
 }
@@ -371,9 +367,7 @@ impl CpuStitcher {
                     let output = &mut output_row[column * RGB_CHANNELS..][..RGB_CHANNELS];
                     if let Some(color) = blend_projected_samples(
                         samples,
-                        lenses,
                         color_adjustment.gains_for_direction(direction),
-                        fisheye_masks,
                     ) {
                         for channel in 0..RGB_CHANNELS {
                             output[channel] = color[channel].round().clamp(0.0, 255.0) as u8;
@@ -550,8 +544,6 @@ fn project_and_sample(
     );
     (detail_weight > 0.0 || illumination_weight > 0.0).then_some(ProjectedSample {
         color: sample,
-        source_x,
-        source_y,
         detail_weight,
         illumination_weight,
     })
@@ -759,11 +751,19 @@ fn smooth_color_means(
         .collect()
 }
 
+/// Blends the two lenses with the sharp seam weights alone.
+///
+/// An earlier two-band blend took fine detail from these weights and low-frequency
+/// illumination, a 5x5 window at +-64 source pixels, from the linear full-overlap
+/// weights. Near its rim a lens darkens and its window reaches past the rim, so its
+/// low-frequency estimate is biased dark exactly where the linear weight still gives
+/// it a few percent. The result was a thin dark arc on flat surfaces inside the
+/// overlap (X4: up to -0.6 levels at 4.5 degrees from the seam), which Insta360
+/// Studio does not show. Halving the window only halved it. With one set of weights
+/// the rim lens carries almost no weight where it darkens.
 fn blend_projected_samples(
     samples: [Option<ProjectedSample>; 2],
-    frames: &[LensFrame; 2],
     gains: [[f64; RGB_CHANNELS]; 2],
-    fisheye_masks: [Option<&FisheyeMask>; 2],
 ) -> Option<[f64; RGB_CHANNELS]> {
     match samples {
         [None, None] => None,
@@ -774,89 +774,24 @@ fn blend_projected_samples(
                 apply_rgb_gain(first.color, gains[0]),
                 apply_rgb_gain(second.color, gains[1]),
             ];
-            let mut low = [
-                low_frequency_rgb(
-                    frames.first()?,
-                    first.source_x,
-                    first.source_y,
-                    fisheye_masks[0],
-                ),
-                low_frequency_rgb(
-                    frames.get(1)?,
-                    second.source_x,
-                    second.source_y,
-                    fisheye_masks[1],
-                ),
-            ];
-            low[0] = apply_rgb_gain(low[0], gains[0]);
-            low[1] = apply_rgb_gain(low[1], gains[1]);
             let detail_total = first.detail_weight + second.detail_weight;
-            let illumination_total = first.illumination_weight + second.illumination_weight;
-            if detail_total <= f64::EPSILON || illumination_total <= f64::EPSILON {
-                return Some(if first.detail_weight >= second.detail_weight {
+            if detail_total <= 0.0 {
+                return Some(if first.illumination_weight >= second.illumination_weight {
                     color[0]
                 } else {
                     color[1]
                 });
             }
-
-            let mut output = [0.0; RGB_CHANNELS];
-            for channel in 0..RGB_CHANNELS {
-                let high_first = color[0][channel] - low[0][channel];
-                let high_second = color[1][channel] - low[1][channel];
-                let high = (high_first * first.detail_weight + high_second * second.detail_weight)
-                    / detail_total;
-                let illumination = (low[0][channel] * first.illumination_weight
-                    + low[1][channel] * second.illumination_weight)
-                    / illumination_total;
-                output[channel] = high + illumination;
-            }
-            Some(output)
+            Some(std::array::from_fn(|channel| {
+                (color[0][channel] * first.detail_weight + color[1][channel] * second.detail_weight)
+                    / detail_total
+            }))
         }
     }
 }
 
 fn apply_rgb_gain(color: [f64; RGB_CHANNELS], gain: [f64; RGB_CHANNELS]) -> [f64; RGB_CHANNELS] {
     std::array::from_fn(|channel| color[channel] * gain[channel])
-}
-
-fn low_frequency_rgb(
-    frame: &LensFrame,
-    source_x: f64,
-    source_y: f64,
-    fisheye_mask: Option<&FisheyeMask>,
-) -> [f64; RGB_CHANNELS] {
-    let maximum_x = f64::from(frame.width - 1);
-    let maximum_y = f64::from(frame.height - 1);
-    let mut result = [0.0; RGB_CHANNELS];
-    let mut total_weight = 0.0;
-    for (vertical_offset, vertical_weight) in
-        LOW_FREQUENCY_OFFSETS.into_iter().zip(LOW_FREQUENCY_WEIGHTS)
-    {
-        for (horizontal_offset, horizontal_weight) in
-            LOW_FREQUENCY_OFFSETS.into_iter().zip(LOW_FREQUENCY_WEIGHTS)
-        {
-            let x = (source_x + horizontal_offset).clamp(0.0, maximum_x);
-            let y = (source_y + vertical_offset).clamp(0.0, maximum_y);
-            let validity = fisheye_mask.map_or(1.0, |mask| mask.weight(x, y));
-            let weight = vertical_weight * horizontal_weight * validity;
-            if weight <= 0.0 {
-                continue;
-            }
-            let sample = masked_bilinear_rgb(frame, x, y, fisheye_mask);
-            for channel in 0..RGB_CHANNELS {
-                result[channel] += sample[channel] * weight;
-            }
-            total_weight += weight;
-        }
-    }
-    if total_weight <= 0.0 {
-        return masked_bilinear_rgb(frame, source_x, source_y, fisheye_mask);
-    }
-    for channel in &mut result {
-        *channel /= total_weight;
-    }
-    result
 }
 
 #[cfg(test)]
@@ -1176,6 +1111,53 @@ fn smoothstep(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn blend_sample(value: f64, detail_weight: f64, illumination_weight: f64) -> ProjectedSample {
+        ProjectedSample {
+            color: [value; RGB_CHANNELS],
+            detail_weight,
+            illumination_weight,
+        }
+    }
+
+    #[test]
+    fn overlap_blend_uses_only_the_seam_weights() {
+        // A lens near its rim has a small seam weight but a larger illumination
+        // weight. Its brightness must not leak in through the illumination weight.
+        let unity = [[1.0; RGB_CHANNELS]; 2];
+        let color = blend_projected_samples(
+            [
+                Some(blend_sample(100.0, 0.9, 0.5)),
+                Some(blend_sample(200.0, 0.1, 0.5)),
+            ],
+            unity,
+        )
+        .unwrap();
+        assert_eq!(color, [110.0; RGB_CHANNELS]);
+        let gained = blend_projected_samples(
+            [
+                Some(blend_sample(100.0, 0.5, 0.5)),
+                Some(blend_sample(100.0, 0.5, 0.5)),
+            ],
+            [[1.0, 1.0, 1.0], [1.2, 1.0, 0.8]],
+        )
+        .unwrap();
+        assert_eq!(gained, [110.0, 100.0, 90.0]);
+    }
+
+    #[test]
+    fn overlap_blend_without_seam_weight_takes_the_stronger_lens() {
+        let unity = [[1.0; RGB_CHANNELS]; 2];
+        let color = blend_projected_samples(
+            [
+                Some(blend_sample(100.0, 0.0, 0.2)),
+                Some(blend_sample(200.0, 0.0, 0.6)),
+            ],
+            unity,
+        )
+        .unwrap();
+        assert_eq!(color, [200.0; RGB_CHANNELS]);
+    }
     use crate::calibration::synthetic_dual_fisheye_calibration;
 
     #[test]
@@ -1190,8 +1172,6 @@ mod tests {
             std::array::from_fn(|lens| {
                 (!(row + column).is_multiple_of(11 + lens * 2)).then_some(ProjectedSample {
                     color: colors[lens],
-                    source_x: 0.0,
-                    source_y: 0.0,
                     detail_weight: 1.0,
                     illumination_weight: 1.0,
                 })

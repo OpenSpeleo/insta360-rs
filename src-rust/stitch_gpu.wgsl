@@ -395,22 +395,40 @@ fn sample_yuv420(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
     return yuv_to_rgb(yuv, metadata);
 }
 
-fn corrected_direction(direction: vec3<f32>) -> vec3<f32> {
+fn corrected_direction(lens_index: u32, direction: vec3<f32>) -> vec3<f32> {
     let parameters = correction_map[0];
-    if parameters.x < 1.0 {
+    let spread = parameters.w;
+    if parameters.x < 1.0 || (lens_index == 0u && spread <= 0.0) {
         return direction;
     }
     let basis = correction_map[1];
     let local = rotate_vector(basis, direction);
     let theta = atan2(length(local.xy), local.z);
     let latitude = theta - PI * 0.5;
-    if abs(latitude) >= parameters.z {
+    var share = 1.0;
+    var sampled_latitude = latitude;
+    if spread > 0.0 {
+        // Positive latitude lies on lens one's side of the seam.
+        var into_own_side = -latitude - parameters.z;
+        var sign = -0.5;
+        if lens_index == 1u {
+            into_own_side = latitude - parameters.z;
+            sign = 0.5;
+        }
+        let ramp = clamp(into_own_side / max(spread - parameters.z, 1e-6), 0.0, 1.0);
+        let fade = 1.0 - ramp * ramp * (3.0 - 2.0 * ramp);
+        if fade <= 0.0 {
+            return direction;
+        }
+        share = sign * fade;
+        sampled_latitude = clamp(latitude, -parameters.z, parameters.z);
+    } else if abs(latitude) >= parameters.z {
         return direction;
     }
     let phi = atan2(local.y, local.x);
     let original = vec2<f32>(phi / (2.0 * PI) * parameters.x - 0.5,
-        (latitude / parameters.z + 1.0) * 0.5 * parameters.y - 0.5);
-    if original.y < 0.0 || original.y > parameters.y - 1.0 {
+        clamp((sampled_latitude / parameters.z + 1.0) * 0.5 * parameters.y - 0.5, 0.0, parameters.y - 1.0));
+    if spread <= 0.0 && (original.y < 0.0 || original.y > parameters.y - 1.0) {
         return direction;
     }
     let x = original.x - floor(original.x / parameters.x) * parameters.x;
@@ -430,6 +448,7 @@ fn corrected_direction(direction: vec3<f32>) -> vec3<f32> {
         let value = correction_map[2u + points[i].y * u32(parameters.x) + points[i].x];
         flow += value.xy * weights[i];
     }
+    flow *= share;
     if all(flow == vec2<f32>(0.0)) {
         return direction;
     }
@@ -814,35 +833,6 @@ fn camera_position(direction: vec3<f32>) -> vec2<f32> {
     );
 }
 
-fn bilinear_mask_weight(lens_index: u32, source: vec2<f32>, maximum: vec2<f32>) -> f32 {
-    return mask_weight(lens_index, min(source, maximum));
-}
-
-fn low_frequency(lens_index: u32, source: vec2<f32>) -> vec3<f32> {
-    let offsets = array<f32, 5>(-64.0, -32.0, 0.0, 32.0, 64.0);
-    let weights = array<f32, 5>(1.0, 4.0, 6.0, 4.0, 1.0);
-    let maximum = lenses[lens_index].source.xy - vec2<f32>(1.0);
-    var result = vec3<f32>(0.0);
-    var total_weight = 0.0;
-    for (var y = 0u; y < 5u; y += 1u) {
-        for (var x = 0u; x < 5u; x += 1u) {
-            let position = clamp(
-                source + vec2<f32>(offsets[x], offsets[y]), vec2<f32>(0.0), maximum,
-            );
-            let weight = weights[x] * weights[y] * bilinear_mask_weight(lens_index, position, maximum);
-            if weight <= 0.0 {
-                continue;
-            }
-            result += sample_source(lens_index, position) * weight;
-            total_weight += weight;
-        }
-    }
-    if total_weight <= 0.0 {
-        return sample_source(lens_index, source);
-    }
-    return result / total_weight;
-}
-
 fn quantize(color: vec3<f32>) -> u32 {
     let bytes = vec3<u32>(floor(clamp(color * 255.0, vec3<f32>(0.0), vec3<f32>(255.0)) + 0.5));
     return bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (255u << 24u);
@@ -978,8 +968,8 @@ fn stitch(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let direction = rotate_vector(frame.output_to_camera, panorama_direction(id.x, id.y));
     let position = camera_position(direction);
-    let first = project_sample(0u, direction);
-    let second = project_sample(1u, corrected_direction(direction));
+    let first = project_sample(0u, corrected_direction(0u, direction));
+    let second = project_sample(1u, corrected_direction(1u, direction));
     var color = vec3<f32>(0.0);
     if first.valid == 0u && second.valid == 0u {
         color = vec3<f32>(0.0);
@@ -992,22 +982,15 @@ fn stitch(@builtin(global_invocation_id) id: vec3<u32>) {
         let second_gain = gain(1u, position);
         let first_color = first.color * first_gain;
         let second_color = second.color * second_gain;
-        let first_low = low_frequency(0u, first.source) * first_gain;
-        let second_low = low_frequency(1u, second.source) * second_gain;
+        // Single band on the sharp seam weights; see blend_projected_samples in stitch.rs.
         let detail_total = first.detail_weight + second.detail_weight;
-        let illumination_total = first.illumination_weight + second.illumination_weight;
-        if detail_total <= 0.0 || illumination_total <= 0.0 {
-            if first.detail_weight >= second.detail_weight {
-                color = first_color;
-            } else {
-                color = second_color;
-            }
+        if detail_total > 0.0 {
+            color = (first_color * first.detail_weight + second_color * second.detail_weight)
+                / detail_total;
+        } else if first.illumination_weight >= second.illumination_weight {
+            color = first_color;
         } else {
-            let high = ((first_color - first_low) * first.detail_weight
-                + (second_color - second_low) * second.detail_weight) / detail_total;
-            let illumination = (first_low * first.illumination_weight
-                + second_low * second.illumination_weight) / illumination_total;
-            color = high + illumination;
+            color = second_color;
         }
     }
     let stitched = quantize(color);

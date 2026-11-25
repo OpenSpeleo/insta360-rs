@@ -486,7 +486,7 @@ fn invalid(message: impl Into<String>) -> Error {
 mod tests {
     use super::*;
     use crate::calibration::synthetic_dual_fisheye_calibration;
-    use crate::stitch::{low_frequency_rgb, CpuStitcher, LensFrame};
+    use crate::stitch::{CpuStitcher, LensFrame};
 
     const FEATHER: f64 = 0.243_902_444_839_477_54;
 
@@ -780,28 +780,6 @@ mod tests {
         // Positive control within radius30 remains usable in both methods.
         assert!(angle.pixel_weight(44, 83) > 0.0);
         assert!(projected.pixel_weight(44, 83) > 0.0);
-    }
-
-    #[test]
-    fn masked_bilinear_taps_cannot_pollute_low_frequency_color() {
-        let mut binary = vec![0; 128 * 128];
-        fill_circle(&mut binary, 128, 128, [64, 64], 32);
-        let weights = feather_mask(128, 128, &binary, FEATHER).unwrap();
-        let mask = FisheyeMask {
-            width: 128,
-            height: 128,
-            weights,
-        };
-        let rgb = binary
-            .iter()
-            .flat_map(|pixel| [if *pixel == 0 { 255 } else { 100 }; 3])
-            .collect();
-        let frame = LensFrame::new(128, 128, rgb).unwrap();
-        assert!(mask.weight(96.25, 64.25) > 0.0);
-        assert_eq!(
-            low_frequency_rgb(&frame, 64.25, 64.25, Some(&mask)),
-            [100.0; 3]
-        );
     }
 
     #[test]

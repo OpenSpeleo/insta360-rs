@@ -3,7 +3,7 @@
 Stitching optimization is separate from physical optics, stabilization, color
 restoration and execution backend. `SeamMode::Fixed` remains the default; the
 application calls this setting **Off**. Off still performs calibrated
-projection, housing exclusion, overlap color adjustment and fixed two-band
+projection, housing exclusion, overlap color adjustment and fixed seam
 blending. It does not mean exporting unstitched lenses, and it is not a claim of
 Studio pixel parity.
 
@@ -41,20 +41,39 @@ correspondence without relaxing texture or round-trip confidence thresholds. An
 independent 12-row valid-strip regression reproduces the otherwise empty result
 when a sparse grid starts only at the upper patch margin.
 
+Belts are shallow, so the pyramid is too: a 64-row belt has two levels, and a
+solver started from zero captures about one coarsest-level pixel (about one
+degree). Near-field parallax is larger (X4: 1.7 degrees at 1–2 m, 4–5 degrees at
+40 cm). Dynamic and Optical Flow therefore seed each coarsest-level patch with
+the integer offset within ±6 pixels that has the best zero-mean normalized
+correlation. Flat patches, incomplete support and correlations below 0.5 start
+from zero; a small distance penalty resolves ties on repetitive texture. A
+regression covers an 11-pixel translation that the unseeded solver misses.
+
 The source masks and sensor-readout motion also apply to analysis. Untextured
 patches, invalid support and forward/backward inconsistency do not acquire a
-guessed displacement. Proposals beyond 32 analysis pixels are rejected. Lens
-zero remains the geometric reference; lens one is warped within the overlap.
-Preparation bakes the latitude taper into the displacement vertices and sets
-rejected proposals and the first/last latitude rows to zero. CPU and GPU then
-interpolate these final displacements directly. They do not normalize by
-confidence or apply a second taper: transitions to calibrated fallback must be
-continuous, including across the periodic azimuth cut. Projection after
-displacement checks the source masks again. The plan reports accepted
-correspondence coverage.
+guessed displacement. The plan reports this accepted coverage. Rejected cells
+then take the confidence-weighted mean of accepted vectors within a 2.8-degree
+Gaussian (normalized convolution). Where the Gaussian-weighted share of accepted
+cells is below 20%, the filled vector fades toward zero in proportion, and the
+result is smoothed over 0.35 degrees. Hard
+zeros beside accepted displacements would otherwise fold the map, and the safety
+pass would then shrink the whole field. AI fields are not densified.
 
-Safety is checked on the composed bilinear map, after taper and confidence
-rejection. Its Jacobian determinant is affine inside each cell, so checking all
+Proposals beyond 32 analysis pixels are rejected. Both lenses move: each takes
+half of the correction, in opposite directions, so the seam lands where the
+lenses agree half way. Each half keeps full strength across the belt and fades
+out over 20 degrees of its own hemisphere. A one-sided warp confined to the belt
+squeezed the whole disparity into the belt's edge, where straight objects then
+bent visibly. Fields without the spread (tests only) keep the original latitude
+taper and zero first/last rows. CPU and GPU interpolate the final displacements
+directly. They do not normalize by confidence or apply a second taper:
+transitions to calibrated fallback must be continuous, including across the
+periodic azimuth cut. Projection after displacement checks the source masks
+again.
+
+Safety is checked on the composed bilinear map, after densification, taper and
+confidence rejection. Its Jacobian determinant is affine inside each cell, so checking all
 four corners also bounds the cell interior. Cells below determinant 0.25 request
 local contraction toward their mean displacement. This preserves each cell's
 translation while reducing its derivatives. A vertex averages requests from its

@@ -3,6 +3,11 @@ use insta360_rs::{LensFrame, ResolvedCalibration};
 /// Forward-generated spherical texture through an independently inverted
 /// equidistant camera. Only the second image contains an angular offset.
 pub fn chart(shift_degrees: f64) -> ([LensFrame; 2], ResolvedCalibration) {
+    chart_shifted([0.0, shift_degrees])
+}
+
+/// The same chart with a separate azimuth offset for each lens.
+pub fn chart_shifted(shift_degrees: [f64; 2]) -> ([LensFrame; 2], ResolvedCalibration) {
     let size = 256;
     let calibration =
         insta360_rs::calibration::synthetic_dual_fisheye_calibration(size, size).unwrap();
@@ -24,12 +29,7 @@ pub fn chart(shift_degrees: f64) -> ([LensFrame; 2], ResolvedCalibration) {
                     ]
                 };
                 let body = lens.orientation.inverse().rotate_vector(local);
-                let phi = body[1].atan2(body[0])
-                    - if index == 1 {
-                        shift_degrees.to_radians()
-                    } else {
-                        0.0
-                    };
+                let phi = body[1].atan2(body[0]) - shift_degrees[index].to_radians();
                 let theta = body[0].hypot(body[1]).atan2(body[2]);
                 let value = 0.5
                     + 0.14 * (17.0 * phi).sin()

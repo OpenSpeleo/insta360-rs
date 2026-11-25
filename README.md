@@ -509,8 +509,8 @@ INSV → FFmpeg software decode
 
 The adapter, device, pipelines, bind groups, and dimension-dependent buffers are
 retained and reused for a job. Projection, bilinear sampling, optical validity
-masks, overlap statistics, color gains, fixed high-frequency seam, two-band
-blend, optional 3D LUT, and video RGB-to-YUV420 conversion run on the GPU.
+masks, overlap statistics, color gains, seam blend, optional 3D LUT, and video
+RGB-to-YUV420 conversion run on the GPU.
 
 For stitched exports, decoding remains on the CPU, each frame is synchronously
 read back, and FFmpeg receives CPU-visible output. Native random-access previews

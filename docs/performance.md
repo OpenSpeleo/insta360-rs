@@ -85,11 +85,10 @@ retain a single demux order to preserve deterministic track synchronization.
 
 The CPU implementation evaluates projection math per output pixel. X5
 radiometric correction adds two deterministic overlap prepasses sampled every
-eight panorama rows, plus a 25-tap low-frequency sample only where both lenses
-contribute.
+eight panorama rows.
 
 The opt-in `wgpu` renderer now moves radiometric estimation, projection,
-sampling, mask/seam evaluation, two-band blending, and video RGB-to-YUV420
+sampling, mask/seam evaluation, seam blending, and video RGB-to-YUV420
 conversion to GPU compute. It uploads decoded YUV420P and 8-bit NV12 directly;
 NV12 uses R8 luma and RG8 interleaved chroma textures with decoded row strides.
 This avoids full-resolution RGB conversion and scalar RGB-to-RGBA packing for

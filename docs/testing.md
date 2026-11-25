@@ -79,8 +79,8 @@ coverage.
   per-lens timing, zero-motion equivalence, and actual CPU/GPU parity.
 - CPU/GPU geometric equivalence within interpolation tolerance.
 - Color correction under exact panorama rotations, cyclic gain interpolation,
-  exclusion of masked pixels from low-frequency blending, GPU smoothing at
-  widths smaller than its kernel, and RGB outputs with odd heights.
+  GPU smoothing at widths smaller than its kernel, and RGB outputs with odd
+  heights. The overlap blend uses only the seam weights.
 - Unequal positive lens exposures must not become black through correction
   extrapolation. Optical-axis brightness stays neutral on CPU and GPU. Changing
   pixels in the asymmetric lower dive-case housing must not change the panorama.

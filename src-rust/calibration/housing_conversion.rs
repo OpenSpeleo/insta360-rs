@@ -7,6 +7,9 @@
 
 use super::*;
 
+/// X4 bare "INSLensTypeOneX4586PanoHongJing" lens, the only established guard source.
+const X4_BARE_LENS_TYPE: u32 = 71;
+
 pub(super) fn apply(
     calibration: &mut ResolvedCalibration,
     camera: Option<&CameraProfile>,
@@ -18,6 +21,26 @@ pub(super) fn apply(
     let target = match (&camera.camera, requested) {
         (CameraModel::X4, OpticalProfile::InvisibleDiveCaseUnderwater) => 86,
         (CameraModel::X4, OpticalProfile::InvisibleDiveCaseAir) => 87,
+        // X4 recordings with a lens guard fitted can still carry the bare-lens
+        // factory offset (lens 71) while the recorded offset state names the
+        // guard. The guard's refraction pulls content toward each lens axis by
+        // roughly 0.7 degrees at 45 and 1.4 at 80; Studio converts the offset to
+        // the guard's physical curve, and the sixth-order 106/107/108 curves
+        // below serve the same fitted V6 route as the dive housings.
+        (CameraModel::X4, OpticalProfile::ProtectorS)
+        | (CameraModel::X4, OpticalProfile::ProtectorA)
+        | (CameraModel::X4, OpticalProfile::ProtectorAS) => {
+            if calibration.lenses[0].lens_type != X4_BARE_LENS_TYPE {
+                return Err(Error::MissingCalibration(
+                    "X4 lens guard conversion requires the bare lens 71 offset; this source-to-guard route is not established".into(),
+                ));
+            }
+            match requested {
+                OpticalProfile::ProtectorS => 106,
+                OpticalProfile::ProtectorA => 107,
+                _ => 108,
+            }
+        }
         (CameraModel::X6, OpticalProfile::InvisibleDiveCaseUnderwater) => 198,
         (CameraModel::X6, OpticalProfile::InvisibleDiveCaseAir) => 199,
         (CameraModel::X4Air, OpticalProfile::InvisibleDiveCaseUnderwater)

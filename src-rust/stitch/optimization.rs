@@ -20,6 +20,12 @@ pub struct PreparedStitchPlan {
     basis: Orientation,
     half_height: f64,
     field: flow::Field,
+    /// Accepted fraction of the analysis belt, measured before densification.
+    coverage: f64,
+    /// Spread warp: angle from the seam (radians) at which each lens's half of
+    /// the correction has faded out into its own hemisphere. Zero keeps the
+    /// original one-sided lens-one warp confined to the analysis belt.
+    spread: f64,
 }
 
 impl PreparedStitchPlan {
@@ -28,15 +34,7 @@ impl PreparedStitchPlan {
     }
     /// Fraction of the analysis belt with independently consistent correspondence.
     pub fn confidence_coverage(&self) -> f64 {
-        if self.field.vectors.is_empty() {
-            return 0.0;
-        }
-        self.field
-            .vectors
-            .iter()
-            .filter(|v| v.confidence >= 0.5)
-            .count() as f64
-            / self.field.vectors.len() as f64
+        self.coverage
     }
     pub fn validate(
         &self,
@@ -55,26 +53,47 @@ impl PreparedStitchPlan {
         Ok(())
     }
     pub(super) fn direction(&self, lens_index: usize, direction: [f64; 3]) -> [f64; 3] {
-        if lens_index == 0 || self.field.vectors.is_empty() {
+        if self.field.vectors.is_empty() || (lens_index == 0 && self.spread <= 0.0) {
             return direction;
         }
         let local = self.basis.rotate_vector(direction);
         let theta = local[0].hypot(local[1]).atan2(local[2]);
         let latitude = theta - PI * 0.5;
-        if latitude.abs() >= self.half_height {
-            return direction;
-        }
+        let (share, sampled_latitude) = if self.spread > 0.0 {
+            // Positive latitude lies on lens one's side of the seam.
+            let into_own_side =
+                if lens_index == 1 { latitude } else { -latitude } - self.half_height;
+            let fade = 1.0
+                - super::smoothstep(
+                    (into_own_side / (self.spread - self.half_height).max(1e-6)).clamp(0.0, 1.0),
+                );
+            if fade <= 0.0 {
+                return direction;
+            }
+            let sign = if lens_index == 1 { 0.5 } else { -0.5 };
+            (
+                sign * fade,
+                latitude.clamp(-self.half_height, self.half_height),
+            )
+        } else {
+            if latitude.abs() >= self.half_height {
+                return direction;
+            }
+            (1.0, latitude)
+        };
         let phi = local[1].atan2(local[0]);
         let x = (phi / TAU * self.field.width as f64 - 0.5) as f32;
-        let y = ((latitude / self.half_height + 1.0) * 0.5 * self.field.height as f64 - 0.5) as f32;
+        let y = ((sampled_latitude / self.half_height + 1.0) * 0.5 * self.field.height as f64 - 0.5)
+            .clamp(0.0, (self.field.height - 1) as f64) as f32;
         let [dx, dy] = sample_displacement(&self.field, x, y);
         if dx == 0.0 && dy == 0.0 {
             return direction;
         }
         // Taper and confidence rejection are already baked into shared vertices.
         // Interpolation to zero displacement is continuous at calibrated fallback.
-        let phi = phi + f64::from(dx) * TAU / self.field.width as f64;
-        let theta = theta + f64::from(dy) * 2.0 * self.half_height / self.field.height as f64;
+        let phi = phi + share * f64::from(dx) * TAU / self.field.width as f64;
+        let theta =
+            theta + share * f64::from(dy) * 2.0 * self.half_height / self.field.height as f64;
         self.basis.inverse().rotate_vector([
             theta.sin() * phi.cos(),
             theta.sin() * phi.sin(),
@@ -88,7 +107,7 @@ impl PreparedStitchPlan {
             self.field.width as f32,
             self.field.height as f32,
             self.half_height as f32,
-            0.0,
+            self.spread as f32,
         ]);
         result.push([
             self.basis.w as f32,
@@ -104,6 +123,23 @@ impl PreparedStitchPlan {
         );
         result
     }
+}
+
+/// Angle from the seam at which each lens's half of the correction has faded
+/// out, in degrees.
+///
+/// The original warp moved only lens one, confined to the analysis belt with a
+/// latitude taper. Next to the belt edge that squeezed the full disparity into a
+/// few degrees, so objects visibly bent at the edge of the belt. Splitting the
+/// correction between the lenses and fading each half out over 20 degrees of its
+/// own hemisphere spreads the same disparity over a much wider area.
+const SPREAD_ANGLE_DEGREES: f64 = 20.0;
+
+fn field_coverage(field: &flow::Field) -> f64 {
+    if field.vectors.is_empty() {
+        return 0.0;
+    }
+    field.vectors.iter().filter(|v| v.confidence >= 0.5).count() as f64 / field.vectors.len() as f64
 }
 
 fn readout_key(motion: &FrameMotion) -> Vec<u64> {
@@ -275,6 +311,8 @@ impl StitchPlanner {
                 height: 0,
                 vectors: Vec::new(),
             },
+            coverage: 0.0,
+            spread: SPREAD_ANGLE_DEGREES.to_radians(),
         };
         if mode == SeamMode::Fixed {
             return Ok(Arc::new(plan));
@@ -300,7 +338,8 @@ impl StitchPlanner {
                     half_height,
                     cancel,
                 )?;
-                prepare_render_displacements(&mut plan.field);
+                plan.coverage = field_coverage(&plan.field);
+                prepare_render_displacements(&mut plan.field, plan.spread <= 0.0);
                 if cancel.load(Ordering::Relaxed) {
                     return Err(Error::Cancelled);
                 }
@@ -374,7 +413,9 @@ impl StitchPlanner {
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
-        prepare_render_displacements(&mut plan.field);
+        plan.coverage = field_coverage(&plan.field);
+        flow::densify(&mut plan.field, half_height);
+        prepare_render_displacements(&mut plan.field, plan.spread <= 0.0);
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
@@ -548,7 +589,9 @@ fn scale_for_minimum_jacobian(derivative: [f64; 4], target: f64) -> f64 {
     low
 }
 
-fn prepare_render_displacements(field: &mut flow::Field) -> f64 {
+/// `latitude_taper` fades the field to zero at the belt's latitude edges. The
+/// spread warp fades outside the belt instead, so it keeps full strength there.
+fn prepare_render_displacements(field: &mut flow::Field, latitude_taper: bool) -> f64 {
     field.vectors.par_iter_mut().enumerate().for_each(|(i, v)| {
         let y = i / field.width;
         if !v.dx.is_finite()
@@ -556,14 +599,17 @@ fn prepare_render_displacements(field: &mut flow::Field) -> f64 {
             || !v.confidence.is_finite()
             || v.confidence < 0.5
             || v.dx.abs().max(v.dy.abs()) > 32.0
-            || y == 0
-            || y + 1 == field.height
+            || (latitude_taper && (y == 0 || y + 1 == field.height))
         {
             *v = flow::Vector::default();
             return;
         }
         let latitude = (y as f64 + 0.5) / field.height as f64 * 2.0 - 1.0;
-        let taper = super::smoothstep(((1.0 - latitude.abs()) * 4.0).clamp(0.0, 1.0));
+        let taper = if latitude_taper {
+            super::smoothstep(((1.0 - latitude.abs()) * 4.0).clamp(0.0, 1.0))
+        } else {
+            1.0
+        };
         v.dx = (f64::from(v.dx) * taper) as f32;
         v.dy = (f64::from(v.dy) * taper) as f32;
     });
@@ -843,6 +889,8 @@ mod tests {
             basis: Orientation::IDENTITY,
             half_height: 12_f64.to_radians(),
             field,
+            coverage: 0.0,
+            spread: 0.0,
         }
     }
 
@@ -917,7 +965,7 @@ mod tests {
         // Raw dy=6 has Jacobian1. The old post-sampling taper maps rows58,59
         // to62.6083984375,62.5595703125: an actual reversed interval.
         let mut field = constant_field(16, 64, 0.0, 6.0);
-        let scale = prepare_render_displacements(&mut field);
+        let scale = prepare_render_displacements(&mut field, true);
         assert!(scale > 0.0 && scale <= 1.0);
         assert_positive_bilinear_map(&field);
         let plan = test_plan(field);
@@ -940,7 +988,7 @@ mod tests {
             field.vectors[y * field.width].confidence = 0.49;
             field.vectors[y * field.width + 7].confidence = 0.0;
         }
-        let scale = prepare_render_displacements(&mut field);
+        let scale = prepare_render_displacements(&mut field, true);
         assert!(scale > 0.0 && scale <= 1.0);
         assert_positive_bilinear_map(&field);
         let plan = test_plan(field);
@@ -961,7 +1009,7 @@ mod tests {
     #[test]
     fn safe_horizontal_translation_keeps_its_full_magnitude() {
         let mut field = constant_field(16, 32, 1.25, 0.0);
-        assert_eq!(prepare_render_displacements(&mut field), 1.0);
+        assert_eq!(prepare_render_displacements(&mut field, true), 1.0);
         assert_positive_bilinear_map(&field);
         let plan = test_plan(field);
         let point = rendered_grid_point(&plan, 15.5, 16.0);
@@ -976,7 +1024,7 @@ mod tests {
             field.vectors[y * field.width + 8].confidence = 0.0;
         }
         assert_eq!(
-            prepare_render_displacements(&mut field),
+            prepare_render_displacements(&mut field, true),
             1.0,
             "local repair must resolve this field without global attenuation"
         );
@@ -1002,7 +1050,7 @@ mod tests {
         field.vectors[45].dx = f32::NAN;
         field.vectors[46].dy = 33.0;
         field.vectors[47].confidence = f32::INFINITY;
-        prepare_render_displacements(&mut field);
+        prepare_render_displacements(&mut field, true);
         for i in [45, 46, 47] {
             let v = field.vectors[i];
             assert_eq!([v.dx, v.dy, v.confidence], [0.0; 3]);

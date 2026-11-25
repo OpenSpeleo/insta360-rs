@@ -1,6 +1,6 @@
 use insta360_rs::calibration::OffsetSource;
 use insta360_rs::container::{EmbeddedOffset, InsvMetadata};
-use insta360_rs::{CalibrationResolver, Environment, Housing, OpticalSelection};
+use insta360_rs::{CalibrationResolver, Environment, Housing, LensAccessory, OpticalSelection};
 
 fn metadata(camera: &str, lens_id: u32, version: u8) -> InsvMetadata {
     let mut fields = vec!["2".to_owned()];
@@ -100,6 +100,56 @@ fn x4_v6_conversions_match_independent_qr_fit_and_preserve_per_unit_terms() {
         assert_eq!(repeated.lenses, converted.lenses);
         assert_eq!(repeated.raw_offset, converted.raw_offset);
     }
+}
+
+#[test]
+fn x4_lens_guards_convert_the_bare_offset_and_preserve_per_unit_terms() {
+    let resolver = CalibrationResolver::default();
+    let input = metadata("Insta360 X4", 71, 6);
+    let bare = resolver
+        .resolve_metadata(&input, &OpticalSelection::default(), OffsetSource::Current)
+        .unwrap();
+    for (accessory, target) in [
+        (LensAccessory::ProtectorS, 106),
+        (LensAccessory::ProtectorA, 107),
+        (LensAccessory::ProtectorAS, 108),
+    ] {
+        let selected = OpticalSelection::with_lens_accessory(accessory);
+        let converted = resolver
+            .resolve_metadata(&input, &selected, OffsetSource::Current)
+            .unwrap();
+        for (lens, original) in converted.lenses.iter().zip(&bare.lenses) {
+            assert_eq!(lens.lens_type, target);
+            assert_eq!(lens.xi, original.xi);
+            assert_eq!(
+                &lens.distortion_coefficients[5..],
+                &original.distortion_coefficients[5..]
+            );
+            assert_eq!((lens.cx, lens.cy), (original.cx, original.cy));
+            assert_eq!(lens.orientation, original.orientation);
+            assert_eq!(lens.translation, original.translation);
+            assert_ne!(
+                &lens.distortion_coefficients[..4],
+                &original.distortion_coefficients[..4]
+            );
+            assert!(lens.fx.is_finite() && lens.fx > 0.0 && lens.fx != original.fx);
+        }
+        let mut encoded = input.clone();
+        encoded.offsets[0].value = converted.raw_offset.clone();
+        let repeated = resolver
+            .resolve_metadata(&encoded, &selected, OffsetSource::Current)
+            .unwrap();
+        assert_eq!(repeated.lenses, converted.lenses);
+    }
+    // A guard offset is never converted again from a non-bare source.
+    let dive = metadata("Insta360 X4", 87, 6);
+    assert!(resolver
+        .resolve_metadata(
+            &dive,
+            &OpticalSelection::with_lens_accessory(LensAccessory::ProtectorA),
+            OffsetSource::Current
+        )
+        .is_err());
 }
 
 #[test]

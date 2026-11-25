@@ -313,6 +313,98 @@ fn track(
     best
 }
 
+/// Integer offsets (coarsest-level pixels, either axis) searched for each
+/// patch's starting vector.
+///
+/// The belt pyramid is shallow: a 64-row belt only supports two levels, so a
+/// solver started from zero captures about one coarse pixel (about 1 degree).
+/// Near-field parallax on the X4 is 1.7 degrees at 1-2 m and 4-5 degrees at
+/// 40 cm, and the solver locked onto wrong local minima there (residuals of
+/// 18 px at full resolution). Seeding from an exhaustive correlation search
+/// brings those to 2-6 px. Larger ranges find more false matches on repetitive
+/// texture and lower coverage.
+const SEED_SEARCH_RANGE: isize = 6;
+/// Minimum correlation a seed needs; weaker patches start from zero.
+const SEED_MIN_SCORE: f32 = 0.5;
+/// Offsets scoring within this of the best are treated as equally good, and the
+/// one nearest zero wins. Smooth or one-dimensional texture gives a flat peak,
+/// and quantization noise alone would otherwise pick its offset; on a 32-row belt
+/// a stray vertical offset pushes the patch out of the belt.
+const SEED_TOLERANCE: f32 = 0.02;
+/// A seeded fit replaces the fit from zero only when its patch error is below
+/// this fraction of it. Correlation alone is ambiguous on anisotropic texture
+/// (any offset along a stripe matches), and forward and backward passes then
+/// seed differently and fail their consistency check.
+const SEED_ERROR_RATIO: f32 = 0.5;
+
+/// Starting vector for one coarsest-level patch: the integer offset within
+/// [`SEED_SEARCH_RANGE`] with the best zero-mean normalized correlation, or zero
+/// when the patch is flat or incomplete or no offset correlates well. Among
+/// offsets within [`SEED_TOLERANCE`] of the best score the smallest wins.
+fn search_seed(first: &Image, second: &Image, (x, y): (usize, usize), radius: isize) -> Vector {
+    let range = SEED_SEARCH_RANGE;
+    let side = (2 * radius + 1) as usize;
+    let mut reference = Vec::with_capacity(side * side);
+    for oy in -radius..=radius {
+        for ox in -radius..=radius {
+            match first.pixel(x as isize + ox, y as isize + oy) {
+                Some(v) => reference.push(v),
+                None => return Vector::default(),
+            }
+        }
+    }
+    let n = reference.len() as f32;
+    let mean = reference.iter().sum::<f32>() / n;
+    reference.iter_mut().for_each(|v| *v -= mean);
+    let energy = reference.iter().map(|v| v * v).sum::<f32>();
+    if energy < 1e-6 {
+        return Vector::default();
+    }
+    let mut scores = Vec::with_capacity(((2 * range + 1) * (2 * range + 1)) as usize);
+    let mut target = vec![0.0_f32; reference.len()];
+    for dy in -range..=range {
+        'offset: for dx in -range..=range {
+            let mut i = 0;
+            for oy in -radius..=radius {
+                for ox in -radius..=radius {
+                    match second.pixel(x as isize + ox + dx, y as isize + oy + dy) {
+                        Some(v) => target[i] = v,
+                        None => continue 'offset,
+                    }
+                    i += 1;
+                }
+            }
+            let tm = target.iter().sum::<f32>() / n;
+            let (mut cross, mut te) = (0.0, 0.0);
+            for (r, t) in reference.iter().zip(&target) {
+                let t = t - tm;
+                cross += r * t;
+                te += t * t;
+            }
+            scores.push((cross / (energy * te).sqrt().max(1e-6), dx, dy));
+        }
+    }
+    let top = scores.iter().map(|s| s.0).fold(f32::NEG_INFINITY, f32::max);
+    if top < SEED_MIN_SCORE {
+        return Vector::default();
+    }
+    // Ascending distance, then descending score; the scan order breaks exact ties.
+    let best = scores
+        .into_iter()
+        .filter(|s| s.0 >= top - SEED_TOLERANCE)
+        .min_by(|a, b| {
+            (a.1 * a.1 + a.2 * a.2)
+                .cmp(&(b.1 * b.1 + b.2 * b.2))
+                .then(b.0.total_cmp(&a.0))
+        })
+        .expect("the top score is a candidate");
+    Vector {
+        dx: best.1 as f32,
+        dy: best.2 as f32,
+        confidence: 1.0,
+    }
+}
+
 fn estimate(
     a: &[PyramidLevel<'_>],
     b: &[PyramidLevel<'_>],
@@ -341,51 +433,68 @@ fn estimate(
         let patches: Vec<_> = positions
             .par_iter()
             .map(|&(x, y)| {
-                let initial = coarse.as_ref().map_or(Vector::default(), |f| {
-                    let v = f.sample((x as f32 + 0.5) * 0.5 - 0.5, (y as f32 + 0.5) * 0.5 - 0.5);
-                    Vector {
-                        dx: v.dx * 2.0,
-                        dy: v.dy * 2.0,
-                        ..v
-                    }
-                });
                 // Choose the largest supported patch before fitting. This is
                 // adaptation to observed source support, not a lower residual
                 // or consistency threshold when a difficult solve fails.
-                let radius = if dense {
-                    Some(radius)
-                } else {
-                    [7, 5, 3].into_iter().find(|&radius| {
-                        let margin = radius as isize + 1;
-                        (-margin..=margin).all(|oy| {
-                            (-margin..=margin).all(|ox| {
-                                let xx = x as isize + ox;
-                                let yy = y as isize + oy;
-                                first.pixel(xx, yy).is_some()
-                                    && second
-                                        .sample(xx as f32 + initial.dx, yy as f32 + initial.dy)
-                                        .is_some()
+                let fit = |initial: Vector| {
+                    let radius = if dense {
+                        Some(radius)
+                    } else {
+                        [7, 5, 3].into_iter().find(|&radius| {
+                            let margin = radius as isize + 1;
+                            (-margin..=margin).all(|oy| {
+                                (-margin..=margin).all(|ox| {
+                                    let xx = x as isize + ox;
+                                    let yy = y as isize + oy;
+                                    first.pixel(xx, yy).is_some()
+                                        && second
+                                            .sample(xx as f32 + initial.dx, yy as f32 + initial.dy)
+                                            .is_some()
+                                })
                             })
                         })
-                    })
+                    };
+                    let Some(radius) = radius else {
+                        return Patch {
+                            x,
+                            y,
+                            flow: Vector::default(),
+                            error: 1.0,
+                        };
+                    };
+                    track(
+                        reference,
+                        second,
+                        (x, y),
+                        initial,
+                        radius as isize,
+                        if dense { 16 } else { 15 },
+                        cancel,
+                    )
                 };
-                let Some(radius) = radius else {
-                    return Patch {
-                        x,
-                        y,
-                        flow: Vector::default(),
-                        error: 1.0,
+                let Some(coarse) = coarse.as_ref() else {
+                    // Coarsest level: the solver's own start from zero, unless a
+                    // correlation seed converges to a clearly better fit.
+                    let zero = fit(Vector::default());
+                    let seed = search_seed(first, second, (x, y), radius as isize);
+                    if seed.dx == 0.0 && seed.dy == 0.0 {
+                        return zero;
+                    }
+                    let seeded = fit(seed);
+                    return if seeded.flow.confidence > 0.0
+                        && seeded.error < zero.error * SEED_ERROR_RATIO
+                    {
+                        seeded
+                    } else {
+                        zero
                     };
                 };
-                track(
-                    reference,
-                    second,
-                    (x, y),
-                    initial,
-                    radius as isize,
-                    if dense { 16 } else { 15 },
-                    cancel,
-                )
+                let v = coarse.sample((x as f32 + 0.5) * 0.5 - 0.5, (y as f32 + 0.5) * 0.5 - 0.5);
+                fit(Vector {
+                    dx: v.dx * 2.0,
+                    dy: v.dy * 2.0,
+                    ..v
+                })
             })
             .collect();
         // Dense patches vote over their footprint; sparse tracks use a compact
@@ -494,6 +603,132 @@ fn refine(first: &Image, second: &Image, field: &mut Field) {
             out.dy = dy - gy * correction;
         });
         std::mem::swap(&mut next, &mut field.vectors);
+    }
+}
+
+/// Angular radius (radians) over which accepted correspondence spreads into
+/// neighbouring rejected cells, weighted by confidence.
+const FILL_SIGMA: f64 = 2.8 * std::f64::consts::PI / 180.0;
+/// Angular radius of the final smoothing, removing steps at confidence edges.
+const SMOOTH_SIGMA: f64 = 0.35 * std::f64::consts::PI / 180.0;
+/// Blurred acceptance at which filled correspondence keeps full strength. Below
+/// it, filled vectors fade to zero so isolated matches do not drive wide warps.
+const FILL_FULL_SUPPORT: f32 = 0.2;
+
+/// Separable Gaussian over interleaved channels: periodic in azimuth, truncated
+/// at the belt's latitude edges (callers normalize by a blurred weight channel).
+fn gaussian<const N: usize>(
+    values: &[[f32; N]],
+    width: usize,
+    height: usize,
+    [sigma_x, sigma_y]: [f32; 2],
+) -> Vec<[f32; N]> {
+    let taps = |sigma: f32| {
+        let radius = (sigma * 3.0).ceil() as isize;
+        let kernel: Vec<f32> = (-radius..=radius)
+            .map(|o| (-(o * o) as f32 / (2.0 * sigma * sigma)).exp())
+            .collect();
+        (radius, kernel)
+    };
+    let (radius, kernel) = taps(sigma_x);
+    let mut horizontal = vec![[0.0; N]; values.len()];
+    horizontal
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for (x, out) in row.iter_mut().enumerate() {
+                for (k, o) in kernel.iter().zip(-radius..=radius) {
+                    let value = values[y * width + wrapped_column(x as isize + o, width)];
+                    for c in 0..N {
+                        out[c] += k * value[c];
+                    }
+                }
+            }
+        });
+    let (radius, kernel) = taps(sigma_y);
+    let mut result = vec![[0.0; N]; values.len()];
+    result
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for (k, o) in kernel.iter().zip(-radius..=radius) {
+                let yy = y as isize + o;
+                if yy < 0 || yy >= height as isize {
+                    continue;
+                }
+                let source = &horizontal[yy as usize * width..][..width];
+                for (out, value) in row.iter_mut().zip(source) {
+                    for c in 0..N {
+                        out[c] += k * value[c];
+                    }
+                }
+            }
+        });
+    result
+}
+
+/// Turn sparse, consistency-filtered correspondence into a smooth field.
+///
+/// Rejected cells previously became hard zeros beside accepted displacements.
+/// Those steps fold the render map, and the safety pass then scaled the whole
+/// field down. Here rejected cells take the confidence-weighted mean of nearby
+/// accepted vectors (normalized convolution), fading to zero only where no
+/// correspondence is nearby, and the result is lightly smoothed. Every vector
+/// is returned with confidence 1: zero is a smooth value, not a pinned rejection.
+/// `half_height` is the belt's angular half-height in radians; the field spans
+/// a full turn of azimuth over its width and the belt over its height.
+pub(super) fn densify(field: &mut Field, half_height: f64) {
+    let (width, height) = (field.width, field.height);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let weighted: Vec<[f32; 3]> = field
+        .vectors
+        .iter()
+        .map(|v| {
+            let c = if v.confidence >= 0.5 && v.dx.is_finite() && v.dy.is_finite() {
+                v.confidence
+            } else {
+                0.0
+            };
+            [c * v.dx, c * v.dy, c]
+        })
+        .collect();
+    let cell = [
+        std::f64::consts::TAU / width as f64,
+        2.0 * half_height / height as f64,
+    ];
+    let sigma = |angle: f64| cell.map(|size| ((angle / size) as f32).max(0.5));
+    let (fill_sigma, smooth_sigma) = (sigma(FILL_SIGMA), sigma(SMOOTH_SIGMA));
+    let spread = gaussian(&weighted, width, height, fill_sigma);
+    let unit = gaussian(&vec![[1.0_f32]; width * height], width, height, fill_sigma);
+    let combined: Vec<[f32; 2]> = weighted
+        .iter()
+        .zip(&spread)
+        .zip(&unit)
+        .map(|((&[cx, cy, c], &[sx, sy, sc]), &[norm])| {
+            let fade = (sc / norm.max(1e-6) / FILL_FULL_SUPPORT).min(1.0);
+            let fill = if sc > 1e-6 {
+                [sx / sc * fade, sy / sc * fade]
+            } else {
+                [0.0; 2]
+            };
+            [cx + (1.0 - c) * fill[0], cy + (1.0 - c) * fill[1]]
+        })
+        .collect();
+    let smooth = gaussian(&combined, width, height, smooth_sigma);
+    let unit = gaussian(
+        &vec![[1.0_f32]; width * height],
+        width,
+        height,
+        smooth_sigma,
+    );
+    for ((v, [dx, dy]), [norm]) in field.vectors.iter_mut().zip(smooth).zip(unit) {
+        *v = Vector {
+            dx: dx / norm,
+            dy: dy / norm,
+            confidence: 1.0,
+        };
     }
 }
 
@@ -871,6 +1106,107 @@ mod tests {
             assert!(error < 0.3, "translation error{error} (dense={dense})");
         }
     }
+    #[test]
+    fn coarse_seed_recovers_shifts_beyond_the_solver_capture_range() {
+        // A 64-row belt has two pyramid levels, so 11 px is 5.5 px at the coarsest
+        // level: far outside what the solver captures when started from zero.
+        for dense in [false, true] {
+            let field = correspond(&chart(0.0), &chart(11.0), dense, &AtomicBool::new(false));
+            let values: Vec<_> = (20..44)
+                .flat_map(|y| (20..100).map(move |x| y * 128 + x))
+                .map(|i| field.vectors[i])
+                .filter(|v| v.confidence > 0.5)
+                .collect();
+            assert!(values.len() > 100, "insufficient support ({dense})");
+            let error = values
+                .iter()
+                .map(|v| (v.dx - 11.0).abs() + v.dy.abs())
+                .sum::<f32>()
+                / values.len() as f32;
+            assert!(error < 0.3, "translation error {error} (dense={dense})");
+        }
+    }
+
+    #[test]
+    fn seed_search_ignores_flat_patches() {
+        let mut flat = chart(0.0);
+        flat.pixels.fill(0.5);
+        let seed = search_seed(&flat, &chart(3.0), (64, 32), 3);
+        assert_eq!(vector_bits(seed), vector_bits(Vector::default()));
+    }
+
+    // 256 x 64 cells over a full turn and a 10.26 degree belt (the X4 overlap):
+    // 1.4 x 0.16 degrees per cell.
+    const DENSIFY_HALF_HEIGHT: f64 = 5.13 * std::f64::consts::PI / 180.0;
+
+    fn sparse_field(accepted: impl Fn(usize, usize) -> Option<(f32, f32)>) -> Field {
+        let (width, height) = (256, 64);
+        Field {
+            width,
+            height,
+            vectors: (0..width * height)
+                .map(|i| match accepted(i % width, i / width) {
+                    Some((dx, dy)) => Vector {
+                        dx,
+                        dy,
+                        confidence: 1.0,
+                    },
+                    // Rejected cells carry garbage that must not leak through.
+                    None => Vector {
+                        dx: 99.0,
+                        dy: -99.0,
+                        confidence: 0.0,
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn densify_fills_patchy_acceptance_with_nearby_correspondence() {
+        let mut field = sparse_field(|x, y| ((x + y) % 3 == 0).then_some((2.0, -1.0)));
+        densify(&mut field, DENSIFY_HALF_HEIGHT);
+        for v in &field.vectors {
+            assert_eq!(v.confidence, 1.0);
+            assert!(
+                (v.dx - 2.0).abs() < 1e-3 && (v.dy + 1.0).abs() < 1e-3,
+                "{v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn densify_fades_an_isolated_match_instead_of_spreading_it() {
+        let mut field = sparse_field(|x, y| (x == 128 && y == 32).then_some((6.0, 0.0)));
+        densify(&mut field, DENSIFY_HALF_HEIGHT);
+        let at = |x: usize, y: usize| field.vectors[y * field.width + x];
+        assert!(at(128, 32).dx < 6.0, "a single match is smoothed down");
+        // Two fill radii (5.6 degrees, four cells) away there is no correspondence.
+        assert!(at(132, 32).dx.abs() < 0.05, "{:?}", at(132, 32));
+        assert!(at(128, 0).dx.abs() < 0.6, "{:?}", at(128, 0));
+        assert!(field
+            .vectors
+            .iter()
+            .all(|v| v.dx.is_finite() && v.dy.abs() < 1e-6));
+    }
+
+    #[test]
+    fn densify_wraps_at_the_azimuth_cut() {
+        // Accepted columns 0..4 are symmetric about 1.5, so column -1 (= 255)
+        // must mirror column 4.
+        let mut field = sparse_field(|x, _| (x < 4).then_some((3.0, 0.0)));
+        densify(&mut field, DENSIFY_HALF_HEIGHT);
+        let at = |x: usize| field.vectors[32 * field.width + x];
+        assert!(at(255).dx > 1.0, "{:?}", at(255));
+        assert!(
+            (at(255).dx - at(4).dx).abs() < 1e-4,
+            "{:?} {:?}",
+            at(255),
+            at(4)
+        );
+        assert!((at(254).dx - at(5).dx).abs() < 1e-4);
+    }
+
     #[test]
     fn flat_and_masked_pixels_never_generate_flow() {
         let mut image = chart(0.0);

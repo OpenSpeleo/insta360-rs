@@ -344,8 +344,11 @@ these fields from serialized valid calibrations and check render preflight.
 For X5, the stitcher separates optical validity from seam selection. It uses the
 lens-specific FOV and blend-angle tables, the Studio `calAlpha` exponent 5.2
 curve, a calibrated radial source mask with a native distance-field feather, and
-a two-band blend. High-frequency detail stays on the narrow calibrated seam;
-low-frequency illumination uses all valid overlap. A two-pass,
+a single-band blend on the sharpened seam weights. An earlier two-band blend
+took low-frequency illumination from all valid overlap. Near its rim a lens
+darkens and its low-pass window reaches past the rim, so that lens's illumination
+was biased dark where it still carried weight. On X4 footage that drew a thin
+dark arc through flat surfaces inside the overlap. A two-pass,
 longitude-smoothed per-channel gain estimator uses the recovered Studio
 `ColorAdjustment::meanAdjustment` statistics, slope normalization, opposing
 neutral regions, and zero clamp.
